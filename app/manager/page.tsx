@@ -1,0 +1,5 @@
+import Link from "next/link";
+import { PageCard } from "@/components/PageCard";
+
+const links = [{ href: "/manager/layout", title: "Layout Builder", text: "View the sample floor plan and table types." }, { href: "/manager/analytics", title: "Analytics", text: "Review occupancy and per-table statistics." }, { href: "/employee", title: "Employee Dashboard", text: "Update table and queue information." }];
+export default function ManagerPage() { return <main className="mx-auto max-w-5xl px-5 py-10"><h1 className="text-3xl font-bold">Manager dashboard</h1><p className="mt-2 text-stone-600">A simple starting point for managing your restaurant.</p><div className="mt-7 grid gap-4 md:grid-cols-3">{links.map((link) => <Link key={link.href} href={link.href}><PageCard className="h-full transition hover:border-emerald-500"><h2 className="font-semibold">{link.title}</h2><p className="mt-2 text-sm text-stone-600">{link.text}</p><p className="mt-4 text-sm font-medium text-emerald-700">Open →</p></PageCard></Link>)}</div></main>; }
