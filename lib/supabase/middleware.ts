@@ -39,8 +39,15 @@ export async function updateSession(request: NextRequest) {
   if (isProtected && !user) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
+    loginUrl.search = "";
     loginUrl.searchParams.set("redirectTo", request.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
+
+    const redirectResponse = NextResponse.redirect(loginUrl);
+    redirectResponse.cookies.set("flash_notice", "You need to be logged in to access that page.", {
+      path: "/",
+      maxAge: 15,
+    });
+    return redirectResponse;
   }
 
   return response;
