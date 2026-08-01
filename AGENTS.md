@@ -1,148 +1,107 @@
-# Halina: Repository Instructions for Codex
+# Halina: Next Implementation Instructions for Codex
 
-This file is the repository-level source of truth for Codex work. Read it before planning or editing. Apply it to the whole repository unless a more specific AGENTS.md is added deeper in the tree.
+This AGENTS.md is the repository-level source of truth. Read it completely before planning or editing. It applies to the entire repository unless a more specific AGENTS.md exists deeper in the tree.
 
-## 1. Product mission
+## 1. Current objective
 
-Build Halina into a high-fidelity, end-to-end restaurant operations prototype for the Philippine market.
+Continue Halina from the completed manager operations vertical slice into a high-fidelity, manager-first restaurant operations prototype for the Philippine market.
 
-The manager experience is the primary product. Its signature feature is a Canva-like restaurant floor-plan editor that lets a non-technical restaurant manager create and publish an accurate operating layout. The layout is not decorative: employees use the published plan to operate tables and queues, and the app records events from those workflows so managers receive useful table, queue, wait-time, and occupancy analytics.
+The manager workspace is the product center. A manager should be able to design the restaurant floor, publish it, operate tables, manage the queue and reservations, view useful statistics, and manage staff records from one coherent application.
 
-The prototype should feel complete and credible in a product demonstration. Most visible controls must work. Demo-backed behavior is acceptable where a production integration is not yet available, but inert buttons, static mock screens, misleading statistics, and placeholder-only routes are not acceptable.
+The signature feature is a Canva-like floor-plan editor. Prioritize it over adding broad secondary features.
 
-Use the existing name Halina unless the task explicitly changes the brand.
+Do not build or expand a separate employee application or employee login for this prototype. The manager performs live operations. Staff records and permissions belong under the manager Team section. Preserve the possibility of invitation- or PIN-based staff access in the domain model for later, but do not add another prominent application surface now.
 
-## 2. Product priorities
+Keep the customer experience public and lightweight. It must eventually read the same operational state as the manager workspace.
 
-Work in this order:
+Do not add POS, payments, ordering, delivery, inventory, payroll, or accounting unless explicitly requested. Do not invent revenue statistics without POS data.
 
-1. Manager application
-   - overview and alerts
-   - floor-plan editor
-   - live floor operations
-   - queue and reservation oversight
-   - analytics and per-table insights
-   - restaurant, hours, and team settings
-2. Employee application
-   - fast live table workflow
-   - queue workflow
-   - clear timers and status transitions
-3. Customer application
-   - restaurant discovery
-   - credible current wait and crowd information
-   - clear freshness and availability
-4. Production hardening
-   - persistent database repository
-   - invitations and tenant security
-   - realtime synchronization
-   - deployment and observability
+## 2. Branch and release reality
 
-Do not expand into POS, payments, menu ordering, delivery, inventory, or accounting unless requested. Revenue metrics must not be invented without POS data.
+At the time this file was written:
 
-## 3. Current repository reality
+- main contains the original architectural skeleton and the prior broad specification.
+- Draft PR #1 contains the implemented manager operations slice.
+- The implementation branch is agent/manager-operations-prototype at commit 6bd787df89e112a02de99e2132a95ead8c12c494.
+- PR #1 targets main and is not merged.
+- The implementation commit has a failing Vercel status.
 
-Audit baseline: main at commit 41322008805ff5756410cee38d911b11a65b5fcc.
+Do not recreate the manager slice from the old main branch. Continue from the implementation in PR #1, or first bring that implementation into the active branch using a non-destructive workflow authorized by the user.
 
-The current repository is a clean architectural skeleton:
+Do not merge PRs, change deployment settings, or deploy production without user authorization. You may diagnose and fix source-controlled deployment problems when implementation work is requested.
+
+## 3. What already works on the implementation branch
+
+Treat these as the baseline to preserve and extend:
 
 - Next.js 15 App Router
-- React 19 and strict TypeScript
+- React 19
+- strict TypeScript
 - Tailwind CSS 4
 - Supabase SSR authentication
-- Prisma 7 with Supabase PostgreSQL
-- role-protected manager and employee layouts
-- small reusable presentation components
-- local restaurant, layout, queue, and analytics mock data
+- Prisma 7
+- explicit NEXT_PUBLIC_HALINA_DEMO_MODE
+- responsive manager shell and sidebar
+- manager Overview
+- interactive Live floor table-status changes
+- valid table transition rules
+- timestamped table events
+- dining-session updates
+- one canonical browser demo state
+- localStorage persistence
+- BroadcastChannel synchronization
+- deterministic reset
+- basic event-derived analytics
+- safe internal login redirects
+- lint, typecheck, Vitest, and build scripts
 
-Preserve useful foundations instead of replacing the project wholesale. In particular, keep the Next.js App Router, TypeScript strict mode, Supabase authentication, Prisma, and current role-protected route concept.
+Do not replace these foundations wholesale. Extend the domain state, repository boundary, and tests.
 
-The present product behavior is much less complete than the architecture suggests:
+## 4. Known weaknesses to address
 
-- Prisma defines only Profile.
-- Profile.restaurant is free text and is not a tenant-safe relation.
-- Restaurant, floor, table, session, queue, reservation, and analytics data are hard-coded.
-- The layout builder is a static preview.
-- Employee and queue buttons do nothing.
-- Analytics are manually entered values rather than calculations.
-- All restaurants share one layout.
-- The public feed, employee view, and analytics can disagree because they read separate mock totals.
-- There are no meaningful loading, empty, error, stale, save, or conflict states.
-- There are no automated tests.
-- The UI is a low-fidelity set of cards rather than a cohesive manager product.
+### Release blockers
 
-Treat those points as implementation work, not documentation-only future work.
+- PR #1 is still draft and unmerged.
+- The Vercel status is failing.
+- Generated Prisma code is ignored, but package installation does not currently guarantee prisma generate.
+- Production environment variables may be absent or incorrect.
 
-## 4. Weak-point audit and required response
+For source work, make a clean installation capable of generating Prisma and building. Prefer a postinstall or explicit build step that runs prisma generate while keeping generated output out of source control. Never commit secrets.
 
-| Severity | Area | Current weakness | Required direction |
-|---|---|---|---|
-| Critical | Tenant security | Anyone can self-select MANAGER or EMPLOYEE and type any restaurant name. | Keep this only as an explicitly labeled demo shortcut. Production-oriented flow must create a restaurant for an owner and use invitation-based memberships for staff. |
-| Critical | Domain data | Prisma has no restaurant operations models. | Introduce a coherent domain model and repository boundary before pretending data is persistent. |
-| High | Manager editor | Floor layout is static absolute-positioned markup. | Implement an interactive editor with creation, selection, drag, resize, rotate, properties, history, save, and publish. |
-| High | Operations | Status and queue actions are inert. | Every primary action must mutate state and append a timestamped domain event. |
-| High | Analytics validity | Metrics are hard-coded and have no source events. | Calculate metrics from table sessions, status events, queue events, and operating hours. |
-| High | Access control | Restaurant association is free text; no membership relation or tenant scoping exists. | Model RestaurantMembership and scope every manager/employee query and mutation by restaurant. |
-| High | Redirect safety | redirectTo comes from user input and is passed to redirect without an internal-path allowlist. | Add a safe internal redirect helper and reject external, protocol-relative, or malformed destinations. |
-| Medium | Authentication consistency | Supabase account creation and Prisma profile creation can partially succeed. | Make profile provisioning idempotent and recoverable; document the boundary because cross-service atomic transactions are unavailable. |
-| Medium | Navigation | Manager and Employee links appear to every visitor, regardless of role. | Render role-aware navigation and provide a dedicated manager sidebar or app shell. |
-| Medium | Data consistency | Restaurant counts, queue counts, and analytics summary are separate manual values. | Derive summaries from one store/repository. Do not store duplicated calculated values unless intentionally cached. |
-| Medium | Data freshness | Public data has a hard-coded old timestamp and no staleness behavior. | Show live, recently updated, or stale states based on real event timestamps. |
-| Medium | Realtime | No synchronization or conflict strategy exists. | In prototype mode, synchronize browser tabs if practical. For production, isolate realtime behind the repository/service layer. |
-| Medium | UX states | No toasts, confirmations, undo, empty states, or destructive-action safeguards. | Add complete interaction feedback and recoverability. |
-| Medium | Accessibility | The visual canvas has no keyboard or screen-reader alternative. | Provide keyboard operations plus a synchronized list/layers view. |
-| Medium | Maintainability | Many pages are compressed into one-line JSX and import mock data directly. | Format for review and move domain behavior out of route components. |
-| Medium | Quality | No tests or scripted seed reset. | Add unit tests for reducers and analytics and a deterministic demo reset. |
+### Product gaps
 
-Also preserve these strengths:
+- The floor-plan builder at /manager/layout is still a static legacy route.
+- The Live floor uses seed geometry instead of a published floor-plan version.
+- Queue and reservation records exist in demo state but lack complete manager workflows.
+- Analytics are basic and lack periods, charts, queue metrics, and deeper table insights.
+- Customer pages use separate hard-coded data.
+- Prisma models only Profile; operations are browser-backed.
+- Public signup still exposes unnecessary manager/employee role choices.
+- A separate /employee surface still exists even though it is not part of the current prototype direction.
+- Live duration labels may not update until another state change.
+- End-to-end coverage and complete loading, empty, error, conflict, and stale states are missing.
 
-- server-side route guards
-- compact, understandable component structure
-- strict TypeScript
-- clear status vocabulary
-- simple setup documentation
+## 5. Product information architecture
 
-## 5. Prototype operating mode
+### Public customer surface
 
-The high-fidelity prototype must be runnable without giving every reviewer access to production secrets.
+No login is required for browsing.
 
-Implement an explicit demo mode, never a silent authentication bypass:
+Keep:
 
-- Use a clearly named environment switch such as NEXT_PUBLIC_HALINA_DEMO_MODE=true.
-- When enabled, show a visible Demo data indicator and a role/restaurant switcher intended for development demonstrations.
-- Persist mutations in versioned localStorage or IndexedDB so refreshes retain the demo state.
-- Seed deterministic data covering at least 14 days, ideally 30 days, so analytics are meaningful.
-- Include Reset demo data with confirmation.
-- If multiple tabs are open, synchronize state with BroadcastChannel or the storage event when reasonable.
-- When demo mode is false, role guards and normal data access must remain enforced.
-- Do not put passwords, service keys, or private Supabase values in source control.
+- restaurant list or discovery
+- restaurant detail
+- current estimated wait
+- crowd level
+- walk-in availability
+- last-updated timestamp
+- stale-data warning
 
-Use one domain interface for both demo and database-backed behavior. Pages must not directly import arrays from lib/mock-data.ts after the migration.
+Only add Join queue if it works end to end with manager operations.
 
-A suitable boundary is:
+### Manager workspace
 
-- restaurant repository
-- floor-plan repository
-- operations repository
-- analytics service
-- authentication/session service
-
-The implementation may begin with a client-side demo repository, but domain types, events, and calculations must be usable later by a Prisma-backed repository.
-
-## 6. Information architecture
-
-### Manager app shell
-
-Replace the three-card manager landing page with a cohesive authenticated app shell:
-
-- collapsible left sidebar on desktop
-- drawer or compact navigation on small screens
-- restaurant switcher or restaurant identity at the top
-- current open/closed state
-- data freshness and save/sync state
-- profile menu
-- contextual page title and actions
-
-Primary manager navigation:
+Use one authenticated manager application with:
 
 - Overview
 - Live floor
@@ -152,280 +111,188 @@ Primary manager navigation:
 - Team
 - Restaurant settings
 
-Do not expose employee-only shortcuts as the primary manager information architecture. A manager may access live operations, but the manager shell should remain manager-focused.
+The manager can perform all operational actions in the prototype.
 
-### Employee app shell
+### Team inside Manager
 
-The employee surface should be optimized for tablet and mobile speed:
+Add /manager/team for:
 
-- Live floor
-- Tables list
-- Queue
-- Add walk-in
-- compact current-shift summary
+- staff directory
+- name
+- job title
+- active/inactive state
+- contact field only if necessary for the demo
+- permission preset display
+- add, edit, deactivate, and remove actions with appropriate confirmation
+- future-access status such as Not invited or Access disabled
 
-Do not show floor-plan editing or business analytics controls to employees.
+Do not build shift scheduling, payroll, attendance, or a separate employee dashboard.
 
-### Customer surface
+Do not let public users self-register as employees. For this prototype, managers may maintain staff records without giving those staff members login access.
 
-Keep the customer experience lightweight:
+If later staff access is requested, use invitation or manager-issued quick PIN semantics and a restricted operations view. Do not add an independent product hierarchy that duplicates the manager tools.
 
-- searchable/filterable restaurant list
-- current estimated wait
-- crowd status
-- walk-in availability
-- last updated and stale-state treatment
-- restaurant details
-- optional Join queue prototype only if it can be made credible and connected to operations
+## 6. Required implementation order
 
-## 7. Manager overview requirements
+Keep the app runnable after every phase. Finish a vertical slice before beginning the next.
 
-The manager overview must answer what needs attention now.
+### Phase 0: stabilize and verify
 
-Include:
+1. Inspect the active branch and preserve unrelated work.
+2. Install dependencies from a clean state.
+3. ensure Prisma client generation occurs during clean install or build.
+4. Run lint, typecheck, tests, and production build.
+5. Diagnose the Vercel failure using real status/log evidence when available.
+6. Fix source-controlled deployment issues.
+7. Record environment or hosting blockers separately instead of masking them.
 
-- current occupancy
-- available, occupied, reserved, cleaning, and out-of-service counts
-- active queue count
-- current estimated wait
-- longest-waiting party
-- today's completed seatings
-- today's average dining duration
-- cleaning delay alert
-- near-term reservations
-- a compact live floor snapshot
-- recent activity
-- actionable insights
+Exit criteria:
 
-Examples of useful alerts:
+- npm run lint passes.
+- npm run typecheck passes.
+- npm test passes.
+- npm run build passes from a clean installation.
+- Prisma generated output remains ignored.
+- No secrets are committed.
+- The relevant deployment check is green, or the exact external blocker is documented.
 
-- A table has been in Cleaning longer than the restaurant target.
-- A party has exceeded its promised wait.
-- A reserved table is still occupied near the reservation time.
-- A table is out of service during a predicted peak.
-- Wait estimate error has been high today.
+### Phase 1: Canva-like floor-plan editor
 
-Cards must link to the relevant table, queue entry, reservation, or analytics filter. Avoid decorative KPI cards that do not support a decision.
+Replace the static /manager/layout route with the flagship editor.
 
-## 8. Canva-like floor-plan editor
+Desktop layout:
 
-This is the flagship feature and must receive the most interaction and visual design attention.
+- top toolbar
+- left object library
+- center canvas
+- right property inspector and layers panel
+- zoom controls
 
-### Editor composition
+Object library:
 
-On desktop, use a professional four-region editor:
+- round table
+- square table
+- rectangular table
+- booth
+- bar or counter
+- wall
+- door
+- host stand
+- waiting area
+- kitchen/service area
+- restroom marker
+- column or obstacle
+- text label
+- zone
 
-1. Top toolbar
-   - floor-plan name
-   - draft/published state
-   - saving/saved/error indicator
-   - undo and redo
-   - preview/live mode
-   - publish
-2. Left library
-   - tables
-   - counters and bars
-   - host stand
-   - waiting area
-   - kitchen or service area
-   - wall
-   - door
-   - restroom marker
-   - column or obstacle
-   - text label
-3. Center stage
-   - neutral restaurant canvas
-   - optional grid
-   - pan and zoom
-   - snapping guides
-   - marquee selection
-4. Right inspector
-   - selected item properties
-   - layers/list view
-   - alignment and arrangement controls
-   - warnings
+Use a stable logical canvas, such as 1600 by 1000 units. Persist x, y, width, height, rotation, zIndex, locked, visible, type, and object-specific properties. Zoom and pan must be viewport transforms and must not rewrite geometry.
 
-Include a bottom zoom control if it improves clarity.
+Every dining table needs:
 
-On tablet, the stage remains usable with drawers for the library and inspector. On mobile, provide a safe read-only preview or limited property editing rather than forcing a cramped desktop canvas.
-
-### Coordinate model
-
-Do not store positions only as percentages.
-
-Use a stable logical canvas such as 1600 by 1000 units and store:
-
-- x
-- y
-- width
-- height
-- rotation
-- zIndex
-- locked
-- visible
-- element type
-- element-specific properties
-
-Render through a viewport transform so zoom does not alter stored geometry. Clamp items to the floor bounds unless a deliberate overflow behavior exists.
-
-### Table properties
-
-Each table needs:
-
-- stable ID separate from display label
-- label or number
-- shape: round, square, rectangle, booth, bar seat group
-- seat capacity
+- stable operational ID
+- visible label
+- shape
+- capacity
 - minimum and maximum practical party size
 - zone
 - rotation
-- color or style token
-- active/out-of-service availability
+- active or archived state
 - optional notes
-- operational table identity used by analytics
 
-Do not delete historical analytics when a table is removed from the active plan. Archive the table or preserve its historical ID.
+Minimum editor interactions:
 
-### Editor interactions
-
-At minimum, implement:
-
-- drag from the library to create
-- click to select
-- shift-click and marquee multi-select
-- drag to move
-- resize handles
-- rotation control
-- keyboard arrow nudge
-- shift-modified larger nudge
+- create by drag/drop or clear click-to-add
+- select
+- shift-click multi-select
+- marquee selection
+- drag
+- resize
+- rotate
 - duplicate
-- copy and paste if feasible
-- delete with undo
-- lock and unlock
-- bring forward, send backward, bring to front, send to back
-- align left, center, right, top, middle, bottom
-- distribute horizontally and vertically for multi-selection
+- delete
+- undo and redo with at least 30 history entries
+- keyboard arrow nudge
+- Shift plus arrow larger nudge
+- Escape to clear selection
+- lock/unlock
+- layers ordering
+- bring forward/back
+- align
+- distribute for multi-selection
 - grid toggle
 - snap-to-grid toggle
-- snapping/alignment guides
+- alignment guides
 - zoom from 25% to 200%
 - pan
 - fit to screen
-- at least 30 undo/redo history entries
-- dirty-state detection
-- autosave or an explicit reliable Save draft action
-- Publish with confirmation and a new immutable version
-- restore or duplicate a previous version
-- rename floor plans
-- create more than one floor or zone
+- editable inspector fields
+- rename floor
+- multiple saved floor plans or zones
+- reliable Save draft
+- dirty/saving/saved/error indication
 
-Keyboard shortcuts should include common conventions where they do not conflict with the browser: Delete/Backspace, arrows, Shift+arrows, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+D, and Escape.
+Use accessible dialogs and toasts rather than native alert for core interactions. Provide keyboard focus and a synchronized layers/list panel so the canvas is not pointer-only.
 
-Do not use native browser alert for core interactions. Use accessible dialogs and non-blocking toasts.
+Validation warnings:
 
-### Editor validation and feedback
+- overlapping tables or objects
+- objects outside bounds
+- zero-capacity table
+- duplicate active table labels
+- plan with no entrance or host area
+- unsaved changes
+- deleting or archiving a table used by an active session or reservation
 
-Warn without unnecessarily blocking when:
+Show total active table count and calculated seating capacity.
 
-- items overlap
-- a table has zero seats
-- two active tables have the same visible label
-- an element extends outside the floor
-- a floor has no entrance or host area
-- the published plan has unsaved changes
-- deleting or archiving a table affects current reservations or sessions
+#### Draft and publish semantics
 
-Show calculated floor capacity and table count while editing.
-
-### Draft and publish semantics
-
-A draft may change freely. Employees operate only on the active published version.
+A floor draft may change freely. Live floor must use only the active published version.
 
 Publishing must:
 
-- create a versioned snapshot
-- preserve stable table identities when possible
-- ask how to handle deleted/changed tables with active operational state
-- update the live floor only after confirmation
-- record who published and when
+- show a confirmation summary
+- create an immutable version snapshot
+- preserve stable table IDs when possible
+- detect removed or materially changed active tables
+- prevent silent loss of active sessions or reservations
+- record publisher and timestamp
+- update Live floor only after successful confirmation
+- leave later edits in a new draft
 
-For the prototype, these semantics may be implemented in the demo store. They still need to be visible and testable.
+Allow viewing, restoring, or duplicating an earlier version.
 
-### Implementation choices
+Keep the domain representation independent of the rendering library. A maintained React-compatible drag/resize or canvas package is acceptable. Do not write a fragile low-level pointer engine when a modest maintained dependency fits.
 
-Choose an interaction library intentionally. A DOM-based approach such as react-rnd plus focused selection/history logic is acceptable for this prototype. A canvas library is also acceptable if it supports text, accessibility fallbacks, reliable hit-testing, and exportable geometry.
+Phase exit criteria:
 
-Do not build a low-level drag/resize engine from scratch if a maintained library fits React 19. Keep the domain representation independent from the rendering library.
+- a manager can create, move, resize, rotate, label, duplicate, and delete tables
+- undo and redo work
+- refresh preserves the draft
+- publishing creates a version
+- unpublished edits do not alter Live floor
+- Live floor renders the published geometry
+- editor state and version behavior have unit tests
+- main editor actions are usable at desktop and tablet sizes
+- no primary visible control is inert
 
-## 9. Live floor operations
+### Phase 2: manager queue and reservations
 
-The live floor is the published layout with operational status overlays.
+Build /manager/queue or an equivalent manager route combining queue and reservation oversight.
 
-Supported table states:
+Queue actions:
 
-- AVAILABLE
-- HELD
-- RESERVED
-- OCCUPIED
-- CLEANING
-- OUT_OF_SERVICE
-
-Use an explicit transition function rather than arbitrary string replacement.
-
-Typical transitions:
-
-- AVAILABLE to HELD, RESERVED, OCCUPIED, or OUT_OF_SERVICE
-- HELD to OCCUPIED or AVAILABLE
-- RESERVED to OCCUPIED, AVAILABLE, or OUT_OF_SERVICE with confirmation
-- OCCUPIED to CLEANING
-- CLEANING to AVAILABLE
-- OUT_OF_SERVICE to AVAILABLE
-
-Each transition must append a TableStatusEvent with:
-
-- restaurant
-- table
-- previous status
-- new status
-- occurredAt
-- actor
-- optional reason or note
-
-When a party is seated, create a TableSession with party size and seatedAt. When the table is cleared, set clearedAt and move to Cleaning. When cleaning finishes, set readyAt and move to Available.
-
-A table detail drawer should show:
-
-- current state and timer
-- capacity
-- seated party
-- session start
-- expected end if available
-- reservation conflicts
-- recent status history
-- quick actions
-- note
-
-Provide map and list views because employees should not be forced to use spatial navigation.
-
-## 10. Queue and reservation workflow
-
-### Queue
-
-A manager or employee can:
-
-- add a walk-in party
-- record party name or short identifier
-- record party size
-- optionally record contact details
-- select accessibility or seating notes
-- set a promised wait
-- edit an entry
-- reorder with an explicit reason if needed
-- notify or mark called in the prototype
-- assign a suitable available table
-- seat the party
-- cancel or mark no-show
-- view elapsed and promised-wait timers
+- add a walk-in
+- edit party name, size, contact when needed, notes, and promised wait
+- reorder parties
+- mark called
+- recommend suitable tables
+- assign a table
+- seat
+- cancel
+- mark no-show
+- show elapsed and promised-wait timers
+- prevent double seating
 
 Queue states:
 
@@ -435,31 +302,28 @@ Queue states:
 - CANCELLED
 - NO_SHOW
 
-When seating a queue entry, the queue record and table session must update together in one domain command. The UI must prevent double-seating.
+A table recommendation must consider availability, capacity fit, zone notes, reservation conflicts, and idle time. Show a brief reason for the recommendation.
 
-Recommend tables based on:
+Seating must be one domain command that:
 
-- table availability
-- capacity fit
-- zone notes
-- reservation conflicts
-- how long the table has been idle
+- validates the queue entry and table
+- changes the queue entry to SEATED
+- changes the table to OCCUPIED
+- creates a dining session
+- appends timestamped events
+- updates Overview and Analytics through canonical state
 
-Recommendations are advisory and explain why a table is suggested.
+Reservations need:
 
-### Reservations
-
-Implement a prototype reservation list/calendar sufficient for a credible demo:
-
-- date
-- time
-- party
+- list and simple day/calendar view
+- date and time
+- party name
 - party size
-- contact
-- notes
+- optional contact and notes
 - status
 - optional assigned table
-- conflict indicator
+- create/edit/cancel/no-show/arrived/seat actions
+- capacity and scheduling conflict warnings
 
 Reservation states:
 
@@ -470,493 +334,316 @@ Reservation states:
 - CANCELLED
 - NO_SHOW
 
-Do not attempt payments or third-party booking integrations.
+Phase exit criteria:
 
-## 11. Analytics requirements
+- queue and reservation primary actions work
+- timers update without unrelated state changes
+- seating affects the table, queue, session, Overview, and Analytics together
+- conflicts and invalid actions give useful feedback
+- reducer/domain tests cover seating, cancellation, no-show, and conflicts
 
-Analytics must be computed from events and sessions. Never display a number merely because it appears in seed data as a summary.
+### Phase 3: Team inside Manager
 
-All calculations use Asia/Manila time and restaurant operating hours. Date filtering must correctly handle sessions that overlap a range boundary.
+Add the manager Team route and remove login bloat.
 
-### Required filters
+Required changes:
+
+- add Team to manager navigation
+- implement staff CRUD in demo state
+- include simple permission presets such as Manager, Host, and Floor staff for future use
+- make it clear that staff access is disabled/not invited in the prototype
+- remove Employee as a public signup choice
+- remove or de-emphasize links to /employee
+- do not expand /employee
+- preserve internal role compatibility only where removing it would cause unnecessary migration risk
+
+Manager account creation must not let an arbitrary public user attach to another restaurant by typing a restaurant name. In demo mode, label shortcuts explicitly. In future database mode, an owner creates a restaurant and staff join only through an invitation or manager-issued access path.
+
+### Phase 4: useful analytics
+
+Expand /manager/analytics using pure calculations over sessions and timestamped events.
+
+Required filters:
 
 - Today
-- Yesterday
 - Last 7 days
 - Last 30 days
-- Custom date range
-- floor or zone
+- custom date range
+- zone
 - table
-- shift or time-of-day where data exists
-- comparison with the immediately preceding equal-length period
 
-### Core metrics
+Required metrics:
 
-| Metric | Definition |
-|---|---|
-| Completed seatings or table turns | Count of table sessions seated in the selected range; expose per table and restaurant total. |
-| Occupied minutes | Sum of the overlap between each session's occupied interval and the selected range. Active sessions end at now for current-period calculations. |
-| Occupancy rate | Occupied table-minutes divided by active table-minutes during operating hours. Exclude archived or intentionally inactive tables. |
-| Seat utilization | Guest count divided by seat capacity across sessions, reported as a weighted percentage. |
-| Average dining duration | Mean of clearedAt minus seatedAt for completed sessions. |
-| Median dining duration | Median of completed session durations; show this beside averages when outliers matter. |
-| Cleaning turnaround | readyAt minus clearedAt for sessions that entered Cleaning. |
-| Idle time | Available time between readyAt and the next seatedAt. |
-| Average actual queue wait | seatedAt minus joinedAt for seated queue entries. |
-| Promised-wait accuracy | Actual wait minus promised wait; report bias and mean absolute error. |
-| Queue abandonment rate | Cancelled plus no-show waiting parties divided by queue entries resolved in the period. |
-| Party-table fit | Party size divided by assigned table capacity, with under-filled large tables highlighted. |
-| Peak period | Highest occupancy or seating volume using consistent 30-minute or 60-minute buckets. |
-
-Handle empty denominators and insufficient data honestly. Use No data or Not enough data instead of zero when zero would be misleading.
-
-### Analytics UI
-
-The main analytics page should contain:
-
-- top KPI row with comparison deltas
-- occupancy over time
-- queue size and wait time over time
-- seatings by hour/day
-- dining and cleaning duration distribution or trend
-- table performance heatmap based on the published floor plan
-- per-table sortable table
-- queue outcomes
-- generated operational insights
-- clear date and zone filters
-
-Clicking a table in the heatmap or performance table opens a detail view with:
-
-- turns
-- occupancy
+- table turns/frequency
+- occupancy rate over the selected period
 - seat utilization
-- average and median stay
-- cleaning time
-- idle time
+- average and median dining duration
+- cleaning turnaround
+- table idle time
+- queue actual wait
+- promised-versus-actual wait accuracy
+- abandonment/no-show rate
 - busiest periods
-- comparison with restaurant median
-- history chart
+- per-table comparison with restaurant average
 
-Generate insights from transparent rules, for example:
+Use Asia/Manila and restaurant operating hours. Active sessions must be handled intentionally. Empty data must show Not enough data rather than a misleading zero.
 
-- Table 4 averages 16 minutes to clean, 42% slower than the restaurant median.
-- Four-seat tables are used by parties of two or fewer 61% of the time during Friday dinner.
-- Wait estimates have been 11 minutes too low on average between 7 PM and 8 PM.
+Add useful charts and a detailed table drawer or page, but always pair charts with readable labels or accessible data tables. Metrics must not be precomputed seed summaries.
 
-Do not claim causal explanations that the data cannot prove.
+Add rule-based operational insights such as:
 
-### Seed data
+- unusually slow cleaning
+- underused table or zone
+- recurring wait-estimate error
+- poor capacity fit
+- peak-period bottleneck
 
-Create deterministic seed data with:
+Each insight must name the metric, time range, and suggested action.
 
-- at least 8 to 12 tables of different capacities
-- multiple zones
-- realistic weekday and weekend differences
-- completed and active sessions
-- cleaning delays
-- queue entries with seated, cancelled, and no-show outcomes
-- reservations
-- a few outliers that produce useful insights
+### Phase 5: customer consistency
 
-The same seed must drive manager overview, live floor, employee operations, customer estimates, and analytics.
+Replace separate customer mock totals with selectors from the same canonical operational repository.
 
-## 12. Customer wait-time estimate
+The customer surface must show:
 
-For the prototype, calculate or suggest a wait estimate from operational data using an explainable heuristic:
-
-- current queue parties ahead
-- available capacity
-- active table session ages
-- typical duration by table capacity or time bucket
-- upcoming reservation holds
-
-Allow staff to override the estimate with a reason. Record automated suggestion, staff override, published value, actor, and timestamp so wait-estimate accuracy can be analyzed later.
-
-Show customers:
-
-- the published estimate as a range when uncertainty is meaningful
-- number of parties waiting
+- current wait estimate
+- crowd level
 - walk-in availability
-- last updated
-- stale-data warning
-- a short explanation such as Based on the live queue and table availability
+- freshness timestamp
+- stale/offline state
 
-Do not promise exact seating times.
+Manager changes should update the customer view in another tab through the existing synchronization mechanism. Do not expose private party names, contacts, notes, or internal staff information.
 
-## 13. Suggested domain model
+### Phase 6: production persistence and security
 
-The exact schema may evolve, but preserve these concepts and relationships.
+Only after the high-fidelity demo flows are coherent, expand Prisma and add a database-backed repository.
 
-### Identity and tenancy
+Expected models or equivalent domain structure:
 
 - Profile
-  - Supabase user identity and display data
 - Restaurant
-  - name, slug, address, timezone, status, settings
 - RestaurantMembership
-  - restaurantId, profileId, role, status, invitedAt, acceptedAt
-- RestaurantInvitation
-  - restaurantId, email, role, token metadata, expiry, acceptedAt
-
-Roles belong to a restaurant membership, not globally to an arbitrary restaurant name. A person may eventually belong to more than one restaurant.
-
-### Layout
-
+- StaffMember or invitation/access record
 - FloorPlan
-  - restaurantId, name, activeVersionId
 - FloorPlanVersion
-  - floorPlanId, version, status, logical width/height, createdBy, publishedAt
-- FloorZone
-  - versionId, name
-- LayoutElement
-  - versionId, zoneId, type, geometry, rotation, zIndex, locked, properties
-- DiningTable
-  - restaurantId, stable identifier, label, capacity, lifecycle status
-- FloorPlanTable
-  - versionId, diningTableId, geometry and visual properties if table elements are normalized separately
-
-JSON properties are acceptable for flexible non-table visual elements, but frequently queried operational fields should be typed columns.
-
-### Operations
-
+- FloorElement
+- DiningTable identity
 - TableStatusEvent
 - TableSession
 - QueueEntry
+- QueueEvent when needed
 - Reservation
-- WaitEstimatePublication
-- AuditEvent
 
-Include createdAt and updatedAt where appropriate. Store timestamps in UTC and render in Asia/Manila.
+Requirements:
 
-Use enums or validated string unions consistently. Do not maintain unrelated duplicate TypeScript and Prisma enums by hand without a deliberate mapping layer.
+- restaurant-scoped queries and mutations
+- invitation-based staff membership
+- no free-text tenant association
+- server-side authorization
+- transactions for multi-record operational commands
+- idempotent profile provisioning
+- safe internal redirects
+- explicit demo/database repository boundary
+- database migrations reviewed before destructive changes
+- RLS or equivalent defense in depth if Supabase client access is used
 
-### Indexes and constraints
+Do not let route components import mutable mock arrays. Keep domain commands and analytics usable by both demo and Prisma repositories.
 
-Plan indexes for:
+### Phase 7: quality and polish
 
-- restaurant plus time
-- table plus time
-- queue status plus joinedAt
-- reservation restaurant plus scheduledAt
-- active table state
-- membership profile plus restaurant
+Add or complete:
 
-Enforce tenant IDs in queries and uniqueness constraints such as restaurant plus table label where appropriate. Use transactions for multi-record operational commands.
+- loading states
+- empty states
+- validation errors
+- persistence errors
+- conflict states
+- stale/offline states
+- confirmation for destructive actions
+- undo where sensible
+- responsive desktop/tablet/mobile behavior
+- keyboard and focus behavior
+- WCAG 2.1 AA contrast and semantics
+- accessible dialogs and charts
+- deterministic demo reset
+- README setup and route documentation
+- clean deployment verification
 
-## 14. Frontend architecture
-
-Keep route components readable and move behavior into focused layers.
-
-Suggested organization:
-
-- app/manager
-  - layout.tsx
-  - page.tsx for Overview
-  - floor/page.tsx for Live floor, or preserve /manager/layout if route compatibility matters
-  - floor-plans/page.tsx or /manager/layout for editor
-  - queue/page.tsx
-  - analytics/page.tsx
-  - team/page.tsx
-  - settings/page.tsx
-- app/employee
-- components/manager
-  - shell
-  - overview
-  - floor-editor
-  - live-floor
-  - analytics
-- components/employee
-- components/customer
-- lib/domain
-  - types
-  - commands
-  - transitions
-  - analytics
-  - wait-estimate
-- lib/repositories
-  - contracts
-  - demo
-  - prisma
-- lib/demo
-  - seed
-  - store
-  - persistence
-- lib/auth
-  - authorization
-  - safe-redirect
-
-Do not reorganize merely for aesthetics. Move files when it makes a completed feature easier to understand.
-
-Use Server Components by default. Add Client Components only for interactive regions such as the editor, live store, charts, filters, dialogs, and forms.
-
-Do not keep one huge manager component. Split by product responsibility, not by arbitrary visual fragments.
-
-## 15. Visual design direction
-
-The current emerald and cream identity is a useful starting point. Evolve it into a polished restaurant operations product rather than a generic admin template.
-
-Design characteristics:
-
-- warm off-white surfaces
-- deep green primary actions
-- charcoal text
-- restrained amber, red, blue, and violet semantic colors
-- high information density where managers need scanning
-- generous touch targets in employee workflows
-- subtle elevation and borders
-- clear hierarchy
-- consistent 8-point spacing
-- professional icon set such as Lucide
-- real chart components such as Recharts when a chart improves a decision
-- skeletons for meaningful loading
-- visible focus states
-- no emoji as core interface icons
-- no excessive gradients, glass effects, or decorative blobs
-
-Create reusable tokens for:
-
-- background and surface
-- text and muted text
-- border
-- primary
-- success
-- warning
-- danger
-- information
-- table states
-- chart series
-- radius and shadow
-
-Use en-PH formatting and Asia/Manila time. Use Philippine peso formatting only for real monetary data.
-
-Responsive expectations:
-
-- manager overview and analytics work from 375-pixel mobile width upward
-- full editor is optimized for at least 1024 pixels
-- employee operations are excellent on mobile and tablet
-- no horizontal page overflow except intentional table/canvas regions
-- sticky toolbars must not hide content
-
-## 16. Accessibility
-
-Target WCAG 2.1 AA for conventional UI.
-
-Required practices:
-
-- semantic buttons and form labels
-- visible keyboard focus
-- status not communicated by color alone
-- sufficient contrast
-- accessible dialogs with focus management
-- keyboard-operable editor actions
-- reduced-motion consideration
-- chart summaries or accessible data tables
-- live-region announcements for saves and operational status changes
-- 44-by-44-pixel touch targets for primary employee actions where practical
-
-The canvas must have a synchronized list or layers panel so an element can be selected and edited without precise pointer input.
-
-## 17. Implementation rules
-
-- Preserve Next.js 15, React 19, Tailwind 4, Supabase SSR, Prisma 7, and strict TypeScript unless a task explicitly authorizes upgrades.
-- Do not commit generated Prisma output, secrets, build output, or local environment files.
-- Do not directly mutate exported mock arrays.
-- Do not put mutable singleton application state in a server module.
-- Keep domain timestamps as ISO/Date values, not display strings such as 11:45 AM.
-- Centralize timezone-aware formatting.
-- Validate user input at server or repository boundaries. Zod is acceptable.
-- Validate internal redirects.
-- Confirm destructive actions and offer undo when possible.
-- Use optimistic updates only when rollback and error feedback exist.
-- Avoid no-op buttons. If a secondary feature cannot be implemented, hide it or label it explicitly as unavailable in demo mode.
-- Keep fixtures deterministic.
-- Format JSX and logic for teammate review; avoid compressed one-line pages.
-- Add comments only where the reason is not obvious from code.
-- Do not use excessive abstractions before the second concrete use case.
-- Avoid replacing the entire stack with a third-party dashboard template.
-- Use maintained packages intentionally and keep the dependency list modest.
-
-## 18. Work sequence for Codex
-
-When asked to implement the high-fidelity prototype, proceed in vertical slices and keep the application runnable after each slice.
-
-### Phase 0: establish the baseline
-
-1. Inspect current files and git status.
-2. Install dependencies.
-3. Generate Prisma client when required.
-4. Run lint and build.
-5. Record pre-existing failures separately.
-6. Do not delete teammate work.
-
-### Phase 1: design system and manager shell
-
-1. Create tokens, typography, buttons, inputs, badges, dialogs, toasts, tabs, and empty/loading states.
-2. Build role-aware global navigation.
-3. Build manager sidebar/header shell.
-4. Replace the manager landing cards with a real Overview using one shared demo state.
-5. Add responsive behavior.
-
-### Phase 2: domain and demo repository
-
-1. Define canonical domain types and transitions.
-2. Create deterministic seed generator.
-3. Create versioned browser persistence and reset.
-4. Derive all summaries from that state.
-5. Add event logging.
-6. Add unit tests for transitions and derivations.
-
-### Phase 3: floor-plan editor
-
-1. Implement logical canvas and viewport.
-2. Add library, selection, drag, resize, rotate, inspector, layers, zoom, and pan.
-3. Add history, shortcuts, snapping, validation, and multi-select.
-4. Add draft/publish/version flow.
-5. Connect the published plan to live operations.
-6. Add targeted tests.
-
-### Phase 4: live operations and queue
-
-1. Implement valid table status commands.
-2. Implement sessions and timers.
-3. Implement queue creation, editing, recommendation, seating, cancellation, and no-show.
-4. Add reservation prototype and conflict warnings.
-5. Make employee workflow fast and responsive.
-6. Verify every event updates Overview and analytics.
-
-### Phase 5: analytics
-
-1. Implement pure calculation functions.
-2. Add filters and comparison periods.
-3. Add charts, heatmap, per-table table, and details.
-4. Add rule-based insights.
-5. Test boundary overlap, active sessions, empty data, and timezone behavior.
-
-### Phase 6: customer consistency
-
-1. Derive public wait/crowd data from the same operational state.
-2. Show freshness and staleness.
-3. Add a credible restaurant detail state.
-4. Only add join-queue behavior if it is connected end to end.
-
-### Phase 7: persistence and security
-
-1. Expand Prisma schema with migrations.
-2. Implement restaurant membership and invitation semantics.
-3. Add tenant-scoped repository methods and server actions.
-4. Make multi-record operations transactional.
-5. Add RLS or equivalent defense-in-depth if Supabase client access is introduced.
-6. Keep demo mode explicit and isolated.
-
-### Phase 8: quality pass
-
-1. Run lint, type checking, tests, and production build.
-2. Check major flows at mobile, tablet, and desktop sizes.
-3. Check empty, loading, error, stale, and no-data states.
-4. Check keyboard interaction and focus.
-5. Remove placeholder copy and dead controls.
-6. Update README and docs to match actual behavior.
-
-Do not stop after only restyling the static pages. A vertical slice is complete only when an interaction changes canonical state and the change appears everywhere it should.
-
-## 19. Tests and verification
-
-Add appropriate scripts if missing:
-
-- typecheck
-- test
-- test:watch
-- test:e2e when end-to-end coverage is introduced
-
-Minimum unit coverage:
-
-- valid and invalid table transitions
-- seating a queue party
-- clearing and cleaning a table
-- floor editor history
-- floor-plan publish semantics
-- occupancy calculation
-- session range overlap
-- average and median duration
-- queue wait and abandonment
-- comparison-period calculation
-- safe redirect validation
-- seed determinism
-- browser-store migration and reset
-
-Minimum end-to-end demo flow:
+Minimum end-to-end flow:
 
 1. Enter explicit manager demo mode.
 2. Create or edit a floor plan.
 3. Add, move, resize, rotate, label, and duplicate a table.
 4. Undo and redo.
-5. Publish the plan.
-6. Open Live floor and see the published geometry.
-7. Add a walk-in party.
-8. Seat the party at an available table.
-9. Clear the table, start Cleaning, then mark it Available.
-10. Open Analytics and confirm the session and status timings affect the metrics.
-11. Refresh and confirm demo state persists.
-12. Reset demo data and confirm deterministic restoration.
+5. Save the draft.
+6. Publish the plan.
+7. Confirm Live floor shows published geometry.
+8. Add a walk-in party.
+9. Seat it at a recommended available table.
+10. Clear the table to Cleaning and then Available.
+11. Confirm Overview and Analytics change.
+12. Confirm customer wait/crowd information changes without leaking private data.
+13. Refresh and confirm persistence.
+14. Reset and confirm deterministic restoration.
+
+## 7. Domain and state rules
+
+Use canonical normalized state or equivalent repository-backed records. Do not store disconnected copies of queue totals, table totals, and analytics summaries.
+
+All domain timestamps are ISO strings or Date values. Display formatting is centralized and timezone-aware.
+
+Primary mutations are explicit domain commands, not arbitrary object edits. At minimum:
+
+- saveFloorDraft
+- publishFloorPlan
+- transitionTable
+- addQueueEntry
+- updateQueueEntry
+- callQueueEntry
+- seatQueueEntry
+- cancelQueueEntry
+- markQueueNoShow
+- createReservation
+- updateReservation
+- seatReservation
+- completeReservation
+- addStaffMember
+- updateStaffMember
+- deactivateStaffMember
+
+Each operational command validates current state, appends the necessary event records, and updates every affected aggregate atomically within the chosen repository.
+
+Keep table states:
+
+- AVAILABLE
+- HELD
+- RESERVED
+- OCCUPIED
+- CLEANING
+- OUT_OF_SERVICE
+
+Preserve existing transition validation. Do not allow an OCCUPIED table to jump directly to AVAILABLE without clearing/cleaning semantics.
+
+Archive historical table identities rather than deleting analytics history.
+
+Version browser state and provide migration/fallback handling when the DemoState shape changes.
+
+## 8. UX and visual direction
+
+The manager product should feel like one application, not unrelated card pages.
+
+Use:
+
+- restrained cream/stone base
+- emerald operational accent
+- status colors with text/icons, never color alone
+- clear hierarchy and compact operational density
+- consistent buttons, inputs, badges, dialogs, drawers, toasts, tables, and empty states
+- meaningful microcopy for managers
+- Philippine locale and Asia/Manila time
+
+Avoid:
+
+- decorative KPIs without actions
+- excessive gradients
+- generic dashboard-template appearance
+- native alert for core workflows
+- tiny canvas controls
+- horizontal page overflow outside intentional canvas/table regions
+- placeholder statistics
+- visible buttons that do nothing
+
+On mobile, prioritize manager live operations, queue, and readable analytics. The full editor may be read-only or limited on small screens rather than forcing the desktop canvas into an unusable layout.
+
+## 9. Engineering rules
+
+- Preserve Next.js 15, React 19, Tailwind 4, Supabase SSR, Prisma 7, and strict TypeScript unless explicitly authorized otherwise.
+- Do not commit generated Prisma output, .env files, secrets, node_modules, or build output.
+- Use apply_patch for local manual file edits.
+- Preserve unrelated teammate changes.
+- Do not rewrite authentication or the app stack as a shortcut.
+- Keep dependencies modest and intentionally selected.
+- Add input validation at repository/server boundaries; Zod is acceptable.
+- Do not use mutable singleton state in server modules.
+- Use optimistic updates only with rollback and error feedback.
+- Use accessible custom dialogs and toasts.
+- Hide unavailable secondary controls instead of leaving no-op buttons.
+- Keep fixtures deterministic.
+- Keep code formatted for teammate review.
+- Update tests with each domain change.
+- Do not claim a placeholder screen is implemented.
+- Do not deploy, merge a PR, send messages, or mutate production data without the required user authorization.
+
+## 10. Verification
 
 Before handing off any implementation, run:
 
 - npm run lint
-- npm run typecheck if added
-- npm test if added
+- npm run typecheck
+- npm test
 - npm run build
 
-If Supabase or database secrets are unavailable, verify demo mode and clearly report which production-backed checks could not run.
+For deployment-related work, also verify a clean install and Prisma generation.
 
-## 20. Definition of done for the high-fidelity prototype
+Minimum new unit coverage:
 
-The prototype is ready for review only when:
+- floor editor selection and history
+- draft persistence
+- publish/version semantics
+- active-table publish conflict
+- queue entry creation/editing
+- table recommendation rules
+- atomic queue seating
+- reservation conflict detection
+- staff CRUD
+- analytics date-range overlap
+- median dining time
+- cleaning and idle calculations
+- promised-versus-actual wait
+- abandonment
+- browser-state migration/reset
+- customer public selector privacy
 
-- the manager experience is a cohesive app rather than three disconnected cards
-- the floor editor supports the core Canva-like interactions
-- draft and published plans are distinct
-- employees operate on the published plan
-- primary employee and queue actions work
-- operational changes generate timestamped events
-- manager Overview reflects current state
-- analytics are derived from event/session data
-- table frequency/turnover and dining/cleaning metrics are visible per table
-- analytics filters work
-- the public wait state is consistent with operations
-- demo data persists and can be reset
-- responsive layouts are credible
-- loading, empty, error, stale, and save states exist
-- role-aware navigation exists
-- no primary visible button is inert
-- lint, type checking, tests, and build pass
-- README accurately describes setup, demo mode, routes, and current limitations
+Add end-to-end coverage for the full manager flow when the browser test setup is introduced.
 
-## 21. Decisions requiring user confirmation
+## 11. Definition of done for this next implementation
 
-Continue with reasonable defaults for reversible UI and implementation choices. Pause for confirmation only when a decision would materially change product scope or destroy/replace existing work, including:
+The next high-fidelity milestone is complete only when:
 
-- changing the core stack
-- deleting or rewriting authentication
-- introducing a paid external service
-- changing the product from walk-in operations to POS/reservations-first
-- handling real customer communications
-- storing new sensitive personal data
-- destructive database migrations
-- deploying or publishing externally
+- the release/build path is stable
+- the manager Floor plans route is a functional Canva-like editor
+- draft and published floor plans are distinct
+- Live floor renders only the published version
+- manager queue and reservation actions work end to end
+- Team exists inside the manager workspace
+- public employee registration and prominent employee navigation are removed
+- no separate employee application was expanded
+- analytics support meaningful periods and are event-derived
+- per-table frequency, dining, cleaning, idle, and utilization metrics are visible
+- customer wait/crowd information comes from the same safe operational source
+- demo state persists, synchronizes, migrates, and resets
+- primary visible controls work
+- loading, empty, error, conflict, and stale states exist
+- responsive and accessible behavior is credible
+- lint, typecheck, tests, and build pass
+- README describes actual behavior and limitations
 
-For normal implementation decisions, make the best repo-consistent choice, document it, and continue.
+## 12. Codex working behavior
 
-## 22. Expected handoff format
+When asked to implement, begin by stating the active branch, what is already implemented, and the vertical slice being attempted. Then inspect the relevant code before editing.
 
-At the end of a Codex implementation task, report:
+Make reasonable reversible design choices without repeatedly asking for permission. Pause when a choice changes core scope, destroys or replaces teammate work, introduces a paid service, stores new sensitive data, requires a destructive migration, merges a PR, or deploys externally.
 
-1. what a manager can now do
-2. what an employee can now do
-3. what a customer can now see or do
-4. which metrics are real calculations and what events feed them
-5. key files changed
-6. verification commands and results
-7. known limitations
-8. the smallest sensible next step
+At handoff, report:
 
-Lead with the working outcome. Do not describe placeholder screens as implemented features.
+1. what the manager can now do
+2. what changed in customer behavior
+3. what remains intentionally excluded
+4. which metrics are calculated and from which events
+5. important files changed
+6. checks and exact results
+7. deployment status when relevant
+8. known limitations
+9. the smallest sensible next step
+
+Lead with working outcomes and be precise about anything still simulated.
