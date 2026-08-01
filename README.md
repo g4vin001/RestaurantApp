@@ -1,10 +1,10 @@
 # Halina
 
-Halina is a Filipino restaurant prototype for checking live crowd levels and estimated wait times before visiting.
+Halina is a Filipino restaurant operations prototype with manager, employee, and customer experiences.
 
 ## Tech stack
 
-Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth, Prisma + PostgreSQL (Supabase). Queue/table data is still local mock data.
+Next.js App Router, strict TypeScript, Tailwind CSS, Supabase Auth, Prisma + PostgreSQL (Supabase), and a browser-persisted demo operations repository.
 
 ## Prerequisites
 
@@ -48,20 +48,40 @@ Finally:
 npm run dev
 ```
 
+### Explicit demo mode
+
+Reviewers can run the manager prototype without an authentication account by adding this to `.env.local`:
+
+```bash
+NEXT_PUBLIC_HALINA_DEMO_MODE=true
+```
+
+Demo mode is visibly labeled in the interface. Table transitions, sessions, and events persist in localStorage, synchronize across browser tabs, and can be reset from the manager sidebar. When the switch is absent or false, the existing Supabase authentication and role guards remain enforced.
+
 ## Current status
 
-Queue list, status badges, and Supabase Auth (login/signup with customer/manager/employee roles) are done. Queue/table/restaurant data is still hardcoded mock data — no data layer for it yet.
+The first manager vertical slice is implemented: a responsive manager shell, decision-focused Overview, interactive Live floor, valid table status transitions, timestamped events, session updates, browser persistence, tab synchronization, and analytics derived from the shared state. The interface labels this as prototype/demo data until the Prisma repository is implemented.
+
+Quality commands:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Available routes
 
 - `/` — customer restaurant feed
 - `/login` — log in or register (customer, manager, or employee)
 - `/restaurants/salu-salo` — sample restaurant detail
-- `/manager` — manager dashboard (requires a manager account)
-- `/manager/layout` — static layout-builder placeholder
-- `/manager/analytics` — sample analytics
+- `/manager` — live manager overview (manager account, or explicit demo mode)
+- `/manager/floor` — interactive live floor and table transitions
+- `/manager/layout` — legacy static layout-builder route; the full editor is the next vertical slice
+- `/manager/analytics` — metrics calculated from shared demo sessions and queue state
 - `/employee` — employee table and queue dashboard (requires an employee or manager account)
 
 ## Next teammate tasks
 
-Start with the items in [docs/FUTURE_WORK.md](docs/FUTURE_WORK.md), then replace mock data with a database-backed data layer when the team is ready.
+Follow [AGENTS.md](AGENTS.md). The next vertical slice is the Canva-like floor-plan editor with draft/publish versions connected to the Live floor.

@@ -4,6 +4,10 @@ import { NextResponse, type NextRequest } from "next/server";
 const PROTECTED_PREFIXES = ["/manager", "/employee"];
 
 export async function updateSession(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_HALINA_DEMO_MODE === "true") {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

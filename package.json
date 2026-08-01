@@ -6,18 +6,22 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.0",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.8",
-    "next": "15.4.6",
+    "lucide-react": "^0.468.0",
+    "next": "^15.5.18",
     "pg": "^8.22.0",
     "prisma": "^7.9.0",
-    "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react": "^19.1.7",
+    "react-dom": "^19.1.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.13",
@@ -27,8 +31,9 @@
     "@types/react-dom": "19.1.7",
     "dotenv": "^17.4.2",
     "eslint": "9.34.0",
-    "eslint-config-next": "15.4.6",
+    "eslint-config-next": "^15.5.18",
     "tailwindcss": "4.1.13",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "vitest": "^3.2.7"
   }
 }

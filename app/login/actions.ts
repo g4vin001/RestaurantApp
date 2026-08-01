@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import { ROLE_HOME, parseRole } from "@/lib/roles";
@@ -9,7 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
-  const redirectTo = (formData.get("redirectTo") as string) || undefined;
+  const redirectTo = safeInternalRedirect(formData.get("redirectTo"), "");
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -20,7 +21,7 @@ export async function login(formData: FormData) {
   }
 
   const profile = await prisma.profile.findUnique({ where: { id: data.user.id } });
-  redirect(redirectTo ?? ROLE_HOME[profile?.role ?? "CUSTOMER"]);
+  redirect(redirectTo || ROLE_HOME[profile?.role ?? "CUSTOMER"]);
 }
 
 export async function signup(formData: FormData) {
