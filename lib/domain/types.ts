@@ -82,7 +82,7 @@ export interface RestaurantIdentity {
   id: string;
   name: string;
   location: string;
-  timezone: "Asia/Manila";
+  timezone: string;
   isOpen: boolean;
   cleaningTargetMinutes: number;
   opensAtHour: number;
@@ -93,6 +93,8 @@ export interface DiningTable {
   id: string;
   label: string;
   capacity: number;
+  minPartySize?: number;
+  maxPartySize?: number;
   zone: string;
   status: TableStatus;
   statusChangedAt: string;
@@ -162,6 +164,8 @@ export interface Reservation {
   arrivedAt?: string;
   seatedAt?: string;
   completedAt?: string;
+  cancelledAt?: string;
+  noShowAt?: string;
   updatedAt: string;
 }
 
@@ -179,7 +183,7 @@ export interface StaffMember {
   updatedAt: string;
 }
 
-export interface DemoState {
+export interface OperationsState {
   version: 2;
   restaurant: RestaurantIdentity;
   tables: DiningTable[];
@@ -192,3 +196,5 @@ export interface DemoState {
   staff: StaffMember[];
   lastUpdatedAt: string;
 }
+
+export type DemoState = OperationsState;
