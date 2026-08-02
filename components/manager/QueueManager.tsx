@@ -10,6 +10,7 @@ import {
   Edit3,
   Plus,
   UserRoundX,
+  Zap,
   UsersRound,
   XCircle,
 } from "lucide-react";
@@ -17,7 +18,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { Modal } from "@/components/ui/Modal";
 import { minutesBetween } from "@/lib/domain/analytics";
-import { recommendTables } from "@/lib/domain/operations";
+import {
+  estimateWaitForParty,
+  recommendTables,
+} from "@/lib/domain/operations";
 import type { QueueEntry, Reservation } from "@/lib/domain/types";
 
 const inputClass =
@@ -102,13 +106,29 @@ function QueueForm({
   entry,
   onSubmit,
   onCancel,
+  rushMode,
+  estimateWait,
 }: {
   entry?: QueueEntry;
   onSubmit: (form: FormData) => void;
   onCancel: () => void;
+  rushMode: boolean;
+  estimateWait: (partySize: number) => number;
 }) {
+  const [partySize, setPartySize] = useState(entry?.partySize ?? 2);
+  const suggestedWait = estimateWait(partySize);
+  const [promisedWait, setPromisedWait] = useState(
+    entry?.promisedWaitMinutes ?? suggestedWait,
+  );
+
   return (
     <form action={onSubmit} className="space-y-4">
+      {rushMode && !entry && (
+        <p className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+          Rush mode keeps only the essential fields open. The wait estimate
+          updates for the selected party size; optional details remain below.
+        </p>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className={labelClass}>
           Party name
@@ -128,50 +148,71 @@ function QueueForm({
             min={1}
             max={30}
             required
-            defaultValue={entry?.partySize ?? 2}
+            value={partySize}
+            onChange={(event) => setPartySize(Number(event.target.value))}
             className={inputClass}
           />
         </label>
-        <label className={labelClass}>
-          Promised wait (min)
+        <label className={labelClass + " sm:col-span-2"}>
+          <span className="flex items-center justify-between gap-3">
+            Promised wait (min)
+            <button
+              type="button"
+              onClick={() => setPromisedWait(suggestedWait)}
+              className="text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+            >
+              Use suggestion: {suggestedWait} min
+            </button>
+          </span>
           <input
             name="promisedWaitMinutes"
             type="number"
             min={0}
             max={240}
             required
-            defaultValue={entry?.promisedWaitMinutes ?? 20}
+            value={promisedWait}
+            onChange={(event) => setPromisedWait(Number(event.target.value))}
             className={inputClass}
-          />
-        </label>
-        <label className={labelClass}>
-          Preferred zone
-          <input
-            name="preferredZone"
-            defaultValue={entry?.preferredZone}
-            className={inputClass}
-            placeholder="Optional"
           />
         </label>
       </div>
-      <label className={labelClass}>
-        Contact
-        <input
-          name="contact"
-          defaultValue={entry?.contact}
-          className={inputClass}
-          placeholder="Optional phone or name"
-        />
-      </label>
-      <label className={labelClass}>
-        Seating notes
-        <textarea
-          name="notes"
-          defaultValue={entry?.notes}
-          className={`${inputClass} min-h-20 py-2`}
-          placeholder="Accessibility, high chair, seating preference…"
-        />
-      </label>
+      <details
+        className="rounded-xl border border-stone-200 bg-stone-50"
+        open={!rushMode || Boolean(entry)}
+      >
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-stone-700">
+          Optional contact and seating preferences
+        </summary>
+        <div className="space-y-4 border-t border-stone-200 p-4">
+          <label className={labelClass}>
+            Preferred zone
+            <input
+              name="preferredZone"
+              defaultValue={entry?.preferredZone}
+              className={inputClass}
+              placeholder="Optional"
+            />
+          </label>
+          <label className={labelClass}>
+            Contact
+            <input
+              name="contact"
+              defaultValue={entry?.contact}
+              className={inputClass}
+              placeholder="Optional phone or name"
+            />
+          </label>
+          <label className={labelClass}>
+            Seating notes
+            <textarea
+              name="notes"
+              defaultValue={entry?.notes}
+              className={inputClass + " min-h-20 py-2"}
+              placeholder="Accessibility, high chair, seating preference…"
+            />
+          </label>
+        </div>
+      </details>
       <div className="flex justify-end gap-3 pt-2">
         <button
           type="button"
@@ -297,6 +338,7 @@ export function QueueManager() {
   const { state } = demo;
   const now = useNow(state.lastUpdatedAt);
   const [tab, setTab] = useState<"queue" | "reservations">("queue");
+  const [rushMode, setRushMode] = useState(false);
   const [reservationDate, setReservationDate] = useState("");
   const [queueModal, setQueueModal] = useState<QueueEntry | "new" | null>(null);
   const [reservationModal, setReservationModal] = useState<
@@ -418,12 +460,12 @@ export function QueueManager() {
       setReservationModal(null);
   };
 
-  const confirmSeat = (tableId: string) => {
+  const confirmSeat = (tableIds: string[]) => {
     if (!seatTarget) return;
     const result =
       seatTarget.kind === "queue"
-        ? demo.seatQueue(seatTarget.id, tableId)
-        : demo.seatReservationRecord(seatTarget.id, tableId);
+        ? demo.seatQueue(seatTarget.id, tableIds)
+        : demo.seatReservationRecord(seatTarget.id, tableIds);
     if (handle(result, "Party seated and table session started."))
       setSeatTarget(null);
   };
@@ -462,16 +504,34 @@ export function QueueManager() {
             Manage walk-ins and upcoming bookings from the same live floor.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() =>
-            tab === "queue" ? setQueueModal("new") : setReservationModal("new")
-          }
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900"
-        >
-          <Plus size={17} />{" "}
-          {tab === "queue" ? "Add walk-in" : "New reservation"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {tab === "queue" && (
+            <button
+              type="button"
+              aria-pressed={rushMode}
+              onClick={() => setRushMode((enabled) => !enabled)}
+              className={
+                rushMode
+                  ? "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900"
+                  : "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-600"
+              }
+            >
+              <Zap size={17} /> Rush mode {rushMode ? "on" : "off"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() =>
+              tab === "queue"
+                ? setQueueModal("new")
+                : setReservationModal("new")
+            }
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900"
+          >
+            <Plus size={17} />{" "}
+            {tab === "queue" ? "Add walk-in" : "New reservation"}
+          </button>
+        </div>
       </div>
       <div className="mt-6 flex gap-2 border-b border-stone-200">
         <button
@@ -575,12 +635,12 @@ export function QueueManager() {
                             onClick={() =>
                               handle(
                                 demo.callQueue(entry.id),
-                                "Party marked called.",
+                                "Marked called. No SMS was sent.",
                               )
                             }
                             className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-800"
                           >
-                            <BellRing size={15} /> Call
+                            <BellRing size={15} /> Mark called
                           </button>
                         )}
                         <button
@@ -838,6 +898,10 @@ export function QueueManager() {
             entry={queueModal === "new" ? undefined : queueModal}
             onSubmit={submitQueue}
             onCancel={() => setQueueModal(null)}
+            rushMode={rushMode}
+            estimateWait={(partySize) =>
+              estimateWaitForParty(state, partySize, now)
+            }
           />
         )}
       </Modal>
@@ -863,33 +927,39 @@ export function QueueManager() {
       <Modal
         open={seatTarget !== null}
         title={`Seat ${seatRecord?.partyName ?? "party"}`}
-        description="Recommended tables consider capacity, preferred zone, reservation conflicts, and idle time."
+        description="Recommendations consider party size, combined same-zone tables, reservations, and current progress."
         onClose={() => setSeatTarget(null)}
       >
         {recommendations.length ? (
           <div className="space-y-3">
             {recommendations.map((recommendation, index) => {
-              const table = state.tables.find(
-                (item) => item.id === recommendation.tableId,
-              );
-              return table ? (
+              const tables = recommendation.tableIds
+                .map((tableId) =>
+                  state.tables.find((item) => item.id === tableId),
+                )
+                .filter(
+                  (table): table is (typeof state.tables)[number] =>
+                    Boolean(table),
+                );
+              return tables.length ? (
                 <button
-                  key={table.id}
+                  key={recommendation.tableIds.join("-")}
                   type="button"
-                  onClick={() => confirmSeat(table.id)}
+                  onClick={() => confirmSeat(recommendation.tableIds)}
                   className="flex w-full items-center justify-between gap-4 rounded-xl border border-stone-200 p-4 text-left hover:border-emerald-300 hover:bg-emerald-50"
                 >
                   <div>
                     <p className="font-semibold text-stone-900">
                       {index === 0 ? "Best match · " : ""}
-                      {table.label}
+                      {tables.map((table) => table.label).join(" + ")}
+                      {recommendation.combined ? " · combined" : ""}
                     </p>
                     <p className="mt-1 text-xs leading-5 text-stone-500">
                       {recommendation.reason}
                     </p>
                   </div>
                   <span className="shrink-0 text-sm font-semibold text-emerald-700">
-                    {table.capacity} seats
+                    {recommendation.capacity} seats
                   </span>
                 </button>
               ) : null;
