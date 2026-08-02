@@ -120,6 +120,7 @@ export interface QueueEntry {
   cancelledAt?: string;
   noShowAt?: string;
   assignedTableId?: string;
+  assignedTableIds?: string[];
   updatedAt: string;
 }
 
@@ -155,6 +156,7 @@ export interface Reservation {
     | "CANCELLED"
     | "NO_SHOW";
   tableId?: string;
+  tableIds?: string[];
   contact?: string;
   notes?: string;
   arrivedAt?: string;
