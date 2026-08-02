@@ -98,6 +98,173 @@ export function transitionTable(
   };
 }
 
+export function correctLastTableTransition(
+  state: DemoState,
+  tableId: string,
+  reason: string,
+  occurredAt: string,
+  actor: string,
+): DomainResult {
+  const table = state.tables.find((item) => item.id === tableId && item.active);
+  if (!table)
+    return { ok: false, error: "Table was not found on the published floor." };
+
+  const event = state.events.find((item) => item.tableId === tableId);
+  if (!event)
+    return { ok: false, error: "There is no recent table action to correct." };
+  if (event.note?.startsWith("Correction:"))
+    return { ok: false, error: "The latest table action is already a correction." };
+  if (table.status !== event.newStatus)
+    return { ok: false, error: "The table changed again; refresh before correcting it." };
+
+  const correctionReason = reason.trim();
+  if (correctionReason.length < 4)
+    return { ok: false, error: "Add a short reason for the correction." };
+  const ageMinutes =
+    (Date.parse(occurredAt) - Date.parse(event.occurredAt)) / 60_000;
+  if (ageMinutes > 15)
+    return {
+      ok: false,
+      error: "Only the most recent 15 minutes can be corrected. Use a new status change instead.",
+    };
+
+  const linkedQueue = state.queue.find(
+    (entry) =>
+      entry.status === "SEATED" &&
+      entry.seatedAt === event.occurredAt &&
+      (entry.assignedTableId === tableId ||
+        entry.assignedTableIds?.includes(tableId)),
+  );
+  const linkedReservation = state.reservations.find(
+    (reservation) =>
+      reservation.status === "SEATED" &&
+      reservation.seatedAt === event.occurredAt &&
+      (reservation.tableId === tableId ||
+        reservation.tableIds?.includes(tableId)),
+  );
+  const linkedIds =
+    linkedQueue?.assignedTableIds ??
+    linkedReservation?.tableIds ??
+    (linkedQueue?.assignedTableId
+      ? [linkedQueue.assignedTableId]
+      : linkedReservation?.tableId
+        ? [linkedReservation.tableId]
+        : [tableId]);
+  const affectedIds =
+    event.newStatus === "OCCUPIED" ? [...new Set(linkedIds)] : [tableId];
+
+  const originals = affectedIds.map((id) =>
+    state.events.find(
+      (item) =>
+        item.tableId === id &&
+        item.occurredAt === event.occurredAt &&
+        item.newStatus === event.newStatus &&
+        !item.note?.startsWith("Correction:"),
+    ),
+  );
+  if (originals.some((item) => !item))
+    return {
+      ok: false,
+      error: "The linked table actions no longer match and cannot be corrected safely.",
+    };
+
+  let sessions = state.sessions;
+  if (event.newStatus === "OCCUPIED") {
+    sessions = sessions.filter(
+      (session) =>
+        !(
+          affectedIds.includes(session.tableId) &&
+          session.seatedAt === event.occurredAt
+        ),
+    );
+  } else if (
+    event.previousStatus === "OCCUPIED" &&
+    event.newStatus === "CLEANING"
+  ) {
+    sessions = sessions.map((session) =>
+      session.tableId === tableId &&
+      session.clearedAt === event.occurredAt &&
+      !session.readyAt
+        ? { ...session, clearedAt: undefined }
+        : session,
+    );
+  } else if (
+    event.previousStatus === "CLEANING" &&
+    event.newStatus === "AVAILABLE"
+  ) {
+    sessions = sessions.map((session) =>
+      session.tableId === tableId && session.readyAt === event.occurredAt
+        ? { ...session, readyAt: undefined }
+        : session,
+    );
+  }
+
+  const originalByTable = new Map(
+    originals.map((item) => [item!.tableId, item!]),
+  );
+  const correctionEvents = affectedIds.map((id) => {
+    const original = originalByTable.get(id)!;
+    return {
+      id: `correction-${occurredAt}-${id}`,
+      tableId: id,
+      previousStatus: original.newStatus,
+      newStatus: original.previousStatus,
+      occurredAt,
+      actor,
+      note: `Correction: ${correctionReason}`,
+    };
+  });
+
+  return {
+    ok: true,
+    state: touch(
+      {
+        ...state,
+        tables: state.tables.map((item) => {
+          const original = originalByTable.get(item.id);
+          return original
+            ? {
+                ...item,
+                status: original.previousStatus,
+                statusChangedAt: occurredAt,
+              }
+            : item;
+        }),
+        sessions,
+        queue: state.queue.map((entry) => {
+          if (entry.id !== linkedQueue?.id) return entry;
+          const {
+            seatedAt: _seatedAt,
+            assignedTableId: _assignedTableId,
+            assignedTableIds: _assignedTableIds,
+            ...rest
+          } = entry;
+          return {
+            ...rest,
+            status: "WAITING" as const,
+            updatedAt: occurredAt,
+          };
+        }),
+        reservations: state.reservations.map((reservation) => {
+          if (reservation.id !== linkedReservation?.id) return reservation;
+          const {
+            seatedAt: _seatedAt,
+            tableIds: _tableIds,
+            ...rest
+          } = reservation;
+          return {
+            ...rest,
+            status: reservation.arrivedAt ? ("ARRIVED" as const) : ("CONFIRMED" as const),
+            updatedAt: occurredAt,
+          };
+        }),
+        events: [...correctionEvents, ...state.events],
+      },
+      occurredAt,
+    ),
+  };
+}
+
 export type QueueInput = Pick<
   QueueEntry,
   "partyName" | "partySize" | "promisedWaitMinutes"
@@ -222,8 +389,26 @@ export function setQueueStatus(
 
 export interface TableRecommendation {
   tableId: string;
+  tableIds: string[];
+  combined: boolean;
+  capacity: number;
   score: number;
   reason: string;
+}
+
+function reservationConflictsWithTable(
+  state: DemoState,
+  tableId: string,
+  now: Date,
+) {
+  return state.reservations.some(
+    (reservation) =>
+      (reservation.tableId === tableId ||
+        reservation.tableIds?.includes(tableId)) &&
+      ["CONFIRMED", "ARRIVED"].includes(reservation.status) &&
+      Math.abs(Date.parse(reservation.scheduledAt) - now.getTime()) <
+        90 * 60_000,
+  );
 }
 
 export function recommendTables(
@@ -231,25 +416,17 @@ export function recommendTables(
   entry: Pick<QueueEntry, "partySize" | "preferredZone">,
   now = new Date(),
 ) {
-  return state.tables
-    .filter(
-      (table) =>
-        table.active &&
-        table.status === "AVAILABLE" &&
-        table.capacity >= entry.partySize,
-    )
+  const available = state.tables.filter(
+    (table) => table.active && table.status === "AVAILABLE",
+  );
+  const singleRecommendations = available
+    .filter((table) => table.capacity >= entry.partySize)
     .map<TableRecommendation>((table) => {
       const capacityWaste = table.capacity - entry.partySize;
       const zoneMatch = Boolean(
         entry.preferredZone && table.zone === entry.preferredZone,
       );
-      const conflict = state.reservations.some(
-        (reservation) =>
-          reservation.tableId === table.id &&
-          ["CONFIRMED", "ARRIVED"].includes(reservation.status) &&
-          Math.abs(Date.parse(reservation.scheduledAt) - now.getTime()) <
-            90 * 60_000,
-      );
+      const conflict = reservationConflictsWithTable(state, table.id, now);
       const idleMinutes = Math.max(
         0,
         Math.floor(
@@ -268,16 +445,208 @@ export function recommendTables(
       if (zoneMatch) reasons.push(`matches ${table.zone}`);
       if (conflict) reasons.push("has a near-term reservation conflict");
       else reasons.push(`idle for ${idleMinutes} min`);
-      return { tableId: table.id, score, reason: reasons.join(" · ") };
-    })
+      return {
+        tableId: table.id,
+        tableIds: [table.id],
+        combined: false,
+        capacity: table.capacity,
+        score,
+        reason: reasons.join(" · "),
+      };
+    });
+
+  const combinedRecommendations: TableRecommendation[] = [];
+  for (let first = 0; first < available.length; first += 1) {
+    for (let second = first + 1; second < available.length; second += 1) {
+      const tables = [available[first], available[second]];
+      if (tables[0].zone !== tables[1].zone) continue;
+      const capacity = tables[0].capacity + tables[1].capacity;
+      if (capacity < entry.partySize || entry.partySize < 3) continue;
+      if (
+        tables.some((table) =>
+          reservationConflictsWithTable(state, table.id, now),
+        )
+      )
+        continue;
+      const capacityWaste = capacity - entry.partySize;
+      const zoneMatch = Boolean(
+        entry.preferredZone && tables[0].zone === entry.preferredZone,
+      );
+      const idleMinutes = Math.min(
+        ...tables.map((table) =>
+          Math.max(
+            0,
+            Math.floor(
+              (now.getTime() - Date.parse(table.statusChangedAt)) / 60_000,
+            ),
+          ),
+        ),
+      );
+      combinedRecommendations.push({
+        tableId: tables[0].id,
+        tableIds: tables.map((table) => table.id),
+        combined: true,
+        capacity,
+        score:
+          82 -
+          capacityWaste * 9 +
+          (zoneMatch ? 18 : 0) +
+          Math.min(idleMinutes, 20),
+        reason: `combine ${tables.map((table) => table.label).join(" + ")} in ${tables[0].zone} · ${capacityWaste} spare ${capacityWaste === 1 ? "seat" : "seats"}`,
+      });
+    }
+  }
+
+  return [...singleRecommendations, ...combinedRecommendations]
     .filter((recommendation) => recommendation.score > 0)
     .sort((a, b) => b.score - a.score);
+}
+
+export function estimateWaitForParty(
+  state: DemoState,
+  partySize: number,
+  now = new Date(),
+) {
+  if (!Number.isFinite(partySize) || partySize < 1) return 0;
+  if (recommendTables(state, { partySize }, now).length) return 0;
+
+  const completedDurations = state.sessions
+    .filter((session) => session.clearedAt)
+    .map(
+      (session) =>
+        (Date.parse(session.clearedAt!) - Date.parse(session.seatedAt)) /
+        60_000,
+    )
+    .filter((minutes) => minutes > 0 && minutes < 360);
+  const averageDiningMinutes = completedDurations.length
+    ? completedDurations.reduce((sum, minutes) => sum + minutes, 0) /
+      completedDurations.length
+    : 60;
+
+  const estimateTable = (table: DemoState["tables"][number]) => {
+    const elapsed = Math.max(
+      0,
+      (now.getTime() - Date.parse(table.statusChangedAt)) / 60_000,
+    );
+    if (table.status === "AVAILABLE") return 0;
+    if (table.status === "CLEANING")
+      return Math.max(2, state.restaurant.cleaningTargetMinutes - elapsed);
+    if (table.status === "OCCUPIED")
+      return Math.max(
+        5,
+        averageDiningMinutes -
+          elapsed +
+          state.restaurant.cleaningTargetMinutes,
+      );
+    if (table.status === "HELD") return 15;
+    if (table.status === "RESERVED") return 30;
+    return Number.POSITIVE_INFINITY;
+  };
+
+  const active = state.tables.filter(
+    (table) => table.active && table.status !== "OUT_OF_SERVICE",
+  );
+  const candidateMinutes: number[] = [];
+  active.forEach((table) => {
+    if (table.capacity >= partySize) candidateMinutes.push(estimateTable(table));
+  });
+  for (let first = 0; first < active.length; first += 1) {
+    for (let second = first + 1; second < active.length; second += 1) {
+      if (
+        active[first].zone === active[second].zone &&
+        active[first].capacity + active[second].capacity >= partySize
+      ) {
+        candidateMinutes.push(
+          Math.max(estimateTable(active[first]), estimateTable(active[second])),
+        );
+      }
+    }
+  }
+
+  const soonest = Math.min(...candidateMinutes);
+  if (!Number.isFinite(soonest)) return 120;
+  const activeQueue = state.queue.filter((entry) =>
+    ["WAITING", "CALLED"].includes(entry.status),
+  ).length;
+  const throughputMinutes = Math.max(
+    4,
+    averageDiningMinutes / Math.max(active.length, 1),
+  );
+  const estimate = soonest + Math.max(0, activeQueue - 1) * throughputMinutes;
+  return Math.min(240, Math.max(0, Math.ceil(estimate / 5) * 5));
+}
+
+function normalizeTableIds(tableIdOrIds: string | string[]) {
+  return [...new Set(Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds])];
+}
+
+function allocatePartyAcrossTables(
+  tables: DemoState["tables"],
+  partySize: number,
+) {
+  if (partySize < tables.length) return null;
+  let remaining = partySize;
+  return tables.map((table, index) => {
+    const tablesAfter = tables.length - index - 1;
+    const allocation = Math.min(table.capacity, remaining - tablesAfter);
+    remaining -= allocation;
+    return allocation;
+  });
+}
+
+function seatTables(
+  state: DemoState,
+  tableIdOrIds: string | string[],
+  partySize: number,
+  occurredAt: string,
+  actor: string,
+): DomainResult {
+  const tableIds = normalizeTableIds(tableIdOrIds);
+  const tables = tableIds
+    .map((id) => state.tables.find((table) => table.id === id && table.active))
+    .filter((table): table is DemoState["tables"][number] => Boolean(table));
+  if (tables.length !== tableIds.length)
+    return { ok: false, error: "One or more selected tables were not found." };
+  if (tables.some((table) => table.status !== "AVAILABLE"))
+    return { ok: false, error: "Every selected table must be available." };
+  if (
+    tables.length > 1 &&
+    !tables.every((table) => table.zone === tables[0].zone)
+  )
+    return {
+      ok: false,
+      error: "Combined tables must be in the same floor zone.",
+    };
+  if (tables.reduce((sum, table) => sum + table.capacity, 0) < partySize)
+    return { ok: false, error: "The selected table capacity is too small." };
+
+  const allocations = allocatePartyAcrossTables(tables, partySize);
+  if (!allocations)
+    return {
+      ok: false,
+      error: "The party is too small to occupy every selected table.",
+    };
+
+  let nextState = state;
+  for (let index = 0; index < tables.length; index += 1) {
+    const transitioned = transitionTable(
+      nextState,
+      tables[index].id,
+      "OCCUPIED",
+      occurredAt,
+      actor,
+      allocations[index],
+    );
+    if (!transitioned.ok) return transitioned;
+    nextState = transitioned.state;
+  }
+  return { ok: true, state: nextState };
 }
 
 export function seatQueueEntry(
   state: DemoState,
   entryId: string,
-  tableId: string,
+  tableIdOrIds: string | string[],
   occurredAt: string,
   actor: string,
 ): DomainResult {
@@ -288,32 +657,29 @@ export function seatQueueEntry(
       error: "Only a waiting or called party can be seated.",
     };
   }
-  const table = state.tables.find((item) => item.id === tableId && item.active);
-  if (!table || table.status !== "AVAILABLE")
-    return { ok: false, error: "Choose an available table." };
-  if (entry.partySize > table.capacity)
-    return { ok: false, error: `${table.label} is too small for this party.` };
-  const transitioned = transitionTable(
+  const tableIds = normalizeTableIds(tableIdOrIds);
+  const seated = seatTables(
     state,
-    tableId,
-    "OCCUPIED",
+    tableIds,
+    entry.partySize,
     occurredAt,
     actor,
-    entry.partySize,
   );
-  if (!transitioned.ok) return transitioned;
+  if (!seated.ok) return seated;
   return {
     ok: true,
     state: touch(
       {
-        ...transitioned.state,
-        queue: transitioned.state.queue.map((item) =>
+        ...seated.state,
+        queue: seated.state.queue.map((item) =>
           item.id === entryId
             ? {
                 ...item,
                 status: "SEATED",
                 seatedAt: occurredAt,
-                assignedTableId: tableId,
+                assignedTableId: tableIds[0],
+                assignedTableIds:
+                  tableIds.length > 1 ? tableIds : undefined,
                 updatedAt: occurredAt,
               }
             : item,
@@ -496,7 +862,7 @@ export function setReservationStatus(
 export function seatReservation(
   state: DemoState,
   reservationId: string,
-  tableId: string,
+  tableIdOrIds: string | string[],
   occurredAt: string,
   actor: string,
 ): DomainResult {
@@ -505,26 +871,27 @@ export function seatReservation(
   );
   if (!reservation || !["CONFIRMED", "ARRIVED"].includes(reservation.status))
     return { ok: false, error: "This reservation cannot be seated." };
-  const transitioned = transitionTable(
+  const tableIds = normalizeTableIds(tableIdOrIds);
+  const seated = seatTables(
     state,
-    tableId,
-    "OCCUPIED",
+    tableIds,
+    reservation.partySize,
     occurredAt,
     actor,
-    reservation.partySize,
   );
-  if (!transitioned.ok) return transitioned;
+  if (!seated.ok) return seated;
   return {
     ok: true,
     state: touch(
       {
-        ...transitioned.state,
-        reservations: transitioned.state.reservations.map((item) =>
+        ...seated.state,
+        reservations: seated.state.reservations.map((item) =>
           item.id === reservationId
             ? {
                 ...item,
                 status: "SEATED",
-                tableId,
+                tableId: tableIds[0],
+                tableIds: tableIds.length > 1 ? tableIds : undefined,
                 seatedAt: occurredAt,
                 updatedAt: occurredAt,
               }
