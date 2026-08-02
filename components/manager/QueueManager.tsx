@@ -605,7 +605,12 @@ export function QueueManager() {
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => demo.reorderQueue(entry.id, -1)}
+                          onClick={() =>
+                            handle(
+                              demo.reorderQueue(entry.id, -1),
+                              "Queue order updated.",
+                            )
+                          }
                           disabled={index === 0}
                           className="grid h-10 w-10 place-items-center rounded-lg border border-stone-200 text-stone-500 disabled:opacity-30"
                           aria-label={`Move ${entry.partyName} up`}
@@ -614,7 +619,12 @@ export function QueueManager() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => demo.reorderQueue(entry.id, 1)}
+                          onClick={() =>
+                            handle(
+                              demo.reorderQueue(entry.id, 1),
+                              "Queue order updated.",
+                            )
+                          }
                           disabled={index === activeQueue.length - 1}
                           className="grid h-10 w-10 place-items-center rounded-lg border border-stone-200 text-stone-500 disabled:opacity-30"
                           aria-label={`Move ${entry.partyName} down`}
