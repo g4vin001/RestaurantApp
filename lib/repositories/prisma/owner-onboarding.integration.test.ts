@@ -6,6 +6,7 @@ import { createOwnedRestaurant } from "./owner-onboarding";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
+const ownerId = "11111111-1111-4111-8111-111111111111";
 
 describeWithDatabase("owner onboarding repository", () => {
   let pool: Pool;
@@ -16,14 +17,24 @@ describeWithDatabase("owner onboarding repository", () => {
     client = new PrismaClient({ adapter: new PrismaPg(pool) });
   });
 
+  async function cleanOwnerFixture() {
+    const memberships = await client.restaurantMembership.findMany({
+      where: { profileId: ownerId },
+      select: { restaurantId: true },
+    });
+    await client.restaurant.deleteMany({
+      where: {
+        id: { in: memberships.map((membership) => membership.restaurantId) },
+      },
+    });
+    await client.profile.deleteMany({ where: { id: ownerId } });
+  }
+
   beforeEach(async () => {
-    await client.floorPlan.deleteMany();
-    await client.restaurantMembership.deleteMany();
-    await client.restaurant.deleteMany();
-    await client.profile.deleteMany();
+    await cleanOwnerFixture();
     await client.profile.create({
       data: {
-        id: "11111111-1111-4111-8111-111111111111",
+        id: ownerId,
         email: "owner@example.com",
         displayName: "Owner",
       },
@@ -31,19 +42,20 @@ describeWithDatabase("owner onboarding repository", () => {
   });
 
   afterAll(async () => {
+    await cleanOwnerFixture();
     await client?.$disconnect();
     await pool?.end();
   });
 
   it("creates one restaurant, OWNER membership, and initial floor", async () => {
     const first = await createOwnedRestaurant(client, {
-      profileId: "11111111-1111-4111-8111-111111111111",
+      profileId: ownerId,
       name: "Salu-Salo Kitchen",
       location: "Quezon City",
       slug: "salu-salo-kitchen-test",
     });
     const second = await createOwnedRestaurant(client, {
-      profileId: "11111111-1111-4111-8111-111111111111",
+      profileId: ownerId,
       name: "Ignored duplicate",
       location: "Makati",
       slug: "ignored-duplicate-test",
@@ -57,7 +69,7 @@ describeWithDatabase("owner onboarding repository", () => {
     expect(
       await client.restaurantMembership.count({
         where: {
-          profileId: "11111111-1111-4111-8111-111111111111",
+          profileId: ownerId,
           role: "OWNER",
           active: true,
         },
@@ -68,6 +80,10 @@ describeWithDatabase("owner onboarding repository", () => {
         where: { restaurantId: first.restaurantId },
       }),
     ).toBe(1);
-    expect(await client.restaurant.count()).toBe(1);
+    expect(
+      await client.restaurant.count({
+        where: { memberships: { some: { profileId: ownerId } } },
+      }),
+    ).toBe(1);
   });
 });
