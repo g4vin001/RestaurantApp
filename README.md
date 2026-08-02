@@ -63,7 +63,7 @@ Reviewers can run the manager prototype without an authentication account by add
 NEXT_PUBLIC_HALINA_DEMO_MODE=true
 ```
 
-Demo mode is visibly labeled in the interface. Table transitions, sessions, and events persist in localStorage, synchronize across browser tabs, and can be reset from the manager sidebar. When the switch is absent or false, the existing Supabase authentication and role guards remain enforced.
+Demo mode is visibly labeled in the interface. Table transitions, sessions, and events persist in localStorage, synchronize across browser tabs, and can be reset from the manager sidebar. When the switch is absent or false, Supabase authentication and restaurant-membership authorization are enforced.
 
 To enter the manager demo, start the app and open [`/manager`](http://localhost:3000/manager). No manager account is required while explicit demo mode is enabled. The public customer experience remains available at [`/`](http://localhost:3000/).
 
@@ -71,7 +71,9 @@ To enter the manager demo, start the app and open [`/manager`](http://localhost:
 
 The high-fidelity manager prototype includes a responsive manager shell, a versioned floor-plan editor, a published Live floor, queue and reservation workflows, staff records, restaurant settings, and event-derived analytics. Manager actions persist in localStorage, synchronize across tabs, and safely update the public customer view.
 
-Operational records are still browser-backed prototype data. Supabase provides authentication. The Prisma schema now includes the tenant-aware restaurant, membership, floor, table, session, queue, reservation, event, and staff foundation, but the application has not switched its operations repository to PostgreSQL yet.
+The application now has one explicit operations-repository boundary. Demo mode uses deterministic browser persistence, while authenticated non-demo manager routes load a canonical, membership-scoped snapshot from PostgreSQL through Prisma. The database snapshot covers restaurant settings, floors and published versions, tables, recent sessions and events, queue entries, reservations, and staff records.
+
+Database-backed commands are deliberately not enabled yet. Non-demo screens identify themselves as a database snapshot and return a clear error instead of silently saving operational changes in the browser. Transactional floor publishing and table, queue, and reservation commands are the next phase. The public customer pages continue to use the isolated demo projection until the privacy-safe database projection is implemented.
 
 The reviewed foundation migration is stored in `prisma/migrations/20260802170000_shared_data_foundation`. It preserves the legacy profile fields, creates owner memberships for existing manager profiles with a restaurant name, and does not grant manager access to legacy employee profiles. It is intentionally not applied automatically: review it and validate it against a disposable or development database through the direct/session connection before using it on shared data.
 
@@ -102,9 +104,9 @@ There is intentionally no `/employee` route. Staff are managed as records under 
 
 ## Known limitations
 
-- The operational repository is local to the browser and is not yet shared across devices.
+- Authenticated manager reads now come from PostgreSQL, but operational writes are still pending and the snapshot does not yet subscribe to realtime changes.
 - The shared-data Prisma migration is prepared but has not been applied to Supabase.
-- Membership authorization and the PostgreSQL operations repository are the next implementation slice.
+- The public customer view remains on the isolated demo projection until the database-backed privacy-safe projection is implemented.
 - `npm audit --omit=dev` currently reports three high advisories inherited through Next 15's bundled PostCSS/Sharp dependency path. npm only proposes a breaking downgrade to Next 9, so that automated fix is intentionally not applied; recheck when a compatible Next 15 patch is available.
 - The floor editor is intentionally limited to tablet-landscape and desktop widths.
 - No employee application, POS, payments, ordering, payroll, or invented revenue analytics are part of this milestone.
