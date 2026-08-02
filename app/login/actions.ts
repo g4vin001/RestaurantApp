@@ -1,10 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
+import { ensureProfile } from "@/lib/auth/profile";
 import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { setFlash } from "@/lib/flash";
-import { prisma } from "@/lib/prisma";
-import { ROLE_HOME } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 
 export async function login(formData: FormData) {
@@ -27,10 +27,9 @@ export async function login(formData: FormData) {
     );
   }
 
-  const profile = await prisma.profile.findUnique({
-    where: { id: data.user.id },
-  });
-  redirect(redirectTo || ROLE_HOME[profile?.role ?? "CUSTOMER"]);
+  await ensureProfile(data.user);
+  const membership = await getActiveManagerMembership(data.user.id);
+  redirect(redirectTo || (membership ? "/manager" : "/"));
 }
 
 export async function signup(formData: FormData) {
@@ -38,15 +37,19 @@ export async function signup(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const confirmPassword = formData.get("confirmPassword") as string;
-  const role = "CUSTOMER" as const;
-
   if (password !== confirmPassword) {
     await setFlash("error", "Passwords do not match.");
     redirect("/login");
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { display_name: displayName.trim() },
+    },
+  });
 
   if (error) {
     await setFlash("error", error.message);
@@ -62,15 +65,7 @@ export async function signup(formData: FormData) {
     redirect("/login");
   }
 
-  await prisma.profile.create({
-    data: {
-      id: data.user.id,
-      email,
-      displayName,
-      role,
-      restaurant: null,
-    },
-  });
+  await ensureProfile(data.user, displayName);
 
   await setFlash("message", "Check your email to confirm your account.");
   redirect("/login");
