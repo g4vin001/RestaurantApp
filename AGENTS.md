@@ -1,4 +1,4 @@
-# Halina: Shared-Data MVP Instructions for Codex
+# Halina: Shared-Data and Operations Usability MVP Instructions for Codex
 
 This AGENTS.md is the repository-level source of truth. Read it completely before planning or editing. It applies to the entire repository unless a more specific AGENTS.md exists deeper in the tree.
 
@@ -16,7 +16,7 @@ The next milestone is not another visual redesign. It is reliable shared operati
 - the deterministic browser demo remains available as an explicit, separate mode
 - the release branch, public deployment, and automated tests are brought into a clean state
 
-The manager workspace remains the center of the product. Staff records belong inside Manager > Team. Do not build a separate employee application or public employee login. If staff login is ever requested later, add a restricted invitation- or PIN-based operations view rather than a second copy of the manager product.
+The manager workspace remains the center of the product. Staff records belong inside Manager > Team. Do not build a separate employee application or public employee login. The next access milestone is a restricted invitation- or PIN-based operations view for approved staff, limited to Live Floor and Queue actions; it must reuse the manager domain commands rather than duplicate the manager product.
 
 Do not add POS, payments, ordering, delivery, inventory, payroll, accounting, or invented revenue statistics unless the user explicitly expands the scope.
 
@@ -27,14 +27,16 @@ Verify current GitHub and deployment state at the start of every task because br
 At the time of this update:
 
 - the complete high-fidelity implementation is on agent/manager-operations-prototype
+- the branch now includes auditable 15-minute table-action correction, combined same-zone table seating, a rush-mode queue form, explicit non-SMS "Mark called" wording, and party-size-aware wait suggestions
 - draft PR #1 targets main and remains open
 - main may still contain the older application skeleton even though it has the same AGENTS.md
 - the production deployment at https://halina-self.vercel.app has been observed working
 - Prisma client generation is already handled by the package.json postinstall script
 - Prisma generated output remains ignored, as it should
 - the app has lint, typecheck, Vitest, and production-build commands
-- the current operational repository is still browser-backed
-- prisma/schema.prisma still models only Profile
+- the current manager UI is still browser-backed through DemoProvider
+- prisma/schema.prisma and the shared-data migration now contain the restaurant, membership, staff, floor, table, session, event, queue, and reservation foundation
+- secure owner onboarding and membership-based manager guards exist, but normal manager operations are not yet connected to PrismaOperationsRepository
 - app/employee/page.tsx is a static legacy placeholder
 
 Do not recreate completed prototype features from stale main. If implementation begins from main and the manager prototype is absent, stop and report the branch mismatch. Continue from the implementation branch or bring it into the active branch only through a non-destructive workflow authorized by the user.
@@ -67,6 +69,11 @@ Treat the following as implemented unless code inspection proves otherwise:
 - safe internal login redirects
 - Prisma generation during clean installation
 - unit coverage for existing domain workflows
+- auditable correction of a recent mistaken table transition, including linked queue/reservation rollback
+- two-table same-zone recommendations and combined seating for larger parties
+- queue rush mode with collapsed optional fields
+- party-size-aware promised-wait suggestions
+- explicit wording that Mark called does not send SMS
 
 Preserve working UX, domain rules, analytics calculations, demo fixtures, and routes. Refactor behind repository boundaries where necessary, but do not replace the manager interface wholesale.
 
@@ -98,6 +105,11 @@ Before assuming a completed behavior is correct, perform a brief audit and run i
 - Browser-only BroadcastChannel is not real cross-device synchronization.
 - No browser end-to-end suite covers the defining editor-to-operations workflow.
 - Network, authorization, stale-data, transaction-conflict, and reconnect behavior require production-grade states.
+- Restaurant hours still use one daily opening and closing time rather than weekday schedules, split shifts, overnight service, and exception dates.
+- Restricted staff operational access is not implemented; managers still carry the full data-entry burden.
+- Combined-table assignments work in demo operations, but the production schema and repository must persist the full table group rather than only one assigned table.
+- Wait suggestions remain advisory until they are calibrated against persisted sessions, reservation pressure, and cleaning progress.
+- Mobile rush operation needs browser verification on common restaurant tablets and phones.
 
 ## 5. Non-negotiable product structure
 
@@ -141,10 +153,64 @@ Team is a manager-owned staff directory. For this milestone:
 - staff do not self-register
 - do not create a separate employee dashboard
 - remove the legacy /employee page and all prominent links to it after confirming no required route depends on it
+- managers may invite or enable selected staff for restricted operations access
+- restricted staff access exposes Live Floor and Queue only, with explicit permission checks for status changes, seating, queue resolution, and corrections
+- use RestaurantMembership plus expiring single-use invitations, or a securely hashed and rate-limited per-staff PIN where an invitation account is intentionally unnecessary
+- record the acting membership on operational events
 
-If authenticated staff access is later requested, implement it through RestaurantMembership and invitations, with least-privilege permissions and a restricted operational route.
+Authenticated staff access must use least-privilege permissions and a restricted operations route. It must not expose analytics, floor editing, Team administration, restaurant settings, owner onboarding, or tenant switching unless separately authorized.
 
-## 6. Target architecture
+## 6. Busy-shift usability requirements
+
+Preserve and finish the operational improvements already started on the prototype branch.
+
+### Correction and audit
+
+- Live Floor must offer Correct last action only for the latest matching transition and only within 15 minutes.
+- Require a human-readable reason and record it in audit history.
+- A mistaken seating correction must remove the false dining session and restore a linked queue party or reservation.
+- Combined seating correction must revert the whole linked table group atomically; never leave half of a group occupied.
+- Production correction commands require membership authorization, an idempotency key, optimistic concurrency checks, and one database transaction.
+- Do not offer arbitrary history rewriting. Older mistakes require a deliberate new status change or manager adjustment workflow.
+
+### Rush mode
+
+- Keep Rush mode optional and reversible.
+- In Rush mode, expose party name, party size, suggested wait, Mark called, and Seat as the primary touch targets.
+- Collapse contact, zone preference, notes, reordering, editing, cancellation, and no-show controls without removing access to them.
+- Use large touch targets, clear confirmation feedback, and a direct Floor/Queue switch.
+- Never discard optional values when Rush mode is toggled.
+
+### Wait estimates
+
+- Suggestions must be party-size-specific.
+- Consider an immediately available fitting table or same-zone pair, active queue pressure, elapsed dining time, historical dining duration, cleaning target/progress, and near-term reservation conflicts.
+- Show the suggestion as editable advisory guidance, not a guarantee.
+- Explain when the result is coarse, stale, or missing enough history.
+- Measure promised-versus-actual wait so later calibration is evidence-based.
+
+### Combined tables
+
+- Recommend at most a same-zone pair in the initial MVP unless the floor model gains explicit adjacency.
+- Show every table label, combined capacity, spare seats, zone, and reservation risk before confirmation.
+- Seating must occupy every selected table and create one linked party assignment while retaining per-table sessions/events for utilization analytics.
+- Clearing, moving, correcting, and completing the party must keep the table group consistent.
+- Persist the group in production with a join model or equivalent normalized relation; do not encode it as a comma-separated string.
+
+### Communication wording
+
+- Mark called changes operational status only.
+- Never imply that SMS, email, or push notification was sent unless a configured provider confirms delivery.
+- If messaging is added later, expose Pending, Delivered, and Failed outcomes separately from queue status.
+
+### Schedules and mobile operation
+
+- Replace the single daily hour pair with weekday schedules, closed days, split shifts, overnight ranges, and dated exceptions or holidays.
+- Use Asia/Manila consistently and test ranges that cross midnight.
+- Preserve the Live Floor list view as the phone fallback; the visual editor may remain tablet-landscape/desktop only.
+- Verify queue and floor operations at 360 px phone width and common tablet widths with no hidden primary action.
+
+## 7. Target architecture
 
 Keep the domain layer independent from storage and React.
 
@@ -182,7 +248,7 @@ Preferred dependency direction:
 
 Do not let route components mutate database rows directly. Do not put mutable singleton state in server modules.
 
-## 7. Required Prisma/domain model
+## 8. Required Prisma/domain model
 
 Adapt names to the existing conventions, but preserve these concepts.
 
@@ -367,7 +433,7 @@ At minimum:
 
 Use database constraints where practical, but keep domain validation for useful user-facing feedback.
 
-## 8. Secure manager onboarding and authorization
+## 9. Secure manager onboarding and authorization
 
 Do not restore a public role selector.
 
@@ -396,7 +462,7 @@ Use Supabase Row Level Security or equivalent defense in depth if client-side Su
 
 Profile creation must be idempotent. Redirect targets must remain internal and validated.
 
-## 9. Transaction-safe application commands
+## 10. Transaction-safe application commands
 
 Preserve current domain state rules. Move these commands behind authenticated server boundaries and database transactions.
 
@@ -455,7 +521,7 @@ Scope all changes to the active restaurant and record the acting manager where u
 
 Use idempotency or command IDs for mutations that may be retried after a network interruption. Use optimistic UI only when rollback and failure feedback are implemented.
 
-## 10. Real-time multi-device synchronization
+## 11. Real-time multi-device synchronization
 
 After database persistence works correctly without subscriptions, add real-time updates.
 
@@ -480,7 +546,7 @@ For conflicting manager actions, the server result wins. Display a clear message
 
 Avoid subscribing every screen to every raw table. Use a small number of restaurant-scoped streams or a server-created public projection appropriate to the data volume and privacy model.
 
-## 11. Customer/manager consistency
+## 12. Customer/manager consistency
 
 The public restaurant page must derive from the same database-backed operational state while exposing only safe aggregates.
 
@@ -506,7 +572,7 @@ Do not introduce machine learning until sufficient real production data exists a
 
 Manager changes must become visible to a customer on another device within a reasonable real-time interval. Customer clients must never receive raw queue entries, reservations, session notes, contacts, or staff data.
 
-## 12. Analytics after persistence
+## 13. Analytics after persistence
 
 Reuse the existing pure analytics logic where possible. Change the data source from demo events to tenant-scoped database records.
 
@@ -540,7 +606,7 @@ Requirements:
 
 Precomputed summaries are optional only after correctness is established and measurement shows raw queries are too slow.
 
-## 13. Demo-to-production separation
+## 14. Demo-to-production separation
 
 Do not silently reinterpret existing localStorage data as production truth.
 
@@ -554,7 +620,7 @@ Do not silently reinterpret existing localStorage data as production truth.
 
 Keep a single feature/configuration boundary that chooses the repository. Avoid sprinkling demo checks throughout page components.
 
-## 14. Implementation order
+## 15. Implementation order
 
 Keep the app runnable after every phase. Complete and verify one vertical slice before beginning the next.
 
@@ -677,7 +743,7 @@ Test desktop manager operations, tablet layouts, and mobile public pages. The fu
 6. Verify the intended Vercel deployment after authorization.
 7. Merge the implementation branch only after checks and explicit authorization.
 
-## 15. Testing requirements
+## 16. Testing requirements
 
 Before handing off any implementation, run:
 
@@ -715,7 +781,7 @@ Minimum new unit or integration coverage:
 
 Tests must prove observable behavior. Do not weaken assertions, bypass authorization, or replace database behavior with mocks merely to make a failing test green.
 
-## 16. UX and error behavior
+## 17. UX and error behavior
 
 Preserve the existing cream/stone and emerald visual direction.
 
@@ -745,7 +811,7 @@ Optimistic interactions must:
 
 Use status text/icons in addition to color. Preserve Philippine locale and Asia/Manila time handling.
 
-## 17. Engineering and safety rules
+## 18. Engineering and safety rules
 
 - Preserve Next.js 15, React 19, Tailwind CSS 4, Supabase SSR, Prisma 7, strict TypeScript, Vitest, and react-rnd unless a verified incompatibility requires change.
 - Keep dependencies modest and justify new infrastructure.
@@ -767,12 +833,13 @@ Use status text/icons in addition to color. Preserve Philippine locale and Asia/
 
 When blocked by unavailable credentials or hosting access, finish all safe source work, document the exact required variables or external step, and stop without inventing values.
 
-## 18. Definition of done for the shared-data MVP
+## 19. Definition of done for the shared-data MVP
 
 This milestone is complete only when:
 
 - the high-fidelity manager prototype is preserved
 - the legacy employee route and public employee login path are gone
+- approved staff can use a restricted invitation- or PIN-based operations surface without a separate employee application
 - a legitimate owner can create a new restaurant securely
 - managers access restaurants through verified memberships
 - restaurant operations persist in PostgreSQL
@@ -781,6 +848,8 @@ This milestone is complete only when:
 - durable table identities survive floor versions
 - table events and dining sessions persist
 - queue and reservation workflows are transaction-safe
+- table corrections and combined-table lifecycle changes are transaction-safe and auditable
+- weekday, overnight, split-shift, and exception schedules are supported
 - two devices cannot double-seat a party or table
 - manager devices receive real-time updates
 - the public customer view receives fresh privacy-safe aggregates
@@ -794,7 +863,7 @@ This milestone is complete only when:
 - the intended deployment is healthy after an authorized release
 - the implementation branch is merged into main after explicit authorization
 
-## 19. Codex working behavior
+## 20. Codex working behavior
 
 When asked to implement:
 
@@ -809,6 +878,7 @@ When asked to implement:
 
 At handoff, report:
 
+- which busy-shift improvements are fully implemented and which remain advisory or demo-only
 - what is now stored in the database
 - which operations are transactional
 - which views synchronize across devices
