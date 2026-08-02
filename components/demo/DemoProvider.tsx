@@ -42,6 +42,10 @@ import type {
   TableStatus,
 } from "@/lib/domain/types";
 import { createDemoState } from "@/lib/demo/seed";
+import {
+  databaseWritePending,
+  type OperationsRepositoryMode,
+} from "@/lib/repositories/operations";
 
 const STORAGE_KEY = "halina:demo-state:v2";
 const LEGACY_STORAGE_KEY = "halina:demo-state:v1";
@@ -119,6 +123,7 @@ export function migrateDemoState(value: unknown): DemoState | null {
 }
 
 interface DemoContextValue {
+  mode: OperationsRepositoryMode;
   state: DemoState;
   hydrated: boolean;
   transitionTable: (
@@ -138,7 +143,7 @@ interface DemoContextValue {
     elements: FloorElement[],
   ) => CommandFeedback;
   restoreFloor: (planId: string, versionId: string) => CommandFeedback;
-  createFloor: (name: string) => string;
+  createFloor: (name: string) => string | null;
   addQueue: (input: QueueInput) => CommandFeedback;
   updateQueue: (entryId: string, input: QueueInput) => CommandFeedback;
   callQueue: (entryId: string) => CommandFeedback;
@@ -182,13 +187,23 @@ interface DemoContextValue {
 
 const DemoContext = createContext<DemoContextValue | null>(null);
 
-export function DemoProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, () =>
-    createDemoState(),
+export function OperationsProvider({
+  children,
+  repositoryMode,
+  initialState,
+}: {
+  children: ReactNode;
+  repositoryMode: OperationsRepositoryMode;
+  initialState?: DemoState;
+}) {
+  const [state, dispatch] = useReducer(
+    reducer,
+    initialState ?? createDemoState(),
   );
-  const [hydrated, setHydrated] = useState(false);
+  const [hydrated, setHydrated] = useState(repositoryMode === "database");
 
   useEffect(() => {
+    if (repositoryMode !== "demo") return;
     const stored =
       window.localStorage.getItem(STORAGE_KEY) ??
       window.localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -203,18 +218,19 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       }
     }
     setHydrated(true);
-  }, []);
+  }, [repositoryMode]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (repositoryMode !== "demo" || !hydrated) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     window.localStorage.removeItem(LEGACY_STORAGE_KEY);
     const channel = new BroadcastChannel(CHANNEL_NAME);
     channel.postMessage(state);
     channel.close();
-  }, [hydrated, state]);
+  }, [hydrated, repositoryMode, state]);
 
   useEffect(() => {
+    if (repositoryMode !== "demo") return;
     const channel = new BroadcastChannel(CHANNEL_NAME);
     channel.onmessage = (event: MessageEvent<DemoState>) => {
       const migrated = migrateDemoState(event.data);
@@ -223,7 +239,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       }
     };
     return () => channel.close();
-  }, [state.lastUpdatedAt]);
+  }, [repositoryMode, state.lastUpdatedAt]);
 
   const applyResult = useCallback(
     (result: {
@@ -232,6 +248,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       error?: string;
       errors?: string[];
     }) => {
+      if (repositoryMode === "database") return databaseWritePending();
       if (!result.ok || !result.state) {
         return {
           ok: false,
@@ -244,7 +261,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "REPLACE", state: result.state });
       return { ok: true } as const;
     },
-    [],
+    [repositoryMode],
   );
 
   const transitionTable = useCallback(
@@ -304,6 +321,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   );
   const createFloor = useCallback(
     (name: string) => {
+      if (repositoryMode === "database") return null;
       const occurredAt = new Date().toISOString();
       const id = `floor-${occurredAt}`;
       const plan: FloorPlan = {
@@ -330,7 +348,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       });
       return id;
     },
-    [state],
+    [repositoryMode, state],
   );
 
   const addQueue = useCallback(
@@ -367,6 +385,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   );
   const reorderQueue = useCallback(
     (entryId: string, direction: -1 | 1): CommandFeedback => {
+      if (repositoryMode === "database") return databaseWritePending();
       const active = state.queue.filter((entry) =>
         ["WAITING", "CALLED"].includes(entry.status),
       );
@@ -392,7 +411,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       });
       return { ok: true };
     },
-    [state],
+    [repositoryMode, state],
   );
 
   const addReservation = useCallback(
@@ -476,6 +495,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         | "closesAtHour"
       >,
     ): CommandFeedback => {
+      if (repositoryMode === "database") return databaseWritePending();
       const name = input.name.trim();
       const location = input.location.trim();
       if (!name || !location)
@@ -514,15 +534,20 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       });
       return { ok: true };
     },
-    [state],
+    [repositoryMode, state],
   );
   const reset = useCallback(
-    () => dispatch({ type: "RESET", state: createDemoState() }),
-    [],
+    () => {
+      if (repositoryMode === "demo") {
+        dispatch({ type: "RESET", state: createDemoState() });
+      }
+    },
+    [repositoryMode],
   );
 
   const value = useMemo<DemoContextValue>(
     () => ({
+      mode: repositoryMode,
       state,
       hydrated,
       transitionTable,
@@ -551,6 +576,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     }),
     [
       state,
+      repositoryMode,
       hydrated,
       transitionTable,
       correctTable,
@@ -577,6 +603,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   );
 
   return <DemoContext.Provider value={value}>{children}</DemoContext.Provider>;
+}
+
+export function DemoProvider({ children }: { children: ReactNode }) {
+  return (
+    <OperationsProvider repositoryMode="demo">{children}</OperationsProvider>
+  );
 }
 
 export function useDemo() {
