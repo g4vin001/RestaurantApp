@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { ManagerShell } from "@/components/manager/ManagerShell";
+import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import { prisma } from "@/lib/prisma";
-import { ROLE_HOME } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ManagerLayout({ children }: { children: React.ReactNode }) {
@@ -24,8 +24,12 @@ export default async function ManagerLayout({ children }: { children: React.Reac
 
   if (!user) redirect("/login?redirectTo=/manager");
 
-  const profile = await prisma.profile.findUnique({ where: { id: user.id } });
-  if (profile?.role !== "MANAGER") redirect(ROLE_HOME[profile?.role ?? "CUSTOMER"]);
+  const [profile, membership] = await Promise.all([
+    prisma.profile.findUnique({ where: { id: user.id } }),
+    getActiveManagerMembership(user.id),
+  ]);
+
+  if (!profile || !membership) redirect("/onboarding/restaurant");
 
   return (
     <div className="manager-app">
