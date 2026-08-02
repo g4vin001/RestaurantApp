@@ -4,6 +4,8 @@ import {
   addQueueEntry,
   addStaffMember,
   createReservation,
+  correctLastTableTransition,
+  estimateWaitForParty,
   recommendTables,
   removeStaffMember,
   seatQueueEntry,
@@ -180,4 +182,94 @@ describe("manager operation commands", () => {
       successful(removed).staff.some((item) => item.id === member!.id),
     ).toBe(false);
   });
+
+  it("corrects a recent mistaken seating without polluting session analytics", () => {
+    const state = createDemoState(now);
+    const seated = transitionTable(
+      state,
+      "table-02",
+      "OCCUPIED",
+      occurredAt,
+      "Manager",
+      2,
+    );
+    const corrected = correctLastTableTransition(
+      successful(seated),
+      "table-02",
+      "Tapped by mistake",
+      new Date(now.getTime() + 60_000).toISOString(),
+      "Manager",
+    );
+
+    expect(corrected.ok).toBe(true);
+    const correctedState = successful(corrected);
+    expect(
+      correctedState.tables.find((table) => table.id === "table-02")?.status,
+    ).toBe("AVAILABLE");
+    expect(
+      correctedState.sessions.some(
+        (session) =>
+          session.tableId === "table-02" &&
+          session.seatedAt === occurredAt,
+      ),
+    ).toBe(false);
+    expect(correctedState.events[0]?.note).toContain("Correction:");
+  });
+
+  it("recommends and seats a same-zone table combination for a large party", () => {
+    const state = createDemoState(now);
+    const prepared = {
+      ...state,
+      reservations: [],
+      tables: state.tables.map((table) =>
+        ["table-03", "table-04"].includes(table.id)
+          ? { ...table, status: "AVAILABLE" as const }
+          : table.id === "table-06"
+            ? { ...table, status: "OCCUPIED" as const }
+            : table,
+      ),
+    };
+    const added = addQueueEntry(
+      prepared,
+      {
+        partyName: "Large family",
+        partySize: 7,
+        promisedWaitMinutes: 20,
+      },
+      occurredAt,
+    );
+    const addedState = successful(added);
+    const entry = addedState.queue.at(-1)!;
+    const recommendation = recommendTables(
+      addedState,
+      { partySize: 7, preferredZone: "Main dining" },
+      now,
+    ).find((item) => item.combined);
+
+    expect(recommendation?.tableIds).toEqual(["table-03", "table-04"]);
+    const seated = seatQueueEntry(
+      addedState,
+      entry.id,
+      recommendation!.tableIds,
+      occurredAt,
+      "Manager",
+    );
+    const seatedState = successful(seated);
+    expect(
+      seatedState.tables
+        .filter((table) => recommendation!.tableIds.includes(table.id))
+        .every((table) => table.status === "OCCUPIED"),
+    ).toBe(true);
+    expect(
+      seatedState.queue.find((item) => item.id === entry.id)
+        ?.assignedTableIds,
+    ).toEqual(["table-03", "table-04"]);
+  });
+
+  it("returns a party-size-aware wait suggestion", () => {
+    const state = createDemoState(now);
+    expect(estimateWaitForParty(state, 2, now)).toBe(0);
+    expect(estimateWaitForParty(state, 20, now)).toBeGreaterThan(0);
+  });
+
 });
