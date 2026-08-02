@@ -43,7 +43,8 @@ function ShellContent({
   profileName: string;
 }) {
   const pathname = usePathname();
-  const { state, reset } = useDemo();
+  const { mode, state, reset } = useDemo();
+  const isDemoRepository = mode === "demo";
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -140,18 +141,22 @@ function ShellContent({
         {!collapsed && (
           <div className="mb-3 rounded-xl border border-amber-200/20 bg-amber-200/10 p-3 text-xs text-amber-50">
             <p className="font-semibold">
-              {demoMode ? "Demo mode" : "Prototype data"}
+              {isDemoRepository ? "Demo mode" : "Database mode"}
             </p>
             <p className="mt-1 leading-5 text-amber-100/80">
-              Changes stay in this browser and sync across open tabs.
+              {isDemoRepository
+                ? "Changes stay in this browser and sync across open tabs."
+                : "Shared restaurant data is loaded from PostgreSQL. Write actions are not enabled yet."}
             </p>
-            <button
-              type="button"
-              onClick={() => setResetOpen(true)}
-              className="mt-2 inline-flex items-center gap-1.5 font-semibold text-amber-100 hover:text-white"
-            >
-              <RotateCcw size={14} /> Reset demo data
-            </button>
+            {isDemoRepository && (
+              <button
+                type="button"
+                onClick={() => setResetOpen(true)}
+                className="mt-2 inline-flex items-center gap-1.5 font-semibold text-amber-100 hover:text-white"
+              >
+                <RotateCcw size={14} /> Reset demo data
+              </button>
+            )}
           </div>
         )}
         <div className="flex items-center gap-3 rounded-xl px-2 py-2 text-emerald-100">
@@ -215,12 +220,12 @@ function ShellContent({
             Updated {formatLastUpdated(state.lastUpdatedAt)}
           </div>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
-            {demoMode ? "Demo data" : "Prototype data"}
+            {isDemoRepository ? "Demo data" : "Database snapshot"}
           </span>
         </header>
         <main>{children}</main>
       </div>
-      {resetOpen && (
+      {isDemoRepository && resetOpen && (
         <div
           className="fixed inset-0 z-[60] grid place-items-center bg-stone-950/50 p-4"
           role="presentation"
