@@ -231,33 +231,31 @@ export function correctLastTableTransition(
             : item;
         }),
         sessions,
-        queue: state.queue.map((entry) => {
-          if (entry.id !== linkedQueue?.id) return entry;
-          const {
-            seatedAt: _seatedAt,
-            assignedTableId: _assignedTableId,
-            assignedTableIds: _assignedTableIds,
-            ...rest
-          } = entry;
-          return {
-            ...rest,
-            status: "WAITING" as const,
-            updatedAt: occurredAt,
-          };
-        }),
-        reservations: state.reservations.map((reservation) => {
-          if (reservation.id !== linkedReservation?.id) return reservation;
-          const {
-            seatedAt: _seatedAt,
-            tableIds: _tableIds,
-            ...rest
-          } = reservation;
-          return {
-            ...rest,
-            status: reservation.arrivedAt ? ("ARRIVED" as const) : ("CONFIRMED" as const),
-            updatedAt: occurredAt,
-          };
-        }),
+        queue: state.queue.map((entry) =>
+          entry.id === linkedQueue?.id
+            ? {
+                ...entry,
+                status: "WAITING" as const,
+                seatedAt: undefined,
+                assignedTableId: undefined,
+                assignedTableIds: undefined,
+                updatedAt: occurredAt,
+              }
+            : entry,
+        ),
+        reservations: state.reservations.map((reservation) =>
+          reservation.id === linkedReservation?.id
+            ? {
+                ...reservation,
+                status: reservation.arrivedAt
+                  ? ("ARRIVED" as const)
+                  : ("CONFIRMED" as const),
+                seatedAt: undefined,
+                tableIds: undefined,
+                updatedAt: occurredAt,
+              }
+            : reservation,
+        ),
         events: [...correctionEvents, ...state.events],
       },
       occurredAt,
