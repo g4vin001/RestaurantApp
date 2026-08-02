@@ -619,6 +619,14 @@ export function FloorPlanEditor() {
             disabled={!newFloorName.trim()}
             onClick={() => {
               const id = createFloor(newFloorName);
+              if (!id) {
+                notify(
+                  "error",
+                  "Creating a database-backed floor is not enabled yet.",
+                );
+                setNewFloorOpen(false);
+                return;
+              }
               setSelectedPlanId(id);
               setPlanName(newFloorName.trim());
               setHistory(createEditorHistory([]));
