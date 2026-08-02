@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
+import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
+import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 import { RestaurantSetupForm } from "./RestaurantSetupForm";
 
@@ -16,7 +18,13 @@ export default async function RestaurantOnboardingPage() {
 
   if (!user) redirect("/login?redirectTo=/onboarding/restaurant");
 
-  const membership = await getActiveManagerMembership(user.id);
+  let membership;
+  try {
+    membership = await getActiveManagerMembership(user.id);
+  } catch (error) {
+    const reference = reportDataError("onboarding-membership", error);
+    return <DatabaseUnavailable reference={reference} />;
+  }
   if (membership) redirect("/manager");
 
   return (

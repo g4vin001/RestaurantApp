@@ -5,7 +5,16 @@ import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import { ensureProfile } from "@/lib/auth/profile";
 import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { setFlash } from "@/lib/flash";
+import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
+
+async function reportLoginDataFailure(context: string, error: unknown) {
+  const reference = reportDataError(context, error);
+  await setFlash(
+    "error",
+    `Halina could not finish loading your account from the restaurant database. Please try again. Support reference: ${reference}`,
+  );
+}
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
@@ -27,8 +36,18 @@ export async function login(formData: FormData) {
     );
   }
 
-  await ensureProfile(data.user);
-  const membership = await getActiveManagerMembership(data.user.id);
+  let membership: Awaited<ReturnType<typeof getActiveManagerMembership>>;
+  try {
+    await ensureProfile(data.user);
+    membership = await getActiveManagerMembership(data.user.id);
+  } catch (databaseError) {
+    await reportLoginDataFailure("login-profile", databaseError);
+    redirect(
+      redirectTo
+        ? `/login?redirectTo=${encodeURIComponent(redirectTo)}`
+        : "/login",
+    );
+  }
   redirect(redirectTo || (membership ? "/manager" : "/"));
 }
 
@@ -65,7 +84,12 @@ export async function signup(formData: FormData) {
     redirect("/login");
   }
 
-  await ensureProfile(data.user, displayName);
+  try {
+    await ensureProfile(data.user, displayName);
+  } catch (databaseError) {
+    await reportLoginDataFailure("signup-profile", databaseError);
+    redirect("/login");
+  }
 
   await setFlash("message", "Check your email to confirm your account.");
   redirect("/login");

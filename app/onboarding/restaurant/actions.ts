@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/restaurant-onboarding";
 import { prisma } from "@/lib/prisma";
 import { createOwnedRestaurant } from "@/lib/repositories/prisma/owner-onboarding";
+import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 
 export type RestaurantSetupState = {
@@ -29,9 +30,8 @@ export async function createRestaurantForOwner(
 
   if (!user) redirect("/login?redirectTo=/onboarding/restaurant");
 
-  await ensureProfile(user);
-
   try {
+    await ensureProfile(user);
     await createOwnedRestaurant(prisma, {
       profileId: user.id,
       name: validation.input.name,
@@ -41,10 +41,10 @@ export async function createRestaurantForOwner(
         randomUUID().replaceAll("-", "").slice(0, 8),
       ),
     });
-  } catch {
+  } catch (error) {
+    const reference = reportDataError("owner-onboarding", error);
     return {
-      error:
-        "We could not create the restaurant right now. Please try again.",
+      error: `We could not create the restaurant right now. Please try again. Support reference: ${reference}`,
     };
   }
 
