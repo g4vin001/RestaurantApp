@@ -6,6 +6,7 @@ import {
   List,
   Map,
   UsersRound,
+  Undo2,
   Utensils,
   X,
 } from "lucide-react";
@@ -112,6 +113,7 @@ function TableDetailPanel({
   now,
   events,
   onChange,
+  onCorrect,
 }: {
   table: DiningTable;
   now: Date;
@@ -125,15 +127,20 @@ function TableDetailPanel({
     status: TableStatus,
     partySize?: number,
   ) => { ok: boolean; error?: string };
+  onCorrect: (reason: string) => { ok: boolean; error?: string };
 }) {
   const [seating, setSeating] = useState(false);
   const [partySize, setPartySize] = useState(Math.min(2, table.capacity));
   const [error, setError] = useState<string | null>(null);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState("");
 
   useEffect(() => {
     setSeating(false);
     setPartySize(Math.min(2, table.capacity));
     setError(null);
+    setCorrecting(false);
+    setCorrectionReason("");
   }, [table.id, table.capacity]);
 
   const run = (status: TableStatus) => {
@@ -152,6 +159,17 @@ function TableDetailPanel({
       return;
     }
     setSeating(false);
+    setError(null);
+  };
+
+  const confirmCorrection = () => {
+    const result = onCorrect(correctionReason);
+    if (!result.ok) {
+      setError(result.error ?? "That action could not be corrected.");
+      return;
+    }
+    setCorrecting(false);
+    setCorrectionReason("");
     setError(null);
   };
 
@@ -238,6 +256,50 @@ function TableDetailPanel({
         </p>
       )}
       <div className="mt-6 border-t border-stone-100 pt-5">
+        <button
+          type="button"
+          onClick={() => setCorrecting((value) => !value)}
+          disabled={!events.length}
+          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-stone-200 px-3 text-sm font-semibold text-stone-600 hover:border-amber-300 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Undo2 size={16} />
+          Correct last action
+        </button>
+        <p className="mt-2 text-xs leading-5 text-stone-500">
+          Available for 15 minutes. A reason is kept in the table audit history.
+        </p>
+        {correcting && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <label className="text-xs font-semibold text-amber-950">
+              Correction reason
+              <input
+                autoFocus
+                value={correctionReason}
+                onChange={(event) => setCorrectionReason(event.target.value)}
+                placeholder="For example: tapped by mistake"
+                className="mt-1 min-h-10 w-full rounded-lg border border-amber-300 bg-white px-3 text-sm text-stone-800"
+              />
+            </label>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCorrecting(false)}
+                className="min-h-9 flex-1 rounded-lg border border-amber-300 px-3 text-xs font-semibold text-amber-900"
+              >
+                Keep current
+              </button>
+              <button
+                type="button"
+                onClick={confirmCorrection}
+                className="min-h-9 flex-1 rounded-lg bg-amber-800 px-3 text-xs font-semibold text-white"
+              >
+                Apply correction
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="mt-6 border-t border-stone-100 pt-5">
         <p className="text-sm font-semibold text-stone-900">Recent history</p>
         <div className="mt-3 space-y-3">
           {events.slice(0, 4).map((event) => (
@@ -268,7 +330,7 @@ function TableDetailPanel({
 
 export function LiveFloor() {
   const params = useSearchParams();
-  const { state, transitionTable } = useDemo();
+  const { state, transitionTable, correctTable } = useDemo();
   const [view, setView] = useState<"map" | "list">("map");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -289,6 +351,13 @@ export function LiveFloor() {
     const result = transitionTable(selected.id, status, partySize);
     if (result.ok)
       setAnnouncement(`${selected.label} is now ${tableStatusLabel(status)}.`);
+    return result;
+  };
+  const correctStatus = (reason: string) => {
+    if (!selected) return { ok: false, error: "Select a table first." };
+    const result = correctTable(selected.id, reason);
+    if (result.ok)
+      setAnnouncement(`${selected.label}'s last action was corrected.`);
     return result;
   };
 
@@ -417,6 +486,7 @@ export function LiveFloor() {
                 (event) => event.tableId === selected.id,
               )}
               onChange={changeStatus}
+              onCorrect={correctStatus}
             />
           ) : (
             <div className="grid min-h-72 place-items-center text-center">
