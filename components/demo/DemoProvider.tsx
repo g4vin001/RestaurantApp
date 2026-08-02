@@ -19,6 +19,7 @@ import {
   addQueueEntry,
   addStaffMember,
   createReservation,
+  correctLastTableTransition,
   removeStaffMember,
   seatQueueEntry,
   seatReservation,
@@ -125,6 +126,7 @@ interface DemoContextValue {
     status: TableStatus,
     partySize?: number,
   ) => CommandFeedback;
+  correctTable: (tableId: string, reason: string) => CommandFeedback;
   saveFloor: (
     planId: string,
     name: string,
@@ -142,7 +144,10 @@ interface DemoContextValue {
   callQueue: (entryId: string) => CommandFeedback;
   cancelQueue: (entryId: string) => CommandFeedback;
   noShowQueue: (entryId: string) => CommandFeedback;
-  seatQueue: (entryId: string, tableId: string) => CommandFeedback;
+  seatQueue: (
+    entryId: string,
+    tableIdOrIds: string | string[],
+  ) => CommandFeedback;
   reorderQueue: (entryId: string, direction: -1 | 1) => CommandFeedback;
   addReservation: (input: ReservationInput) => CommandFeedback;
   updateReservationRecord: (
@@ -155,7 +160,7 @@ interface DemoContextValue {
   ) => CommandFeedback;
   seatReservationRecord: (
     reservationId: string,
-    tableId: string,
+    tableIdOrIds: string | string[],
   ) => CommandFeedback;
   addStaff: (input: StaffInput) => CommandFeedback;
   updateStaff: (staffId: string, input: StaffInput) => CommandFeedback;
@@ -256,6 +261,19 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       ),
     [applyResult, state],
   );
+  const correctTable = useCallback(
+    (tableId: string, reason: string) =>
+      applyResult(
+        correctLastTableTransition(
+          state,
+          tableId,
+          reason,
+          new Date().toISOString(),
+          "Demo manager",
+        ),
+      ),
+    [applyResult, state],
+  );
   const saveFloor = useCallback(
     (planId: string, name: string, elements: FloorElement[]) =>
       applyResult(
@@ -335,12 +353,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     [applyResult, state],
   );
   const seatQueue = useCallback(
-    (entryId: string, tableId: string) =>
+    (entryId: string, tableIdOrIds: string | string[]) =>
       applyResult(
         seatQueueEntry(
           state,
           entryId,
-          tableId,
+          tableIdOrIds,
           new Date().toISOString(),
           "Demo manager",
         ),
@@ -410,12 +428,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     [applyResult, state],
   );
   const seatReservationRecord = useCallback(
-    (reservationId: string, tableId: string) =>
+    (reservationId: string, tableIdOrIds: string | string[]) =>
       applyResult(
         seatReservation(
           state,
           reservationId,
-          tableId,
+          tableIdOrIds,
           new Date().toISOString(),
           "Demo manager",
         ),
@@ -508,6 +526,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       state,
       hydrated,
       transitionTable,
+      correctTable,
       saveFloor,
       publishFloor,
       restoreFloor,
@@ -534,6 +553,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       state,
       hydrated,
       transitionTable,
+      correctTable,
       saveFloor,
       publishFloor,
       restoreFloor,
