@@ -87,7 +87,6 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
               className={inputClass}
             />
           </label>
-          <input type="hidden" name="role" value="CUSTOMER" />
           <p className="rounded-lg bg-stone-50 p-3 text-xs leading-5 text-stone-500">
             This creates a customer account. Restaurant managers and staff are
             added through the restaurant workspace.
