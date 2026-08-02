@@ -65,11 +65,15 @@ NEXT_PUBLIC_HALINA_DEMO_MODE=true
 
 Demo mode is visibly labeled in the interface. Table transitions, sessions, and events persist in localStorage, synchronize across browser tabs, and can be reset from the manager sidebar. When the switch is absent or false, the existing Supabase authentication and role guards remain enforced.
 
+To enter the manager demo, start the app and open [`/manager`](http://localhost:3000/manager). No manager account is required while explicit demo mode is enabled. The public customer experience remains available at [`/`](http://localhost:3000/).
+
 ## Current status
 
 The high-fidelity manager prototype includes a responsive manager shell, a versioned floor-plan editor, a published Live floor, queue and reservation workflows, staff records, restaurant settings, and event-derived analytics. Manager actions persist in localStorage, synchronize across tabs, and safely update the public customer view.
 
-Operational records are still browser-backed prototype data. Supabase provides authentication and Prisma currently models profiles; database-backed restaurant operations and staff invitations are intentionally deferred.
+Operational records are still browser-backed prototype data. Supabase provides authentication. The Prisma schema now includes the tenant-aware restaurant, membership, floor, table, session, queue, reservation, event, and staff foundation, but the application has not switched its operations repository to PostgreSQL yet.
+
+The reviewed foundation migration is stored in `prisma/migrations/20260802170000_shared_data_foundation`. It preserves the legacy profile fields, creates owner memberships for existing manager profiles with a restaurant name, and does not grant manager access to legacy employee profiles. It is intentionally not applied automatically: review it and validate it against a disposable or development database through the direct/session connection before using it on shared data.
 
 Quality commands:
 
@@ -84,6 +88,7 @@ npm run build
 
 - `/` — customer restaurant feed
 - `/login` — log in or create a customer account; staff access is not publicly self-service
+- `/onboarding/restaurant` — authenticated first-restaurant creation; creates a new restaurant and OWNER membership
 - `/restaurants/salu-salo` — sample restaurant detail
 - `/manager` — live manager overview (manager account, or explicit demo mode)
 - `/manager/floor` — interactive live floor and table transitions
@@ -93,9 +98,14 @@ npm run build
 - `/manager/team` — staff records and future permission presets; login access remains disabled
 - `/manager/settings` — restaurant identity, walk-in availability, hours, and cleaning target
 
+There is intentionally no `/employee` route. Staff are managed as records under `/manager/team`; they do not receive a separate application or public signup path in this milestone.
+
 ## Known limitations
 
 - The operational repository is local to the browser and is not yet shared across devices.
+- The shared-data Prisma migration is prepared but has not been applied to Supabase.
+- Membership authorization and the PostgreSQL operations repository are the next implementation slice.
+- `npm audit --omit=dev` currently reports three high advisories inherited through Next 15's bundled PostCSS/Sharp dependency path. npm only proposes a breaking downgrade to Next 9, so that automated fix is intentionally not applied; recheck when a compatible Next 15 patch is available.
 - The floor editor is intentionally limited to tablet-landscape and desktop widths.
 - No employee application, POS, payments, ordering, payroll, or invented revenue analytics are part of this milestone.
 - End-to-end browser automation should be introduced with the future test setup; domain workflows have unit coverage.
