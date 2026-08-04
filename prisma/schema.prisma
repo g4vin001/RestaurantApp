@@ -18,14 +18,355 @@ enum Role {
   EMPLOYEE
 }
 
-// the app creates this row right after a successful supabase.auth.signUp().
+enum MembershipRole {
+  OWNER
+  MANAGER
+}
+
+enum StaffPermissionPreset {
+  MANAGER
+  HOST
+  FLOOR_STAFF
+}
+
+enum StaffAccessStatus {
+  NOT_INVITED
+  ACCESS_DISABLED
+}
+
+enum WalkInAvailability {
+  AVAILABLE
+  LIMITED
+  PAUSED
+}
+
+enum FloorPlanVersionStatus {
+  PUBLISHED
+  ARCHIVED
+}
+
+enum FloorElementType {
+  TABLE
+  BAR
+  WALL
+  DOOR
+  HOST_STAND
+  WAITING_AREA
+  KITCHEN
+  RESTROOM
+  COLUMN
+  TEXT
+  ZONE
+}
+
+enum TableShape {
+  ROUND
+  SQUARE
+  RECTANGLE
+  BOOTH
+}
+
+enum TableStatus {
+  AVAILABLE
+  HELD
+  RESERVED
+  OCCUPIED
+  CLEANING
+  OUT_OF_SERVICE
+}
+
+enum DiningSessionStatus {
+  ACTIVE
+  CLEARED
+  CLEANING
+  COMPLETED
+}
+
+enum QueueStatus {
+  WAITING
+  CALLED
+  SEATED
+  CANCELLED
+  NO_SHOW
+}
+
+enum ReservationStatus {
+  CONFIRMED
+  ARRIVED
+  SEATED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// Supabase Auth owns the account. Role and restaurant are retained only as
+// legacy migration fields; production authorization must use memberships.
 model Profile {
-  id          String   @id @db.Uuid
-  email       String   @unique
-  displayName String
-  role        Role     @default(CUSTOMER)
-  // Free-text for now; will become a relation once a Restaurant model exists.
-  // Only meaningful for MANAGER/EMPLOYEE accounts.
-  restaurant  String?
-  createdAt   DateTime @default(now())
+  id                     String                 @id @db.Uuid
+  email                  String                 @unique
+  displayName            String
+  role                   Role                   @default(CUSTOMER)
+  restaurant             String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  memberships            RestaurantMembership[]
+  createdFloorVersions   FloorPlanVersion[]     @relation("FloorVersionCreatedBy")
+  publishedFloorVersions FloorPlanVersion[]     @relation("FloorVersionPublishedBy")
+  tableStatusEvents      TableStatusEvent[]
+  createdQueueEntries    QueueEntry[]
+  createdReservations    Reservation[]
+}
+
+model Restaurant {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  slug                    String                 @unique
+  name                    String
+  location                String                 @default("")
+  timezone                String                 @default("Asia/Manila")
+  locale                  String                 @default("en-PH")
+  operatingSettings       Json                   @default("{}")
+  walkInAvailability      WalkInAvailability     @default(AVAILABLE)
+  lastOperationalUpdateAt DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  memberships             RestaurantMembership[]
+  staffMembers            StaffMember[]
+  floorPlans              FloorPlan[]
+  diningTables            DiningTable[]
+  tableStatusEvents       TableStatusEvent[]
+  diningSessions          DiningSession[]
+  queueEntries            QueueEntry[]
+  reservations            Reservation[]
+}
+
+model RestaurantMembership {
+  id           String         @id @default(uuid()) @db.Uuid
+  restaurantId String         @db.Uuid
+  profileId    String         @db.Uuid
+  role         MembershipRole
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  restaurant   Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  profile      Profile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  staffRecord  StaffMember?
+
+  @@unique([restaurantId, profileId])
+  @@index([profileId, active])
+  @@index([restaurantId, active])
+}
+
+model StaffMember {
+  id               String                @id @default(uuid()) @db.Uuid
+  restaurantId     String                @db.Uuid
+  membershipId     String?               @unique @db.Uuid
+  name             String
+  jobTitle         String
+  contact          String?
+  permissionPreset StaffPermissionPreset
+  accessStatus     StaffAccessStatus     @default(NOT_INVITED)
+  active           Boolean               @default(true)
+  archivedAt       DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  restaurant       Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  membership       RestaurantMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+
+  @@index([restaurantId, active])
+}
+
+model FloorPlan {
+  id              String             @id @default(uuid()) @db.Uuid
+  restaurantId    String             @db.Uuid
+  name            String
+  logicalWidth    Int                @default(1600)
+  logicalHeight   Int                @default(1000)
+  draftRevision   Int                @default(0)
+  draftSnapshot   Json               @default("{}")
+  activeVersionId String?            @unique @db.Uuid
+  archivedAt      DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  restaurant      Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  versions        FloorPlanVersion[] @relation("FloorPlanVersions")
+  activeVersion   FloorPlanVersion?  @relation("ActiveFloorPlanVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+
+  @@index([restaurantId, archivedAt])
+}
+
+model FloorPlanVersion {
+  id            String                 @id @default(uuid()) @db.Uuid
+  floorPlanId   String                 @db.Uuid
+  version       Int
+  name          String
+  logicalWidth  Int
+  logicalHeight Int
+  status        FloorPlanVersionStatus @default(PUBLISHED)
+  createdById   String?                @db.Uuid
+  publishedById String?                @db.Uuid
+  createdAt     DateTime               @default(now())
+  publishedAt   DateTime?
+  floorPlan     FloorPlan              @relation("FloorPlanVersions", fields: [floorPlanId], references: [id], onDelete: Cascade)
+  activeForPlan FloorPlan?             @relation("ActiveFloorPlanVersion")
+  createdBy     Profile?               @relation("FloorVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  publishedBy   Profile?               @relation("FloorVersionPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+  elements      FloorElement[]
+
+  @@unique([floorPlanId, version])
+  @@index([floorPlanId, publishedAt])
+}
+
+model FloorElement {
+  id                 String           @id @default(uuid()) @db.Uuid
+  floorPlanVersionId String           @db.Uuid
+  stableElementId    String           @db.Uuid
+  diningTableId      String?          @db.Uuid
+  type               FloorElementType
+  x                  Float
+  y                  Float
+  width              Float
+  height             Float
+  rotation           Float            @default(0)
+  zIndex             Int              @default(0)
+  locked             Boolean          @default(false)
+  visible            Boolean          @default(true)
+  label              String           @default("")
+  zone               String?
+  shape              TableShape?
+  properties         Json             @default("{}")
+  floorPlanVersion   FloorPlanVersion @relation(fields: [floorPlanVersionId], references: [id], onDelete: Cascade)
+  diningTable        DiningTable?     @relation(fields: [diningTableId], references: [id], onDelete: SetNull)
+
+  @@unique([floorPlanVersionId, stableElementId])
+  @@index([diningTableId])
+  @@index([floorPlanVersionId, zIndex])
+}
+
+model DiningTable {
+  id                   String             @id @default(uuid()) @db.Uuid
+  restaurantId         String             @db.Uuid
+  label                String
+  capacity             Int
+  minPartySize         Int                @default(1)
+  maxPartySize         Int
+  zone                 String             @default("Main")
+  shape                TableShape
+  currentStatus        TableStatus        @default(AVAILABLE)
+  statusRevision       Int                @default(0)
+  active               Boolean            @default(true)
+  archivedAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  restaurant           Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  floorElements        FloorElement[]
+  statusEvents         TableStatusEvent[]
+  sessions             DiningSession[]
+  assignedQueueEntries QueueEntry[]
+  assignedReservations Reservation[]
+
+  @@index([restaurantId, active])
+  @@index([restaurantId, currentStatus])
+  @@index([restaurantId, label])
+}
+
+model TableStatusEvent {
+  id              String      @id @default(uuid()) @db.Uuid
+  restaurantId    String      @db.Uuid
+  diningTableId   String      @db.Uuid
+  fromStatus      TableStatus
+  toStatus        TableStatus
+  occurredAt      DateTime    @default(now())
+  actorProfileId  String?     @db.Uuid
+  sourceCommandId String      @db.Uuid
+  reason          String?
+  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  diningTable     DiningTable @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
+  actorProfile    Profile?    @relation(fields: [actorProfileId], references: [id], onDelete: SetNull)
+
+  @@unique([restaurantId, sourceCommandId])
+  @@index([restaurantId, occurredAt])
+  @@index([diningTableId, occurredAt])
+}
+
+model DiningSession {
+  id                String              @id @default(uuid()) @db.Uuid
+  restaurantId      String              @db.Uuid
+  diningTableId     String              @db.Uuid
+  queueEntryId      String?             @unique @db.Uuid
+  reservationId     String?             @unique @db.Uuid
+  partySize         Int
+  status            DiningSessionStatus @default(ACTIVE)
+  seatedAt          DateTime
+  clearedAt         DateTime?
+  cleaningStartedAt DateTime?
+  availableAt       DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  restaurant        Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  diningTable       DiningTable         @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
+  queueEntry        QueueEntry?         @relation(fields: [queueEntryId], references: [id], onDelete: SetNull)
+  reservation       Reservation?        @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([restaurantId, seatedAt])
+  @@index([diningTableId, seatedAt])
+  @@index([restaurantId, status])
+}
+
+model QueueEntry {
+  id                  String         @id @default(uuid()) @db.Uuid
+  restaurantId        String         @db.Uuid
+  partyName           String
+  partySize           Int
+  contact             String?
+  notes               String?
+  preferredZone       String?
+  status              QueueStatus    @default(WAITING)
+  promisedWaitMinutes Int
+  joinedAt            DateTime       @default(now())
+  calledAt            DateTime?
+  seatedAt            DateTime?
+  cancelledAt         DateTime?
+  noShowAt            DateTime?
+  assignedTableId     String?        @db.Uuid
+  createdById         String?        @db.Uuid
+  source              String         @default("MANAGER")
+  revision            Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  restaurant          Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  assignedTable       DiningTable?   @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
+  createdBy           Profile?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  diningSession       DiningSession?
+
+  @@index([restaurantId, status, joinedAt])
+  @@index([restaurantId, assignedTableId])
+}
+
+model Reservation {
+  id              String            @id @default(uuid()) @db.Uuid
+  restaurantId    String            @db.Uuid
+  partyName       String
+  partySize       Int
+  contact         String?
+  notes           String?
+  scheduledAt     DateTime
+  status          ReservationStatus @default(CONFIRMED)
+  assignedTableId String?           @db.Uuid
+  createdById     String?           @db.Uuid
+  arrivedAt       DateTime?
+  seatedAt        DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  noShowAt        DateTime?
+  revision        Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  restaurant      Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  assignedTable   DiningTable?      @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
+  createdBy       Profile?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  diningSession   DiningSession?
+
+  @@index([restaurantId, status, scheduledAt])
+  @@index([restaurantId, assignedTableId, scheduledAt])
 }

@@ -1,26 +1,54 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
+import { ensureProfile } from "@/lib/auth/profile";
+import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { setFlash } from "@/lib/flash";
-import { prisma } from "@/lib/prisma";
-import { ROLE_HOME, parseRole } from "@/lib/roles";
+import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
+
+async function reportLoginDataFailure(context: string, error: unknown) {
+  const reference = reportDataError(context, error);
+  await setFlash(
+    "error",
+    `Halina could not finish loading your account from the restaurant database. Please try again. Support reference: ${reference}`,
+  );
+}
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
-  const redirectTo = (formData.get("redirectTo") as string) || undefined;
+  const redirectTo = safeInternalRedirect(formData.get("redirectTo"), "");
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
   if (error) {
     await setFlash("error", error.message);
-    redirect(redirectTo ? `/login?redirectTo=${encodeURIComponent(redirectTo)}` : "/login");
+    redirect(
+      redirectTo
+        ? `/login?redirectTo=${encodeURIComponent(redirectTo)}`
+        : "/login",
+    );
   }
 
-  const profile = await prisma.profile.findUnique({ where: { id: data.user.id } });
-  redirect(redirectTo ?? ROLE_HOME[profile?.role ?? "CUSTOMER"]);
+  let membership: Awaited<ReturnType<typeof getActiveManagerMembership>>;
+  try {
+    await ensureProfile(data.user);
+    membership = await getActiveManagerMembership(data.user.id);
+  } catch (databaseError) {
+    await reportLoginDataFailure("login-profile", databaseError);
+    redirect(
+      redirectTo
+        ? `/login?redirectTo=${encodeURIComponent(redirectTo)}`
+        : "/login",
+    );
+  }
+  redirect(redirectTo || (membership ? "/manager" : "/"));
 }
 
 export async function signup(formData: FormData) {
@@ -28,21 +56,19 @@ export async function signup(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const confirmPassword = formData.get("confirmPassword") as string;
-  const role = parseRole(formData.get("role"));
-  const restaurant = (formData.get("restaurant") as string | null)?.trim() || null;
-
   if (password !== confirmPassword) {
     await setFlash("error", "Passwords do not match.");
     redirect("/login");
   }
 
-  if (role !== "CUSTOMER" && !restaurant) {
-    await setFlash("error", "Restaurant is required for manager and employee accounts.");
-    redirect("/login");
-  }
-
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { display_name: displayName.trim() },
+    },
+  });
 
   if (error) {
     await setFlash("error", error.message);
@@ -51,19 +77,19 @@ export async function signup(formData: FormData) {
 
   // An empty `identities` array signals that no new account was actually created.
   if (!data.user || data.user.identities?.length === 0) {
-    await setFlash("error", "An account with this email already exists. Try logging in instead.");
+    await setFlash(
+      "error",
+      "An account with this email already exists. Try logging in instead.",
+    );
     redirect("/login");
   }
 
-  await prisma.profile.create({
-    data: {
-      id: data.user.id,
-      email,
-      displayName,
-      role,
-      restaurant: role === "CUSTOMER" ? null : restaurant,
-    },
-  });
+  try {
+    await ensureProfile(data.user, displayName);
+  } catch (databaseError) {
+    await reportLoginDataFailure("signup-profile", databaseError);
+    redirect("/login");
+  }
 
   await setFlash("message", "Check your email to confirm your account.");
   redirect("/login");
