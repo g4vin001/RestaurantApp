@@ -258,26 +258,35 @@ export function FloorPlanEditor() {
     setNewFloorOpen(true);
   };
 
-  const save = useCallback(() => {
+  const save = useCallback(async () => {
     setSaveState("saving");
-    const result = saveFloor(plan.id, planName, elements);
+    const result = await saveFloor(plan.id, planName, elements);
     if (!result.ok) {
       setSaveState("error");
       notify("error", result.error);
       return;
     }
+    const savedPlan = result.state?.floorPlans.find((item) => item.id === plan.id);
     setSaveState("saved");
-    notify("success", "Draft saved in this browser.");
+    setPlanName(savedPlan?.name ?? planName);
+    setHistory(createEditorHistory(savedPlan?.draft.elements ?? elements));
+    notify("success", "Draft saved.");
   }, [elements, notify, plan.id, planName, saveFloor]);
 
-  const publish = () => {
-    const result = publishFloor(plan.id, planName, elements);
+  const publish = async () => {
+    setSaveState("saving");
+    const result = await publishFloor(plan.id, planName, elements);
     if (!result.ok) {
+      setSaveState("error");
       notify("error", result.error);
       return;
     }
+    const savedPlan = result.state?.floorPlans.find((item) => item.id === plan.id);
     setPublishOpen(false);
     setSaveState("saved");
+    setPlanName(savedPlan?.name ?? planName);
+    setHistory(createEditorHistory(savedPlan?.draft.elements ?? elements));
+    setSelectedIds([]);
     notify("success", "Floor published. Live floor now uses this version.");
   };
 
