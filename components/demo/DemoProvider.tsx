@@ -46,6 +46,10 @@ import {
   databaseWritePending,
   type OperationsRepositoryMode,
 } from "@/lib/repositories/operations";
+import {
+  publishFloorPlanAction,
+  saveFloorPlanDraftAction,
+} from "@/app/manager/floor/actions";
 
 const STORAGE_KEY = "halina:demo-state:v2";
 const LEGACY_STORAGE_KEY = "halina:demo-state:v1";
@@ -56,7 +60,9 @@ type DemoAction =
   | { type: "RESET"; state: DemoState }
   | { type: "REPLACE"; state: DemoState };
 
-type CommandFeedback = { ok: true } | { ok: false; error: string };
+type CommandFeedback =
+  | { ok: true; state?: DemoState }
+  | { ok: false; error: string };
 
 function reducer(_state: DemoState, action: DemoAction): DemoState {
   return action.state;
@@ -136,12 +142,12 @@ interface DemoContextValue {
     planId: string,
     name: string,
     elements: FloorElement[],
-  ) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
   publishFloor: (
     planId: string,
     name: string,
     elements: FloorElement[],
-  ) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
   restoreFloor: (planId: string, versionId: string) => CommandFeedback;
   createFloor: (name: string) => string | null;
   addQueue: (input: QueueInput) => CommandFeedback;
@@ -292,25 +298,53 @@ export function OperationsProvider({
     [applyResult, state],
   );
   const saveFloor = useCallback(
-    (planId: string, name: string, elements: FloorElement[]) =>
-      applyResult(
-        saveFloorDraft(state, planId, name, elements, new Date().toISOString()),
-      ),
-    [applyResult, state],
+    async (planId: string, name: string, elements: FloorElement[]) => {
+      if (repositoryMode === "demo") {
+        return applyResult(
+          saveFloorDraft(state, planId, name, elements, new Date().toISOString()),
+        );
+      }
+      const plan = state.floorPlans.find((item) => item.id === planId);
+      if (!plan) return { ok: false, error: "Floor plan was not found." } as const;
+      const result = await saveFloorPlanDraftAction({
+        planId,
+        name,
+        elements,
+        draftRevision: plan.draft.baseVersion,
+      });
+      if (!result.ok) return result;
+      dispatch({ type: "REPLACE", state: result.state });
+      return { ok: true, state: result.state } as const;
+    },
+    [applyResult, repositoryMode, state],
   );
   const publishFloor = useCallback(
-    (planId: string, name: string, elements: FloorElement[]) =>
-      applyResult(
-        publishFloorPlan(
-          state,
-          planId,
-          name,
-          elements,
-          new Date().toISOString(),
-          "Demo manager",
-        ),
-      ),
-    [applyResult, state],
+    async (planId: string, name: string, elements: FloorElement[]) => {
+      if (repositoryMode === "demo") {
+        return applyResult(
+          publishFloorPlan(
+            state,
+            planId,
+            name,
+            elements,
+            new Date().toISOString(),
+            "Demo manager",
+          ),
+        );
+      }
+      const plan = state.floorPlans.find((item) => item.id === planId);
+      if (!plan) return { ok: false, error: "Floor plan was not found." } as const;
+      const result = await publishFloorPlanAction({
+        planId,
+        name,
+        elements,
+        draftRevision: plan.draft.baseVersion,
+      });
+      if (!result.ok) return result;
+      dispatch({ type: "REPLACE", state: result.state });
+      return { ok: true, state: result.state } as const;
+    },
+    [applyResult, repositoryMode, state],
   );
   const restoreFloor = useCallback(
     (planId: string, versionId: string) =>
