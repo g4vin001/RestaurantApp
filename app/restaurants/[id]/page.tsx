@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { fetchPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-restaurant-view";
 import { reportDataError } from "@/lib/server/data-error";
 
+export const dynamic = "force-dynamic";
+
 export default async function RestaurantPage({
   params,
 }: {

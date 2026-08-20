@@ -11,13 +11,34 @@ export async function cancelMyWaitlist(formData: FormData) {
   const queueId = String(formData.get("queueId") ?? "");
   const now = new Date();
   const entry = await prisma.queueEntry.findFirst({
-    where: { id: queueId, createdById: user.id, source: "CUSTOMER", status: { in: ["WAITING", "CALLED"] } },
-    select: { id: true, restaurantId: true },
+    where: {
+      id: queueId,
+      createdById: user.id,
+      source: "CUSTOMER",
+      status: { in: ["WAITING", "CALLED"] },
+    },
+    select: {
+      id: true,
+      restaurantId: true,
+      restaurant: { select: { slug: true } },
+    },
   });
   if (!entry) return;
   await prisma.$transaction([
-    prisma.queueEntry.update({ where: { id: entry.id }, data: { status: "CANCELLED", cancelledAt: now, revision: { increment: 1 } } }),
-    prisma.restaurant.update({ where: { id: entry.restaurantId }, data: { lastOperationalUpdateAt: now } }),
+    prisma.queueEntry.update({
+      where: { id: entry.id },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: now,
+        revision: { increment: 1 },
+      },
+    }),
+    prisma.restaurant.update({
+      where: { id: entry.restaurantId },
+      data: { lastOperationalUpdateAt: now },
+    }),
   ]);
   revalidatePath("/my/waitlist");
+  revalidatePath(`/restaurants/${entry.restaurant.slug}`);
+  revalidatePath("/");
 }
