@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PROTECTED_PREFIXES = ["/manager", "/onboarding"];
+const AUTH_TRANSITION_PATHS = new Set(["/login", "/auth/callback", "/reset-password"]);
 
 export function isAnonymousBrowsePath(pathname: string) {
   if (pathname === "/") return true;
@@ -10,10 +11,15 @@ export function isAnonymousBrowsePath(pathname: string) {
   return segments.length === 2 && segments[0] === "restaurants";
 }
 
+export function isAuthTransitionPath(pathname: string) {
+  return AUTH_TRANSITION_PATHS.has(pathname);
+}
+
 export async function updateSession(request: NextRequest) {
   if (
     process.env.NEXT_PUBLIC_HALINA_DEMO_MODE === "true" ||
-    isAnonymousBrowsePath(request.nextUrl.pathname)
+    isAnonymousBrowsePath(request.nextUrl.pathname) ||
+    isAuthTransitionPath(request.nextUrl.pathname)
   ) {
     return NextResponse.next({ request });
   }
