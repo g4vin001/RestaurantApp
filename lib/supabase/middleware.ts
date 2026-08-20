@@ -3,8 +3,18 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PROTECTED_PREFIXES = ["/manager", "/onboarding"];
 
+export function isAnonymousBrowsePath(pathname: string) {
+  if (pathname === "/") return true;
+
+  const segments = pathname.split("/").filter(Boolean);
+  return segments.length === 2 && segments[0] === "restaurants";
+}
+
 export async function updateSession(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_HALINA_DEMO_MODE === "true") {
+  if (
+    process.env.NEXT_PUBLIC_HALINA_DEMO_MODE === "true" ||
+    isAnonymousBrowsePath(request.nextUrl.pathname)
+  ) {
     return NextResponse.next({ request });
   }
 
