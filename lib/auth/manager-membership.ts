@@ -33,10 +33,20 @@ export async function getActiveManagerMembership(
     },
   });
 
-  const access = resolveRestaurantAccess(
-    memberships satisfies ManagerMembershipClaim[],
-    requestedRestaurantId,
+  const managerClaims: ManagerMembershipClaim[] = memberships.flatMap(
+    (membership) =>
+      membership.role === "OWNER" || membership.role === "MANAGER"
+        ? [
+            {
+              restaurantId: membership.restaurantId,
+              role: membership.role,
+              active: membership.active,
+            },
+          ]
+        : [],
   );
+
+  const access = resolveRestaurantAccess(managerClaims, requestedRestaurantId);
 
   if (!access) return null;
 
