@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
+import { setFlash } from "@/lib/flash";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
@@ -10,24 +11,22 @@ export async function GET(request: NextRequest) {
   );
 
   if (!code) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set(
+    await setFlash(
       "error",
       "The email confirmation link is missing its authentication code. Please try signing in or request a new confirmation email.",
     );
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   const supabase = await createClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set(
+    await setFlash(
       "error",
       "Halina could not finish confirming this email. The link may have expired; try signing in or register again.",
     );
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   return NextResponse.redirect(new URL(next, request.url));
