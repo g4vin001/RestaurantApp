@@ -44,24 +44,23 @@ async function authOrigin() {
   return `${protocol}://${host}`;
 }
 
+function loginRedirect(redirectTo: string) {
+  return redirectTo
+    ? `/login?redirectTo=${encodeURIComponent(redirectTo)}`
+    : "/login";
+}
+
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const redirectTo = safeInternalRedirect(formData.get("redirectTo"), "");
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     await setFlash("error", error.message);
-    redirect(
-      redirectTo
-        ? `/login?redirectTo=${encodeURIComponent(redirectTo)}`
-        : "/login",
-    );
+    redirect(loginRedirect(redirectTo));
   }
 
   let membership: Awaited<ReturnType<typeof getActiveManagerMembership>>;
@@ -70,11 +69,7 @@ export async function login(formData: FormData) {
     membership = await getActiveManagerMembership(data.user.id);
   } catch (databaseError) {
     await reportLoginDataFailure("login-profile", databaseError);
-    redirect(
-      redirectTo
-        ? `/login?redirectTo=${encodeURIComponent(redirectTo)}`
-        : "/login",
-    );
+    redirect(loginRedirect(redirectTo));
   }
   redirect(redirectTo || (membership ? "/manager" : "/"));
 }
@@ -87,11 +82,7 @@ export async function signup(formData: FormData) {
   const redirectTo = safeInternalRedirect(formData.get("redirectTo"), "/");
   if (password !== confirmPassword) {
     await setFlash("error", "Passwords do not match.");
-    redirect(
-      redirectTo === "/"
-        ? "/login"
-        : `/login?redirectTo=${encodeURIComponent(redirectTo)}`,
-    );
+    redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
   }
 
   const origin = await authOrigin();
@@ -110,43 +101,80 @@ export async function signup(formData: FormData) {
 
   if (error) {
     await setFlash("error", error.message);
-    redirect(
-      redirectTo === "/"
-        ? "/login"
-        : `/login?redirectTo=${encodeURIComponent(redirectTo)}`,
-    );
+    redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
   }
 
-  // An empty `identities` array signals that no new account was actually created.
   if (!data.user || data.user.identities?.length === 0) {
     await setFlash(
       "error",
-      "An account with this email already exists. Try logging in instead.",
+      "An account with this email already exists. Try logging in or resetting the password.",
     );
-    redirect(
-      redirectTo === "/"
-        ? "/login"
-        : `/login?redirectTo=${encodeURIComponent(redirectTo)}`,
-    );
+    redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
   }
 
   try {
     await ensureProfile(data.user, displayName);
   } catch (databaseError) {
     await reportLoginDataFailure("signup-profile", databaseError);
-    redirect(
-      redirectTo === "/"
-        ? "/login"
-        : `/login?redirectTo=${encodeURIComponent(redirectTo)}`,
-    );
+    redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
   }
 
   await setFlash("message", "Check your email to confirm your account.");
-  redirect(
-    redirectTo === "/"
-      ? "/login"
-      : `/login?redirectTo=${encodeURIComponent(redirectTo)}`,
-  );
+  redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
+}
+
+export async function requestPasswordReset(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim();
+  if (!email) {
+    await setFlash("error", "Enter your email first, then choose Forgot password.");
+    redirect("/login");
+  }
+
+  const origin = await authOrigin();
+  const callbackUrl = new URL("/auth/callback", origin);
+  callbackUrl.searchParams.set("next", "/reset-password");
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: callbackUrl.toString(),
+  });
+
+  if (error) {
+    await setFlash("error", error.message);
+  } else {
+    await setFlash(
+      "message",
+      "If that account exists, a password reset email has been sent. Open the newest email only.",
+    );
+  }
+  redirect("/login");
+}
+
+export async function resendConfirmation(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim();
+  const redirectTo = safeInternalRedirect(formData.get("redirectTo"), "/");
+  if (!email) {
+    await setFlash("error", "Enter your email first, then choose Resend confirmation.");
+    redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
+  }
+
+  const origin = await authOrigin();
+  const callbackUrl = new URL("/auth/callback", origin);
+  callbackUrl.searchParams.set("next", redirectTo);
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo: callbackUrl.toString() },
+  });
+
+  if (error) {
+    await setFlash("error", error.message);
+  } else {
+    await setFlash("message", "A fresh confirmation email has been sent. Use the newest link only.");
+  }
+  redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
 }
 
 export async function logout() {

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { login, signup } from "./actions";
+import {
+  login,
+  requestPasswordReset,
+  resendConfirmation,
+  signup,
+} from "./actions";
 
 type Mode = "login" | "register";
 
@@ -32,31 +37,59 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
       </div>
 
       {mode === "login" ? (
-        <form className="flex flex-col gap-3" action={login}>
-          {redirectTo && (
-            <input type="hidden" name="redirectTo" value={redirectTo} />
-          )}
-          <label className={labelClass}>
-            Email
-            <input name="email" type="email" required className={inputClass} />
-          </label>
-          <label className={labelClass}>
-            Password
-            <input
-              name="password"
-              type="password"
-              required
-              minLength={6}
-              className={inputClass}
-            />
-          </label>
-          <button
-            type="submit"
-            className="mt-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white"
-          >
-            Log in
-          </button>
-        </form>
+        <div className="space-y-3">
+          <form className="flex flex-col gap-3" action={login}>
+            {redirectTo && (
+              <input type="hidden" name="redirectTo" value={redirectTo} />
+            )}
+            <label className={labelClass}>
+              Email
+              <input name="email" type="email" required className={inputClass} />
+            </label>
+            <label className={labelClass}>
+              Password
+              <input
+                name="password"
+                type="password"
+                required
+                minLength={6}
+                className={inputClass}
+              />
+            </label>
+            <button
+              type="submit"
+              className="mt-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Log in
+            </button>
+          </form>
+
+          <div className="grid grid-cols-2 gap-2">
+            <form action={requestPasswordReset}>
+              <label className="sr-only" htmlFor="reset-email">Email for password reset</label>
+              <input id="reset-email" name="email" type="email" required placeholder="Email" className={inputClass} />
+              <button
+                type="submit"
+                className="mt-2 w-full rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700"
+              >
+                Forgot password
+              </button>
+            </form>
+            <form action={resendConfirmation}>
+              {redirectTo && (
+                <input type="hidden" name="redirectTo" value={redirectTo} />
+              )}
+              <label className="sr-only" htmlFor="resend-email">Email for confirmation resend</label>
+              <input id="resend-email" name="email" type="email" required placeholder="Email" className={inputClass} />
+              <button
+                type="submit"
+                className="mt-2 w-full rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700"
+              >
+                Resend confirmation
+              </button>
+            </form>
+          </div>
+        </div>
       ) : (
         <form className="flex flex-col gap-3" action={signup}>
           {redirectTo && (
