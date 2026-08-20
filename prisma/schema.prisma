@@ -21,6 +21,7 @@ enum Role {
 enum MembershipRole {
   OWNER
   MANAGER
+  STAFF
 }
 
 enum StaffPermissionPreset {
@@ -31,6 +32,8 @@ enum StaffPermissionPreset {
 
 enum StaffAccessStatus {
   NOT_INVITED
+  INVITED
+  ACTIVE
   ACCESS_DISABLED
 }
 
@@ -116,6 +119,8 @@ model Profile {
   createdQueueEntries    QueueEntry[]
   createdReservations    Reservation[]          @relation("ReservationCreatedBy")
   customerReservations   Reservation[]          @relation("ReservationCustomer")
+  staffInvitesCreated    StaffInvite[]          @relation("StaffInviteCreatedBy")
+  staffInvitesRedeemed   StaffInvite[]          @relation("StaffInviteRedeemedBy")
 }
 
 model Restaurant {
@@ -133,6 +138,7 @@ model Restaurant {
   updatedAt               DateTime               @updatedAt
   memberships             RestaurantMembership[]
   staffMembers            StaffMember[]
+  staffInvites            StaffInvite[]
   floorPlans              FloorPlan[]
   diningTables            DiningTable[]
   tableStatusEvents       TableStatusEvent[]
@@ -173,8 +179,30 @@ model StaffMember {
   updatedAt        DateTime              @updatedAt
   restaurant       Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   membership       RestaurantMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  invites          StaffInvite[]
 
   @@index([restaurantId, active])
+}
+
+model StaffInvite {
+  id             String                 @id @default(uuid()) @db.Uuid
+  restaurantId   String                 @db.Uuid
+  staffMemberId  String                 @db.Uuid
+  tokenHash      String                 @unique
+  shortCodeHash  String                 @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  createdById    String                 @db.Uuid
+  redeemedById   String?                @db.Uuid
+  createdAt      DateTime               @default(now())
+  restaurant     Restaurant             @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staffMember    StaffMember            @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  createdBy      Profile                @relation("StaffInviteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  redeemedBy     Profile?               @relation("StaffInviteRedeemedBy", fields: [redeemedById], references: [id], onDelete: SetNull)
+
+  @@index([restaurantId, expiresAt])
+  @@index([staffMemberId, acceptedAt, revokedAt])
 }
 
 model FloorPlan {
@@ -343,6 +371,7 @@ model QueueEntry {
 
   @@index([restaurantId, status, joinedAt])
   @@index([restaurantId, assignedTableId])
+  @@index([createdById, source, status])
 }
 
 model Reservation {
