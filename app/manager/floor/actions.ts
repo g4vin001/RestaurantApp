@@ -23,13 +23,21 @@ async function managerScope() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new OperationsRepositoryError("UNAUTHORIZED", "Please log in again.");
+  if (!user)
+    throw new OperationsRepositoryError("UNAUTHORIZED", "Please log in again.");
   await ensureProfile(user);
   const membership = await getActiveManagerMembership(user.id);
   if (!membership) {
-    throw new OperationsRepositoryError("FORBIDDEN", "You do not have manager access to a restaurant.");
+    throw new OperationsRepositoryError(
+      "FORBIDDEN",
+      "You do not have manager access to a restaurant.",
+    );
   }
-  return { profileId: user.id, restaurantId: membership.restaurantId };
+  return {
+    profileId: user.id,
+    restaurantId: membership.restaurantId,
+    restaurantSlug: membership.restaurant.slug,
+  };
 }
 
 async function runFloorPlanAction(
@@ -44,12 +52,17 @@ async function runFloorPlanAction(
     await command(scope, input);
     const state = await new PrismaOperationsRepository(prisma, scope).loadSnapshot();
     revalidatePath("/manager");
+    revalidatePath(`/restaurants/${scope.restaurantSlug}`);
+    revalidatePath("/");
     return { ok: true, state };
   } catch (error) {
     if (error instanceof OperationsRepositoryError) {
       return { ok: false, error: error.message };
     }
-    return { ok: false, error: "Halina could not save the floor plan. Please try again." };
+    return {
+      ok: false,
+      error: "Halina could not save the floor plan. Please try again.",
+    };
   }
 }
 
