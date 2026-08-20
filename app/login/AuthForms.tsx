@@ -59,6 +59,9 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
         </form>
       ) : (
         <form className="flex flex-col gap-3" action={signup}>
+          {redirectTo && (
+            <input type="hidden" name="redirectTo" value={redirectTo} />
+          )}
           <label className={labelClass}>
             Display name
             <input name="displayName" required className={inputClass} />
