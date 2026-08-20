@@ -29,6 +29,12 @@ function normalizeOrigin(value: string | undefined) {
 }
 
 async function authOrigin() {
+  // Production auth emails must always return to the public Halina deployment.
+  // This deliberately ignores stale localhost-oriented environment variables on Vercel.
+  if (process.env.VERCEL_ENV === "production" || process.env.VERCEL === "1") {
+    return "https://halina-self.vercel.app";
+  }
+
   const configured =
     normalizeOrigin(process.env.NEXT_PUBLIC_SITE_URL) ??
     normalizeOrigin(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
