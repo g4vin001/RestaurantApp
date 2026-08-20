@@ -11,6 +11,7 @@ import {
   OperationsRepositoryError,
   type OperationsRepository,
 } from "@/lib/repositories/operations";
+import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
 
 const FLOOR_ELEMENT_TYPES = new Set<FloorElementType>([
   "TABLE",
@@ -37,18 +38,6 @@ export type PrismaOperationsScope = {
   profileId: string;
   restaurantId: string;
 };
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function finiteNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : fallback;
-}
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : undefined;

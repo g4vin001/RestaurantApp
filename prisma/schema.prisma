@@ -114,7 +114,8 @@ model Profile {
   publishedFloorVersions FloorPlanVersion[]     @relation("FloorVersionPublishedBy")
   tableStatusEvents      TableStatusEvent[]
   createdQueueEntries    QueueEntry[]
-  createdReservations    Reservation[]
+  createdReservations    Reservation[]          @relation("ReservationCreatedBy")
+  customerReservations   Reservation[]          @relation("ReservationCustomer")
 }
 
 model Restaurant {
@@ -122,6 +123,7 @@ model Restaurant {
   slug                    String                 @unique
   name                    String
   location                String                 @default("")
+  cuisineType             String?
   timezone                String                 @default("Asia/Manila")
   locale                  String                 @default("en-PH")
   operatingSettings       Json                   @default("{}")
@@ -344,29 +346,32 @@ model QueueEntry {
 }
 
 model Reservation {
-  id              String            @id @default(uuid()) @db.Uuid
-  restaurantId    String            @db.Uuid
-  partyName       String
-  partySize       Int
-  contact         String?
-  notes           String?
-  scheduledAt     DateTime
-  status          ReservationStatus @default(CONFIRMED)
-  assignedTableId String?           @db.Uuid
-  createdById     String?           @db.Uuid
-  arrivedAt       DateTime?
-  seatedAt        DateTime?
-  completedAt     DateTime?
-  cancelledAt     DateTime?
-  noShowAt        DateTime?
-  revision        Int               @default(0)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  restaurant      Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  assignedTable   DiningTable?      @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
-  createdBy       Profile?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  diningSession   DiningSession?
+  id                String            @id @default(uuid()) @db.Uuid
+  restaurantId      String            @db.Uuid
+  partyName         String
+  partySize         Int
+  contact           String?
+  notes             String?
+  scheduledAt       DateTime
+  status            ReservationStatus @default(CONFIRMED)
+  assignedTableId   String?           @db.Uuid
+  createdById       String?           @db.Uuid
+  customerProfileId String?           @db.Uuid
+  arrivedAt         DateTime?
+  seatedAt          DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  noShowAt          DateTime?
+  revision          Int               @default(0)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  restaurant        Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  assignedTable     DiningTable?      @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
+  createdBy         Profile?          @relation("ReservationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  customerProfile   Profile?          @relation("ReservationCustomer", fields: [customerProfileId], references: [id], onDelete: SetNull)
+  diningSession     DiningSession?
 
   @@index([restaurantId, status, scheduledAt])
   @@index([restaurantId, assignedTableId, scheduledAt])
+  @@index([customerProfileId])
 }
