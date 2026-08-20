@@ -170,6 +170,11 @@ export interface Reservation {
 }
 
 export type StaffPermissionPreset = "MANAGER" | "HOST" | "FLOOR_STAFF";
+export type StaffAccessStatus =
+  | "NOT_INVITED"
+  | "INVITED"
+  | "ACTIVE"
+  | "ACCESS_DISABLED";
 
 export interface StaffMember {
   id: string;
@@ -178,7 +183,7 @@ export interface StaffMember {
   contact?: string;
   permissionPreset: StaffPermissionPreset;
   active: boolean;
-  accessStatus: "NOT_INVITED" | "ACCESS_DISABLED";
+  accessStatus: StaffAccessStatus;
   createdAt: string;
   updatedAt: string;
 }
