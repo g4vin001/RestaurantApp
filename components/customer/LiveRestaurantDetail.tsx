@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { PageCard } from "@/components/PageCard";
 import { StatusBadge } from "@/components/StatusBadge";
+import { PublicFloorMap } from "@/components/customer/PublicFloorMap";
+import { PublicLiveRefresh } from "@/components/customer/PublicLiveRefresh";
 import { formatLastUpdated } from "@/lib/helpers";
 import type { PublicRestaurantView } from "@/lib/repositories/prisma/public-restaurant-view";
 
@@ -12,15 +14,22 @@ export function LiveRestaurantDetail({
   slug: string;
 }) {
   return (
-    <main className="mx-auto max-w-3xl px-5 py-10">
+    <main className="mx-auto max-w-5xl px-5 py-10">
       <p className="text-sm text-stone-500">
-        {restaurant.cuisineType ? `${restaurant.cuisineType} · ${restaurant.location}` : restaurant.location}
+        {restaurant.cuisineType
+          ? `${restaurant.cuisineType} · ${restaurant.location}`
+          : restaurant.location}
       </p>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-bold">{restaurant.name}</h1>
         <StatusBadge status={restaurant.walkInStatus} />
       </div>
-      <div className="mt-7 grid gap-4 sm:grid-cols-3">
+
+      <div className="mt-4">
+        <PublicLiveRefresh />
+      </div>
+
+      <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <PageCard>
           <b>{restaurant.estimatedWaitMinutes} min</b>
           <p className="text-sm text-stone-500">estimated wait</p>
@@ -33,20 +42,56 @@ export function LiveRestaurantDetail({
           <b>
             {restaurant.availableTables} of {restaurant.activeTables}
           </b>
-          <p className="text-sm text-stone-500">tables available</p>
+          <p className="text-sm text-stone-500">tables available now</p>
+        </PageCard>
+        <PageCard>
+          <b>{restaurant.availableSeatCapacity}</b>
+          <p className="text-sm text-stone-500">seats across open tables</p>
+        </PageCard>
+        <PageCard>
+          <b>
+            {restaurant.largestAvailableTable
+              ? `${restaurant.largestAvailableTable} seats`
+              : "None"}
+          </b>
+          <p className="text-sm text-stone-500">largest open table</p>
+        </PageCard>
+        <PageCard>
+          <b>{restaurant.preparingTables}</b>
+          <p className="text-sm text-stone-500">tables being prepared</p>
         </PageCard>
       </div>
+
       <PageCard className="mt-5">
         <p className="text-sm text-stone-500">
           Last updated {formatLastUpdated(restaurant.lastUpdatedAt)}
         </p>
+        {restaurant.reservedTables > 0 && (
+          <p className="mt-2 text-sm text-stone-600">
+            {restaurant.reservedTables} table
+            {restaurant.reservedTables === 1 ? " is" : "s are"} currently reserved.
+          </p>
+        )}
         {restaurant.stale && (
           <p className="mt-2 text-sm font-medium text-amber-700">
             Live information may be a few minutes old.
           </p>
         )}
       </PageCard>
-      <div className="mt-6 flex flex-wrap gap-3">
+
+      {restaurant.publicFloor ? (
+        <PublicFloorMap floor={restaurant.publicFloor} />
+      ) : (
+        <PageCard className="mt-8">
+          <p className="font-semibold text-stone-800">Dining layout not published yet</p>
+          <p className="mt-1 text-sm leading-6 text-stone-500">
+            Live wait and table totals are available, but the restaurant has not
+            published a customer-visible floor layout yet.
+          </p>
+        </PageCard>
+      )}
+
+      <div className="mt-8 flex flex-wrap gap-3">
         <Link
           href={`/restaurants/${slug}/waitlist`}
           className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900"
