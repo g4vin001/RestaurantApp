@@ -46,12 +46,26 @@ export function LiveRestaurantDetail({
           </p>
         )}
       </PageCard>
-      <Link
-        href={`/restaurants/${slug}/book`}
-        className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900"
-      >
-        Book a table
-      </Link>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Link
+          href={`/restaurants/${slug}/waitlist`}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900"
+        >
+          Join waitlist
+        </Link>
+        <Link
+          href={`/restaurants/${slug}/book`}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-800 hover:bg-stone-50"
+        >
+          Book a table
+        </Link>
+        <Link
+          href="/my/waitlist"
+          className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+        >
+          My waitlist
+        </Link>
+      </div>
     </main>
   );
 }
