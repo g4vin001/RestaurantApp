@@ -7,3 +7,9 @@ node_modules
 
 .vercel
 .env*
+# Prisma's auto-generated AI-agent reference docs (from `prisma init`) —
+# vendor documentation, not project code; symlinks are Windows-fragile.
+/.agents/
+/.windsurf/
+/.claude/skills/
+skills-lock.json
