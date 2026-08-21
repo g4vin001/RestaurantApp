@@ -825,6 +825,10 @@ export function setReservationStatus(
   );
   if (!reservation) return { ok: false, error: "Reservation was not found." };
   const allowed: Record<Reservation["status"], Reservation["status"][]> = {
+    // Demo-mode reservations never start PENDING_APPROVAL today (they're
+    // created CONFIRMED directly, same as staff-entered ones always were) —
+    // no transitions defined here until that changes.
+    PENDING_APPROVAL: [],
     CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
     ARRIVED: ["CANCELLED", "NO_SHOW"],
     SEATED: ["COMPLETED"],

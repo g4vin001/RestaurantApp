@@ -94,6 +94,7 @@ enum QueueStatus {
 }
 
 enum ReservationStatus {
+  PENDING_APPROVAL
   CONFIRMED
   ARRIVED
   SEATED

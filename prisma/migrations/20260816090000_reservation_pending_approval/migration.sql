@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ReservationStatus" ADD VALUE 'PENDING_APPROVAL' BEFORE 'CONFIRMED';

@@ -76,7 +76,7 @@ describeWithDatabase("customer reservation booking", () => {
     });
     expect(reservation.customerProfileId).toBe(customerAId);
     expect(reservation.createdById).toBeNull();
-    expect(reservation.status).toBe("CONFIRMED");
+    expect(reservation.status).toBe("PENDING_APPROVAL");
   });
 
   it("rejects a booking that would exceed total capacity in the overlap window", async () => {
@@ -146,7 +146,7 @@ describeWithDatabase("customer reservation booking", () => {
     } satisfies Partial<OperationsRepositoryError>);
 
     const totalBooked = await client.reservation.aggregate({
-      where: { restaurantId, status: "CONFIRMED" },
+      where: { restaurantId, status: "PENDING_APPROVAL" },
       _sum: { partySize: true },
     });
     expect(totalBooked._sum.partySize).toBeLessThanOrEqual(TOTAL_CAPACITY);
