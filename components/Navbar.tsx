@@ -34,11 +34,14 @@ export async function Navbar() {
         <div className="flex items-center gap-4 text-sm text-stone-600">
           <Link href="/manager">Manager</Link>
           {user ? (
-            <form action={logout}>
-              <button type="submit" className="font-medium text-stone-700">
-                Log out
-              </button>
-            </form>
+            <>
+              <Link href="/reservations">My reservations</Link>
+              <form action={logout}>
+                <button type="submit" className="font-medium text-stone-700">
+                  Log out
+                </button>
+              </form>
+            </>
           ) : (
             <Link href="/login" className="font-medium text-emerald-700">
               Log in

@@ -14,6 +14,42 @@ export type CreateCustomerReservationInput = {
 
 export type CreateCustomerReservationResult = { reservationId: string };
 
+export type CustomerReservation = {
+  id: string;
+  restaurantName: string;
+  partyName: string;
+  partySize: number;
+  scheduledAt: Date;
+  status: string;
+};
+
+export async function fetchCustomerReservations(
+  client: PrismaClient,
+  customerProfileId: string,
+): Promise<CustomerReservation[]> {
+  const reservations = await client.reservation.findMany({
+    where: { customerProfileId },
+    select: {
+      id: true,
+      partyName: true,
+      partySize: true,
+      scheduledAt: true,
+      status: true,
+      restaurant: { select: { name: true } },
+    },
+    orderBy: { scheduledAt: "desc" },
+  });
+
+  return reservations.map((reservation) => ({
+    id: reservation.id,
+    restaurantName: reservation.restaurant.name,
+    partyName: reservation.partyName,
+    partySize: reservation.partySize,
+    scheduledAt: reservation.scheduledAt,
+    status: reservation.status,
+  }));
+}
+
 // Matches the ±90min heuristic already used by the manager-side domain layer
 // (lib/domain/operations.ts's reservationConflict) — kept consistent rather
 // than inventing a different overlap model.
