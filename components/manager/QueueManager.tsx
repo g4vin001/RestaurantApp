@@ -86,6 +86,7 @@ function QueueStatus({ status }: { status: QueueEntry["status"] }) {
 
 function ReservationStatus({ status }: { status: Reservation["status"] }) {
   const styles: Record<Reservation["status"], string> = {
+    PENDING_APPROVAL: "bg-amber-50 text-amber-700 border-amber-200",
     CONFIRMED: "bg-violet-50 text-violet-700 border-violet-200",
     ARRIVED: "bg-sky-50 text-sky-700 border-sky-200",
     SEATED: "bg-emerald-50 text-emerald-700 border-emerald-200",

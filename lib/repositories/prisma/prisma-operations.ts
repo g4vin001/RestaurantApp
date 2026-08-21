@@ -209,7 +209,7 @@ async function fetchRestaurantSnapshot(
       reservations: {
         where: {
           OR: [
-            { status: { in: ["CONFIRMED", "ARRIVED", "SEATED"] } },
+            { status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED", "SEATED"] } },
             { scheduledAt: { gte: historyStart, lte: reservationEnd } },
           ],
         },

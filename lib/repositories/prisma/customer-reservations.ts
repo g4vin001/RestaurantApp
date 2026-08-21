@@ -54,7 +54,10 @@ export async function fetchCustomerReservations(
 // (lib/domain/operations.ts's reservationConflict) — kept consistent rather
 // than inventing a different overlap model.
 const OVERLAP_WINDOW_MS = 90 * 60_000;
-const ACTIVE_STATUSES = ["CONFIRMED", "ARRIVED", "SEATED"] as const;
+// Includes PENDING_APPROVAL — an unreviewed booking still holds a claim on
+// capacity, otherwise a customer could stack multiple pending requests past
+// what the restaurant can actually seat.
+const ACTIVE_STATUSES = ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED", "SEATED"] as const;
 const MAX_ATTEMPTS = 3;
 
 async function attemptCreate(
@@ -108,7 +111,7 @@ async function attemptCreate(
           contact: input.contact,
           notes: input.notes,
           scheduledAt: input.scheduledAt,
-          status: "CONFIRMED",
+          status: "PENDING_APPROVAL",
           customerProfileId: input.customerProfileId,
         },
         select: { id: true },

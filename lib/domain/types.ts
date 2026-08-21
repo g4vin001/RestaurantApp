@@ -151,6 +151,7 @@ export interface Reservation {
   partySize: number;
   scheduledAt: string;
   status:
+    | "PENDING_APPROVAL"
     | "CONFIRMED"
     | "ARRIVED"
     | "SEATED"
