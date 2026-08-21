@@ -6,7 +6,10 @@ export async function Navbar() {
   if (process.env.NEXT_PUBLIC_HALINA_DEMO_MODE === "true") {
     return (
       <header className="border-b border-stone-200 bg-white">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+        <nav
+          aria-label="Main navigation"
+          className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4"
+        >
           <Link href="/" className="text-xl font-bold text-emerald-800">
             Halina
           </Link>
@@ -27,7 +30,10 @@ export async function Navbar() {
 
   return (
     <header className="border-b border-stone-200 bg-white">
-      <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+      <nav
+        aria-label="Main navigation"
+        className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4"
+      >
         <Link href="/" className="text-xl font-bold text-emerald-800">
           Halina
         </Link>
