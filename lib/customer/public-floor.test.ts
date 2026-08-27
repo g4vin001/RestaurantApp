@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@/lib/generated/prisma/client";
+import {
+  fetchPublicRestaurantBySlug,
+  fetchPublicRestaurants,
+} from "@/lib/repositories/prisma/public-restaurant-view";
 import { buildPublicFloor, toPublicTableStatus } from "./public-floor";
 
 describe("public floor projection", () => {
@@ -103,7 +108,33 @@ describe("public floor projection", () => {
       capacity: 4,
       status: "IN_USE",
     });
-    expect(floor?.elements.some((element) => element.type === "KITCHEN")).toBe(false);
+    expect(floor?.elements.map((element) => String(element.type))).not.toContain("KITCHEN");
     expect(floor?.elements.some((element) => element.label === "Internal note")).toBe(false);
+  });
+
+  it("excludes TEST and archived restaurants from every public query", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const client = {
+      restaurant: { findMany, findFirst },
+    } as unknown as PrismaClient;
+
+    await fetchPublicRestaurants(client);
+    await fetchPublicRestaurantBySlug(client, "hidden-test-restaurant");
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { environment: "LIVE", archivedAt: null },
+      }),
+    );
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          slug: "hidden-test-restaurant",
+          environment: "LIVE",
+          archivedAt: null,
+        },
+      }),
+    );
   });
 });

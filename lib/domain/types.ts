@@ -28,6 +28,17 @@ export type FloorElementType =
 
 export type TableShape = "ROUND" | "SQUARE" | "RECTANGLE" | "BOOTH";
 
+export type RestaurantEnvironment = "LIVE" | "TEST";
+
+export type StaffPermission =
+  | "VIEW_LIVE_FLOOR"
+  | "CHANGE_TABLE_STATUS"
+  | "VIEW_QUEUE"
+  | "VIEW_CONTACT_DETAILS"
+  | "MANAGE_QUEUE"
+  | "SEAT_PARTIES"
+  | "CORRECT_RECENT_ACTION";
+
 export interface FloorElement {
   id: string;
   type: FloorElementType;
@@ -87,6 +98,8 @@ export interface RestaurantIdentity {
   cleaningTargetMinutes: number;
   opensAtHour: number;
   closesAtHour: number;
+  environment?: RestaurantEnvironment;
+  revision?: number;
 }
 
 export interface DiningTable {
@@ -105,6 +118,7 @@ export interface DiningTable {
   rotation: number;
   shape: TableShape;
   active: boolean;
+  revision?: number;
 }
 
 export interface QueueEntry {
@@ -124,6 +138,8 @@ export interface QueueEntry {
   assignedTableId?: string;
   assignedTableIds?: string[];
   updatedAt: string;
+  revision?: number;
+  position?: number;
 }
 
 export interface TableSession {
@@ -168,6 +184,7 @@ export interface Reservation {
   cancelledAt?: string;
   noShowAt?: string;
   updatedAt: string;
+  revision?: number;
 }
 
 export type StaffPermissionPreset = "MANAGER" | "HOST" | "FLOOR_STAFF";
@@ -182,7 +199,12 @@ export interface StaffMember {
   name: string;
   jobTitle: string;
   contact?: string;
+  email?: string;
   permissionPreset: StaffPermissionPreset;
+  staffRoleId?: string;
+  staffRoleName?: string;
+  permissions?: StaffPermission[];
+  revision?: number;
   active: boolean;
   accessStatus: StaffAccessStatus;
   createdAt: string;

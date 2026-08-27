@@ -26,7 +26,7 @@ export function LiveRestaurantDetail({
       </div>
 
       <div className="mt-4">
-        <PublicLiveRefresh />
+        <PublicLiveRefresh slug={slug} />
       </div>
 
       <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

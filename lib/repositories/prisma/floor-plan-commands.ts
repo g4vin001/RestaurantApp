@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { validateFloor } from "@/lib/domain/floor-plan";
 import type {
@@ -36,6 +36,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type FloorPlanMutationInput = {
+  commandId: string;
   planId: string;
   name: string;
   elements: FloorElement[];
@@ -132,6 +133,8 @@ export function validateFloorPlanMutation(input: unknown): FloorPlanMutationInpu
     invalid("Floor-plan input is invalid.");
   }
   const raw = input as Record<string, unknown>;
+  const commandId = text(raw.commandId, "Command ID", 80, true) as string;
+  if (!UUID_PATTERN.test(commandId)) invalid("Command ID is invalid.");
   const planId = text(raw.planId, "Floor plan ID", 80, true) as string;
   if (!UUID_PATTERN.test(planId)) invalid("Floor plan ID is invalid.");
   const name = text(raw.name, "Floor plan name", 120, true) as string;
@@ -142,12 +145,96 @@ export function validateFloorPlanMutation(input: unknown): FloorPlanMutationInpu
   if (new Set(elements.map((element) => element.id)).size !== elements.length) {
     invalid("Floor element IDs must be unique.");
   }
+  const tableLabels = elements
+    .filter((element) => element.type === "TABLE")
+    .map((element) => element.label.trim().toLocaleLowerCase("en"));
+  if (new Set(tableLabels).size !== tableLabels.length) {
+    invalid("Active table labels must be unique within the restaurant.");
+  }
   return {
+    commandId,
     planId,
     name,
     elements,
     draftRevision: integer(raw.draftRevision, "Draft revision", 0, Number.MAX_SAFE_INTEGER),
   };
+}
+
+function floorCommandFingerprint(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+async function findFloorCommandReplay(
+  transaction: Prisma.TransactionClient,
+  scope: PrismaOperationsScope,
+  commandId: string,
+  commandType: string,
+  payload: unknown,
+) {
+  if (!scope.membershipId) {
+    throw new OperationsRepositoryError(
+      "FORBIDDEN",
+      "An active manager membership is required to save floor changes.",
+    );
+  }
+  const replay = await transaction.operationCommand.findUnique({
+    where: { id: commandId },
+  });
+  if (!replay) return null;
+  const result =
+    replay.result && typeof replay.result === "object" && !Array.isArray(replay.result)
+      ? replay.result
+      : null;
+  if (
+    replay.restaurantId !== scope.restaurantId ||
+    replay.actorMembershipId !== scope.membershipId ||
+    replay.commandType !== commandType ||
+    result?.fingerprint !== floorCommandFingerprint(payload)
+  ) {
+    throw new OperationsRepositoryError(
+      "CONFLICT",
+      "This floor command identifier was already used for another change.",
+    );
+  }
+  return result;
+}
+
+async function recordFloorCommand(
+  transaction: Prisma.TransactionClient,
+  scope: PrismaOperationsScope,
+  input: {
+    commandId: string;
+    commandType: string;
+    entityId: string;
+    payload: unknown;
+    result?: Prisma.InputJsonObject;
+  },
+) {
+  if (!scope.membershipId) {
+    throw new OperationsRepositoryError(
+      "FORBIDDEN",
+      "An active manager membership is required to save floor changes.",
+    );
+  }
+  await transaction.operationCommand.create({
+    data: {
+      id: input.commandId,
+      restaurantId: scope.restaurantId,
+      actorMembershipId: scope.membershipId,
+      commandType: input.commandType,
+      entityType: "FloorPlan",
+      entityId: input.entityId,
+      result: {
+        ok: true,
+        fingerprint: floorCommandFingerprint(input.payload),
+        ...input.result,
+      },
+    },
+  });
+  await transaction.restaurant.update({
+    where: { id: scope.restaurantId },
+    data: { lastOperationalUpdateAt: new Date() },
+  });
 }
 
 function scopedPlanWhere(scope: PrismaOperationsScope, planId: string) {
@@ -180,6 +267,18 @@ function draftSnapshot(
 
 function errorFromUnknown(error: unknown) {
   if (error instanceof OperationsRepositoryError) return error;
+  if (
+    typeof error === "object" &&
+    error &&
+    "code" in error &&
+    error.code === "P2034"
+  ) {
+    return new OperationsRepositoryError(
+      "CONFLICT",
+      "This floor plan changed on another device. Halina kept the latest saved version.",
+      { cause: error },
+    );
+  }
   return new OperationsRepositoryError(
     "PERSISTENCE",
     "Halina could not save the floor plan. Please try again.",
@@ -195,6 +294,17 @@ export async function saveFloorPlanDraft(
   const input = validateFloorPlanMutation(rawInput);
   try {
     await client.$transaction(async (transaction) => {
+      if (
+        await findFloorCommandReplay(
+          transaction,
+          scope,
+          input.commandId,
+          "SAVE_FLOOR_DRAFT",
+          input,
+        )
+      ) {
+        return;
+      }
       const plan = await transaction.floorPlan.findFirst({
         where: scopedPlanWhere(scope, input.planId),
         select: { id: true, logicalWidth: true, logicalHeight: true, draftRevision: true },
@@ -226,6 +336,12 @@ export async function saveFloorPlanDraft(
           "This floor plan was changed on another device. Refresh and try again.",
         );
       }
+      await recordFloorCommand(transaction, scope, {
+        commandId: input.commandId,
+        commandType: "SAVE_FLOOR_DRAFT",
+        entityId: plan.id,
+        payload: input,
+      });
     }, { isolationLevel: "Serializable" });
   } catch (error) {
     throw errorFromUnknown(error);
@@ -240,6 +356,17 @@ export async function publishFloorPlan(
   const input = validateFloorPlanMutation(rawInput);
   try {
     await client.$transaction(async (transaction) => {
+      if (
+        await findFloorCommandReplay(
+          transaction,
+          scope,
+          input.commandId,
+          "PUBLISH_FLOOR_PLAN",
+          input,
+        )
+      ) {
+        return;
+      }
       const plan = await transaction.floorPlan.findFirst({
         where: scopedPlanWhere(scope, input.planId),
         select: {
@@ -275,13 +402,29 @@ export async function publishFloorPlan(
         .map((element) => element.tableId)
         .filter((id): id is string => Boolean(id && UUID_PATTERN.test(id)));
       const existingTables = await transaction.diningTable.findMany({
-        where: { restaurantId: scope.restaurantId, id: { in: suppliedTableIds } },
+        where: {
+          restaurantId: scope.restaurantId,
+          OR: [
+            { id: { in: suppliedTableIds } },
+            { active: true, archivedAt: null },
+          ],
+        },
       });
       const existingById = new Map(existingTables.map((table) => [table.id, table]));
+      const existingByLabel = new Map(
+        existingTables
+          .filter((table) => table.active && !table.archivedAt)
+          .map((table) => [
+            table.label.trim().toLocaleLowerCase("en"),
+            table,
+          ]),
+      );
       const canonicalTableIdByElementId = new Map<string, string>();
 
       for (const element of tableElements) {
-        const existing = element.tableId ? existingById.get(element.tableId) : undefined;
+        const existing =
+          (element.tableId ? existingById.get(element.tableId) : undefined) ??
+          existingByLabel.get(element.label.trim().toLocaleLowerCase("en"));
         if (existing) {
           canonicalTableIdByElementId.set(element.id, existing.id);
           continue;
@@ -451,6 +594,175 @@ export async function publishFloorPlan(
           "This floor plan was changed on another device. Refresh and try again.",
         );
       }
+      await recordFloorCommand(transaction, scope, {
+        commandId: input.commandId,
+        commandType: "PUBLISH_FLOOR_PLAN",
+        entityId: plan.id,
+        payload: input,
+        result: { versionId: version.id },
+      });
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    throw errorFromUnknown(error);
+  }
+}
+
+export async function createFloorPlan(
+  client: PrismaClient,
+  scope: PrismaOperationsScope,
+  rawName: unknown,
+  commandId: string,
+) {
+  const name = text(rawName, "Floor plan name", 120, true) as string;
+  if (!UUID_PATTERN.test(commandId)) invalid("Command ID is invalid.");
+  const payload = { commandId, name };
+  try {
+    return await client.$transaction(async (transaction) => {
+      const replay = await findFloorCommandReplay(
+        transaction,
+        scope,
+        commandId,
+        "CREATE_FLOOR_PLAN",
+        payload,
+      );
+      if (replay) {
+        const planId = typeof replay.planId === "string" ? replay.planId : null;
+        if (!planId) {
+          throw new OperationsRepositoryError(
+            "PERSISTENCE",
+            "The saved floor command has no result identifier.",
+          );
+        }
+        return { id: planId };
+      }
+      const restaurant = await transaction.restaurant.findFirst({
+        where: {
+          id: scope.restaurantId,
+          memberships: {
+            some: {
+              profileId: scope.profileId,
+              active: true,
+              role: { in: ["OWNER", "MANAGER"] },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      if (!restaurant) {
+        throw new OperationsRepositoryError("FORBIDDEN", "You cannot create a floor for this restaurant.");
+      }
+      const plan = await transaction.floorPlan.create({
+        data: {
+          restaurantId: scope.restaurantId,
+          name,
+          draftSnapshot: { elements: [], logicalWidth: 1600, logicalHeight: 1000 },
+        },
+        select: { id: true },
+      });
+      await recordFloorCommand(transaction, scope, {
+        commandId,
+        commandType: "CREATE_FLOOR_PLAN",
+        entityId: plan.id,
+        payload,
+        result: { planId: plan.id },
+      });
+      return plan;
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    throw errorFromUnknown(error);
+  }
+}
+
+export async function restoreFloorPlanVersion(
+  client: PrismaClient,
+  scope: PrismaOperationsScope,
+  input: {
+    commandId: string;
+    planId: string;
+    versionId: string;
+    expectedRevision: number;
+  },
+) {
+  if (
+    !UUID_PATTERN.test(input.commandId) ||
+    !UUID_PATTERN.test(input.planId) ||
+    !UUID_PATTERN.test(input.versionId)
+  ) {
+    invalid("Floor plan version is invalid.");
+  }
+  try {
+    await client.$transaction(async (transaction) => {
+      if (
+        await findFloorCommandReplay(
+          transaction,
+          scope,
+          input.commandId,
+          "RESTORE_FLOOR_VERSION",
+          input,
+        )
+      ) {
+        return;
+      }
+      const plan = await transaction.floorPlan.findFirst({
+        where: scopedPlanWhere(scope, input.planId),
+        include: {
+          versions: {
+            where: { id: input.versionId },
+            include: { elements: { orderBy: { zIndex: "asc" } } },
+          },
+        },
+      });
+      if (!plan || plan.versions.length !== 1) {
+        throw new OperationsRepositoryError("FORBIDDEN", "You cannot restore this floor version.");
+      }
+      if (plan.draftRevision !== input.expectedRevision) {
+        throw new OperationsRepositoryError("CONFLICT", "This floor changed on another device.");
+      }
+      const version = plan.versions[0];
+      const elements: FloorElement[] = version.elements.map((element) => {
+        const properties = element.properties && typeof element.properties === "object" && !Array.isArray(element.properties)
+          ? element.properties as Record<string, unknown>
+          : {};
+        return {
+          id: element.stableElementId,
+          type: element.type,
+          x: element.x,
+          y: element.y,
+          width: element.width,
+          height: element.height,
+          rotation: element.rotation,
+          zIndex: element.zIndex,
+          locked: element.locked,
+          visible: element.visible,
+          label: element.label,
+          ...(element.zone ? { zone: element.zone } : {}),
+          ...(element.diningTableId ? { tableId: element.diningTableId } : {}),
+          ...(element.shape ? { shape: element.shape } : {}),
+          ...(typeof properties.capacity === "number" ? { capacity: properties.capacity } : {}),
+          ...(typeof properties.minPartySize === "number" ? { minPartySize: properties.minPartySize } : {}),
+          ...(typeof properties.maxPartySize === "number" ? { maxPartySize: properties.maxPartySize } : {}),
+          ...(typeof properties.notes === "string" ? { notes: properties.notes } : {}),
+          ...(typeof properties.color === "string" ? { color: properties.color } : {}),
+        };
+      });
+      const updated = await transaction.floorPlan.updateMany({
+        where: { id: plan.id, restaurantId: scope.restaurantId, draftRevision: input.expectedRevision },
+        data: {
+          name: `${version.name} restored`,
+          draftRevision: { increment: 1 },
+          draftSnapshot: draftSnapshot(elements, version.logicalWidth, version.logicalHeight),
+        },
+      });
+      if (updated.count !== 1) {
+        throw new OperationsRepositoryError("CONFLICT", "This floor changed on another device.");
+      }
+      await recordFloorCommand(transaction, scope, {
+        commandId: input.commandId,
+        commandType: "RESTORE_FLOOR_VERSION",
+        entityId: plan.id,
+        payload: input,
+        result: { versionId: version.id },
+      });
     }, { isolationLevel: "Serializable" });
   } catch (error) {
     throw errorFromUnknown(error);

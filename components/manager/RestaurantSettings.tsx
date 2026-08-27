@@ -34,9 +34,9 @@ export function RestaurantSettings() {
     setClosesAtHour(state.restaurant.closesAtHour);
   }, [state.restaurant]);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = updateRestaurant({
+    const result = await updateRestaurant({
       name,
       location,
       isOpen,

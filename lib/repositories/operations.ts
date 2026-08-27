@@ -1,4 +1,8 @@
 import type { OperationsState } from "@/lib/domain/types";
+import type {
+  DatabaseOperationsCommand,
+  OperationsCommandResult,
+} from "@/lib/repositories/commands";
 
 export type OperationsRepositoryMode = "demo" | "database";
 
@@ -25,19 +29,14 @@ export interface OperationsRepository {
   loadSnapshot(): Promise<OperationsState>;
 }
 
+export interface WritableOperationsRepository extends OperationsRepository {
+  execute(command: DatabaseOperationsCommand): Promise<OperationsState>;
+}
+
 export function resolveOperationsRepositoryMode(
   demoModeValue: string | undefined,
 ): OperationsRepositoryMode {
   return demoModeValue === "true" ? "demo" : "database";
 }
 
-export function databaseWritePending(): {
-  ok: false;
-  error: string;
-} {
-  return {
-    ok: false,
-    error:
-      "This screen is reading shared restaurant data, but database writes are not enabled for this action yet.",
-  };
-}
+export type { DatabaseOperationsCommand, OperationsCommandResult };

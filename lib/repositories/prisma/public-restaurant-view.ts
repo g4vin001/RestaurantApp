@@ -119,8 +119,8 @@ export async function fetchPublicRestaurantBySlug(
   slug: string,
   now = new Date(),
 ) {
-  const restaurant = await client.restaurant.findUnique({
-    where: { slug },
+  const restaurant = await client.restaurant.findFirst({
+    where: { slug, environment: "LIVE", archivedAt: null },
     select: {
       id: true,
       slug: true,
@@ -206,6 +206,7 @@ export async function fetchPublicRestaurants(
   now = new Date(),
 ) {
   const restaurants = await client.restaurant.findMany({
+    where: { environment: "LIVE", archivedAt: null },
     select: {
       id: true,
       slug: true,

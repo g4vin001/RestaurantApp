@@ -29,8 +29,8 @@ export async function joinCustomerWaitlist(
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > 30)
     return { error: "Party size must be between 1 and 30." };
 
-  const restaurant = await prisma.restaurant.findUnique({
-    where: { slug },
+  const restaurant = await prisma.restaurant.findFirst({
+    where: { slug, environment: "LIVE", archivedAt: null },
     select: { id: true, walkInAvailability: true },
   });
   if (!restaurant) return { error: "Restaurant not found." };

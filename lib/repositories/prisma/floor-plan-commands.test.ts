@@ -4,6 +4,7 @@ import { validateFloorPlanMutation } from "./floor-plan-commands";
 
 function validInput() {
   return {
+    commandId: randomUUID(),
     planId: randomUUID(),
     name: "Main floor",
     draftRevision: 0,

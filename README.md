@@ -8,7 +8,7 @@ Next.js App Router, strict TypeScript, Tailwind CSS, Supabase Auth, Prisma + Pos
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - Access to the project's Supabase project (ask Gio for the needed passwords/URIs)
 
 ## Run locally
@@ -17,23 +17,12 @@ Next.js App Router, strict TypeScript, Tailwind CSS, Supabase Auth, Prisma + Pos
 npm install
 ```
 
-Create two env files in the project root (both are gitignored):
+Copy `.env.example` to `.env.local` for local development. The file is
+gitignored. Never commit or paste its values into issues or pull requests.
 
-**`.env.local`** — used by the Next.js app for Supabase Auth:
-
-```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-```
-
-**`.env`** — used by Prisma to reach the Supabase Postgres database:
-
-```
-DATABASE_URL=   # Supabase "Transaction pooler" connection string (port 6543)
-DIRECT_URL=     # Supabase "Session pooler" connection string (port 5432)
-```
-
-Get all four values from Supabase dashboard → Project Settings → Database / API.
+`DATABASE_URL` is the pooled runtime connection on port `6543`. `DIRECT_URL`
+is the direct/session connection on port `5432` and is used only by Prisma CLI
+migration commands. Supabase Auth values come from Project Settings → API.
 
 `npm install` automatically generates the Prisma client through the `postinstall` script. Its output remains gitignored. You can also regenerate it explicitly after a schema change:
 
@@ -41,13 +30,18 @@ Get all four values from Supabase dashboard → Project Settings → Database / 
 npx prisma generate
 ```
 
-Only if the database itself is missing tables (e.g. you're pointing at a brand-new Supabase project, not the shared one) — apply the schema:
+Before applying committed migrations, verify that `DIRECT_URL` points to the
+intended non-production database without printing its credential, then run:
 
 ```bash
-npx prisma db push --url="$DIRECT_URL"
+npx prisma migrate status
+npx prisma migrate deploy
+npx prisma migrate status
 ```
 
-Note the explicit `--url` override: `db push`/`migrate dev` hang indefinitely against the pooled `DATABASE_URL` (port 6543) — Supabase's transaction-mode pooler isn't compatible with the protocol Prisma's schema engine needs. Always point schema-changing commands at `DIRECT_URL` instead.
+Never use `prisma db push`, `prisma migrate reset`, table dropping, or database
+recreation on a shared Halina database. Preview migrations must use an isolated
+Preview Supabase project; production is a separate approval gate.
 
 Finally:
 
@@ -69,11 +63,22 @@ To enter the manager demo, start the app and open [`/manager`](http://localhost:
 
 ## Current status
 
-The high-fidelity manager prototype includes a responsive manager shell, a versioned floor-plan editor, a published Live floor, queue and reservation workflows, staff records, restaurant settings, and event-derived analytics. Manager actions persist in localStorage, synchronize across tabs, and safely update the public customer view.
+The high-fidelity manager app includes a responsive shell, versioned floor-plan editor, published Live floor, queue and reservation workflows, staff records, restaurant settings, and event-derived analytics.
 
 The application now has one explicit operations-repository boundary. Demo mode uses deterministic browser persistence, while authenticated non-demo manager routes load a canonical, membership-scoped snapshot from PostgreSQL through Prisma. The database snapshot covers restaurant settings, floors and published versions, tables, recent sessions and events, queue entries, reservations, and staff records.
 
-Database-backed commands are deliberately not enabled yet. Non-demo screens identify themselves as a database snapshot and return a clear error instead of silently saving operational changes in the browser. Transactional floor publishing and table, queue, and reservation commands are the next phase. The public customer pages continue to use the isolated demo projection until the privacy-safe database projection is implemented.
+Authenticated database mode now routes Manager writes through tenant-scoped,
+revisioned, idempotent server commands. Table/session changes, combined seating,
+queue, reservations, Team records, settings, and floor drafts/publishing persist
+transactionally. Conflict and database failures never silently fall back to demo
+data. Private Realtime broadcasts invalidate manager/staff snapshots; public
+clients receive only safe projection invalidations.
+
+Team includes restricted roles, 24-hour email-bound invitations, QR/link/manual
+code sharing, revocation, and regeneration. `/ops` is limited to the staff role's
+Live Floor and Queue permissions. `/admin/data-lab` stages validated CSV/XLSX
+history and applies it only to TEST restaurants, which are excluded from every
+public discovery, booking, and waitlist route.
 
 The reviewed foundation migration is stored in `prisma/migrations/20260802170000_shared_data_foundation`. It preserves the legacy profile fields, creates owner memberships for existing manager profiles with a restaurant name, and does not grant manager access to legacy employee profiles. It is intentionally not applied automatically: review it and validate it against a disposable or development database through the direct/session connection before using it on shared data.
 
@@ -83,8 +88,15 @@ Quality commands:
 npm run lint
 npm run typecheck
 npm test
+npm run test:e2e
 npm run build
 ```
+
+`npm run test:e2e` starts the app in explicit demo mode on port 3100 and checks
+the manager shell, queue persistence, cross-tab synchronization, and mobile
+operation without requiring database credentials. Authenticated tenant,
+migration, and Data API security browser flows still require the isolated
+Preview Supabase project and dedicated test accounts.
 
 ## Available routes
 
@@ -97,19 +109,21 @@ npm run build
 - `/manager/layout` — Canva-like floor editor with draft saving and immutable publish versions
 - `/manager/queue` — live queue, table recommendations, seating, and reservation day view
 - `/manager/analytics` — period, zone, and table analytics derived from shared operational events
-- `/manager/team` — staff records and future permission presets; login access remains disabled
+- `/manager/team` — staff records, restricted roles, and invitation status
 - `/manager/settings` — restaurant identity, walk-in availability, hours, and cleaning target
+- `/ops` — restricted invited-staff Live Floor and Queue workspace
+- `/admin/data-lab` — allowlisted, secondary-password TEST data import and statistics lab
 
-There is intentionally no `/employee` route. Staff are managed as records under `/manager/team`; they do not receive a separate application or public signup path in this milestone.
+There is intentionally no `/employee` route. Staff use normal Supabase-authenticated Halina accounts and redeem an email-bound invite for restricted `/ops` access.
 
 ## Known limitations
 
-- Authenticated manager reads now come from PostgreSQL, but operational writes are still pending and the snapshot does not yet subscribe to realtime changes.
-- The shared-data Prisma migration is prepared but has not been applied to Supabase.
-- The public customer view remains on the isolated demo projection until the database-backed privacy-safe projection is implemented.
-- `npm audit --omit=dev` currently reports three high advisories inherited through Next 15's bundled PostCSS/Sharp dependency path. npm only proposes a breaking downgrade to Next 9, so that automated fix is intentionally not applied; recheck when a compatible Next 15 patch is available.
+- The new shared-operations and RLS migrations are committed but must not be applied to production until an isolated Preview Supabase project passes migration, Data API denial, runtime-log, and browser verification.
+- Preview deployment is blocked while no isolated Supabase project is available; production is intentionally not used as a substitute.
+- Automatic Vercel deployment is disabled for `agent/shared-operations-staff-data-lab` in `vercel.json`. Remove that branch gate only after its isolated Preview environment variables are configured, then deploy and inspect runtime logs explicitly.
+- `npm audit` currently reports seven advisories (three moderate and four high) in the Prisma, Next/PostCSS, and ExcelJS dependency paths. npm's remaining automated proposals are breaking version changes, so `--force` is intentionally not used; recheck and upgrade through supported framework releases.
 - The floor editor is intentionally limited to tablet-landscape and desktop widths.
 - No employee application, POS, payments, ordering, payroll, or invented revenue analytics are part of this milestone.
-- End-to-end browser automation should be introduced with the future test setup; domain workflows have unit coverage.
+- Demo browser end-to-end coverage runs locally. Authenticated cross-tenant, invitation, import, and Data API denial browser flows require the isolated Preview database and test accounts.
 
 Follow [AGENTS.md](AGENTS.md) for the production persistence and security phase.

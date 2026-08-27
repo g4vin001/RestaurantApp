@@ -37,6 +37,34 @@ enum StaffAccessStatus {
   ACCESS_DISABLED
 }
 
+enum StaffPermission {
+  VIEW_LIVE_FLOOR
+  CHANGE_TABLE_STATUS
+  VIEW_QUEUE
+  VIEW_CONTACT_DETAILS
+  MANAGE_QUEUE
+  SEAT_PARTIES
+  CORRECT_RECENT_ACTION
+}
+
+enum RestaurantEnvironment {
+  LIVE
+  TEST
+}
+
+enum SeatingAssignmentStatus {
+  ACTIVE
+  CLEARING
+  COMPLETED
+  CORRECTED
+}
+
+enum ImportBatchStatus {
+  STAGED
+  APPLIED
+  REVERTED
+}
+
 enum WalkInAvailability {
   AVAILABLE
   LIMITED
@@ -122,6 +150,10 @@ model Profile {
   customerReservations   Reservation[]          @relation("ReservationCustomer")
   staffInvitesCreated    StaffInvite[]          @relation("StaffInviteCreatedBy")
   staffInvitesRedeemed   StaffInvite[]          @relation("StaffInviteRedeemedBy")
+  inviteAttempts         StaffInviteAttempt[]
+  adminAuditLogs         AdminAuditLog[]
+  adminAuthAttempts      AdminAuthAttempt[]
+  importBatches          SyntheticImportBatch[]
 }
 
 model Restaurant {
@@ -134,6 +166,9 @@ model Restaurant {
   locale                  String                 @default("en-PH")
   operatingSettings       Json                   @default("{}")
   walkInAvailability      WalkInAvailability     @default(AVAILABLE)
+  environment             RestaurantEnvironment  @default(LIVE)
+  revision                Int                    @default(0)
+  archivedAt              DateTime?
   lastOperationalUpdateAt DateTime?
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
@@ -146,19 +181,31 @@ model Restaurant {
   diningSessions          DiningSession[]
   queueEntries            QueueEntry[]
   reservations            Reservation[]
+  staffRoles              StaffRole[]
+  seatingAssignments      SeatingAssignment[]
+  operationCommands       OperationCommand[]
+  importBatches           SyntheticImportBatch[]
+  adminAuditLogs          AdminAuditLog[]
+
+  @@index([environment, archivedAt])
 }
 
 model RestaurantMembership {
-  id           String         @id @default(uuid()) @db.Uuid
-  restaurantId String         @db.Uuid
-  profileId    String         @db.Uuid
-  role         MembershipRole
-  active       Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  restaurant   Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  profile      Profile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  staffRecord  StaffMember?
+  id                  String                 @id @default(uuid()) @db.Uuid
+  restaurantId        String                 @db.Uuid
+  profileId           String                 @db.Uuid
+  role                MembershipRole
+  active              Boolean                @default(true)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  restaurant          Restaurant             @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  profile             Profile                @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  staffRecord         StaffMember?
+  staffInvitesCreated StaffInvite[]          @relation("StaffInviteCreatedByMembership")
+  tableStatusEvents   TableStatusEvent[]     @relation("TableStatusEventActorMembership")
+  operationCommands   OperationCommand[]
+  importBatches       SyntheticImportBatch[]
+  adminAuditLogs      AdminAuditLog[]
 
   @@unique([restaurantId, profileId])
   @@index([profileId, active])
@@ -169,41 +216,86 @@ model StaffMember {
   id               String                @id @default(uuid()) @db.Uuid
   restaurantId     String                @db.Uuid
   membershipId     String?               @unique @db.Uuid
+  staffRoleId      String?               @db.Uuid
   name             String
   jobTitle         String
   contact          String?
+  email            String?
   permissionPreset StaffPermissionPreset
   accessStatus     StaffAccessStatus     @default(NOT_INVITED)
   active           Boolean               @default(true)
   archivedAt       DateTime?
+  revision         Int                   @default(0)
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
   restaurant       Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   membership       RestaurantMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  staffRole        StaffRole?            @relation(fields: [staffRoleId], references: [id], onDelete: SetNull)
   invites          StaffInvite[]
 
   @@index([restaurantId, active])
+  @@index([restaurantId, email])
+  @@index([staffRoleId])
+}
+
+model StaffRole {
+  id           String            @id @default(uuid()) @db.Uuid
+  restaurantId String            @db.Uuid
+  name         String
+  permissions  StaffPermission[] @default([])
+  presetKey    String?
+  archivedAt   DateTime?
+  revision     Int               @default(0)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staffMembers StaffMember[]
+  invites      StaffInvite[]
+
+  @@unique([restaurantId, name])
+  @@index([restaurantId, archivedAt])
 }
 
 model StaffInvite {
-  id             String                 @id @default(uuid()) @db.Uuid
-  restaurantId   String                 @db.Uuid
-  staffMemberId  String                 @db.Uuid
-  tokenHash      String                 @unique
-  shortCodeHash  String                 @unique
-  expiresAt      DateTime
-  acceptedAt     DateTime?
-  revokedAt      DateTime?
-  createdById    String                 @db.Uuid
-  redeemedById   String?                @db.Uuid
-  createdAt      DateTime               @default(now())
-  restaurant     Restaurant             @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  staffMember    StaffMember            @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
-  createdBy      Profile                @relation("StaffInviteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  redeemedBy     Profile?               @relation("StaffInviteRedeemedBy", fields: [redeemedById], references: [id], onDelete: SetNull)
+  id                    String                @id @default(uuid()) @db.Uuid
+  restaurantId          String                @db.Uuid
+  staffMemberId         String                @db.Uuid
+  staffRoleId           String?               @db.Uuid
+  recipientEmail        String
+  tokenHash             String                @unique
+  shortCodeHash         String                @unique
+  expiresAt             DateTime
+  acceptedAt            DateTime?
+  revokedAt             DateTime?
+  createdById           String                @db.Uuid
+  createdByMembershipId String?               @db.Uuid
+  redeemedById          String?               @db.Uuid
+  createdAt             DateTime              @default(now())
+  restaurant            Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staffMember           StaffMember           @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  staffRole             StaffRole?            @relation(fields: [staffRoleId], references: [id], onDelete: SetNull)
+  createdBy             Profile               @relation("StaffInviteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  redeemedBy            Profile?              @relation("StaffInviteRedeemedBy", fields: [redeemedById], references: [id], onDelete: SetNull)
+  createdByMembership   RestaurantMembership? @relation("StaffInviteCreatedByMembership", fields: [createdByMembershipId], references: [id], onDelete: SetNull)
+  attempts              StaffInviteAttempt[]
 
   @@index([restaurantId, expiresAt])
   @@index([staffMemberId, acceptedAt, revokedAt])
+  @@index([recipientEmail, expiresAt])
+}
+
+model StaffInviteAttempt {
+  id          String       @id @default(uuid()) @db.Uuid
+  inviteId    String?      @db.Uuid
+  profileId   String?      @db.Uuid
+  ipHash      String
+  successful  Boolean      @default(false)
+  attemptedAt DateTime     @default(now())
+  invite      StaffInvite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+  profile     Profile?     @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([profileId, attemptedAt])
+  @@index([ipHash, attemptedAt])
 }
 
 model FloorPlan {
@@ -274,134 +366,273 @@ model FloorElement {
 }
 
 model DiningTable {
-  id                   String             @id @default(uuid()) @db.Uuid
-  restaurantId         String             @db.Uuid
+  id                   String                   @id @default(uuid()) @db.Uuid
+  restaurantId         String                   @db.Uuid
   label                String
   capacity             Int
-  minPartySize         Int                @default(1)
+  minPartySize         Int                      @default(1)
   maxPartySize         Int
-  zone                 String             @default("Main")
+  zone                 String                   @default("Main")
   shape                TableShape
-  currentStatus        TableStatus        @default(AVAILABLE)
-  statusRevision       Int                @default(0)
-  active               Boolean            @default(true)
+  currentStatus        TableStatus              @default(AVAILABLE)
+  statusRevision       Int                      @default(0)
+  active               Boolean                  @default(true)
   archivedAt           DateTime?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  restaurant           Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  syntheticBatchId     String?                  @db.Uuid
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  restaurant           Restaurant               @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   floorElements        FloorElement[]
   statusEvents         TableStatusEvent[]
   sessions             DiningSession[]
   assignedQueueEntries QueueEntry[]
   assignedReservations Reservation[]
+  seatingAssignments   SeatingAssignmentTable[]
+  syntheticBatch       SyntheticImportBatch?    @relation(fields: [syntheticBatchId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, active])
   @@index([restaurantId, currentStatus])
   @@index([restaurantId, label])
+  @@index([syntheticBatchId])
 }
 
 model TableStatusEvent {
-  id              String      @id @default(uuid()) @db.Uuid
-  restaurantId    String      @db.Uuid
-  diningTableId   String      @db.Uuid
-  fromStatus      TableStatus
-  toStatus        TableStatus
-  occurredAt      DateTime    @default(now())
-  actorProfileId  String?     @db.Uuid
-  sourceCommandId String      @db.Uuid
-  reason          String?
-  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  diningTable     DiningTable @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
-  actorProfile    Profile?    @relation(fields: [actorProfileId], references: [id], onDelete: SetNull)
+  id                String                @id @default(uuid()) @db.Uuid
+  restaurantId      String                @db.Uuid
+  diningTableId     String                @db.Uuid
+  fromStatus        TableStatus
+  toStatus          TableStatus
+  occurredAt        DateTime              @default(now())
+  actorProfileId    String?               @db.Uuid
+  actorMembershipId String?               @db.Uuid
+  syntheticBatchId  String?               @db.Uuid
+  sourceCommandId   String                @db.Uuid
+  reason            String?
+  restaurant        Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  diningTable       DiningTable           @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
+  actorProfile      Profile?              @relation(fields: [actorProfileId], references: [id], onDelete: SetNull)
+  actorMembership   RestaurantMembership? @relation("TableStatusEventActorMembership", fields: [actorMembershipId], references: [id], onDelete: SetNull)
+  syntheticBatch    SyntheticImportBatch? @relation(fields: [syntheticBatchId], references: [id], onDelete: SetNull)
 
-  @@unique([restaurantId, sourceCommandId])
+  @@unique([diningTableId, sourceCommandId])
+  @@index([restaurantId, sourceCommandId])
   @@index([restaurantId, occurredAt])
   @@index([diningTableId, occurredAt])
+  @@index([actorMembershipId, occurredAt])
+  @@index([syntheticBatchId])
 }
 
 model DiningSession {
-  id                String              @id @default(uuid()) @db.Uuid
-  restaurantId      String              @db.Uuid
-  diningTableId     String              @db.Uuid
-  queueEntryId      String?             @unique @db.Uuid
-  reservationId     String?             @unique @db.Uuid
-  partySize         Int
-  status            DiningSessionStatus @default(ACTIVE)
-  seatedAt          DateTime
-  clearedAt         DateTime?
-  cleaningStartedAt DateTime?
-  availableAt       DateTime?
-  completedAt       DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  restaurant        Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  diningTable       DiningTable         @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
-  queueEntry        QueueEntry?         @relation(fields: [queueEntryId], references: [id], onDelete: SetNull)
-  reservation       Reservation?        @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  id                  String                  @id @default(uuid()) @db.Uuid
+  restaurantId        String                  @db.Uuid
+  diningTableId       String                  @db.Uuid
+  queueEntryId        String?                 @db.Uuid
+  reservationId       String?                 @db.Uuid
+  seatingAssignmentId String?                 @db.Uuid
+  syntheticBatchId    String?                 @db.Uuid
+  partySize           Int
+  status              DiningSessionStatus     @default(ACTIVE)
+  seatedAt            DateTime
+  clearedAt           DateTime?
+  cleaningStartedAt   DateTime?
+  availableAt         DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  restaurant          Restaurant              @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  diningTable         DiningTable             @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
+  queueEntry          QueueEntry?             @relation(fields: [queueEntryId], references: [id], onDelete: SetNull)
+  reservation         Reservation?            @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  seatingAssignment   SeatingAssignment?      @relation(fields: [seatingAssignmentId], references: [id], onDelete: SetNull)
+  assignmentTable     SeatingAssignmentTable?
+  syntheticBatch      SyntheticImportBatch?   @relation(fields: [syntheticBatchId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, seatedAt])
   @@index([diningTableId, seatedAt])
   @@index([restaurantId, status])
+  @@index([queueEntryId])
+  @@index([reservationId])
+  @@index([seatingAssignmentId])
+  @@index([syntheticBatchId])
 }
 
 model QueueEntry {
-  id                  String         @id @default(uuid()) @db.Uuid
-  restaurantId        String         @db.Uuid
+  id                  String                @id @default(uuid()) @db.Uuid
+  restaurantId        String                @db.Uuid
   partyName           String
   partySize           Int
   contact             String?
   notes               String?
   preferredZone       String?
-  status              QueueStatus    @default(WAITING)
+  status              QueueStatus           @default(WAITING)
   promisedWaitMinutes Int
-  joinedAt            DateTime       @default(now())
+  joinedAt            DateTime              @default(now())
   calledAt            DateTime?
   seatedAt            DateTime?
   cancelledAt         DateTime?
   noShowAt            DateTime?
-  assignedTableId     String?        @db.Uuid
-  createdById         String?        @db.Uuid
-  source              String         @default("MANAGER")
-  revision            Int            @default(0)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  restaurant          Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  assignedTable       DiningTable?   @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
-  createdBy           Profile?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  diningSession       DiningSession?
+  assignedTableId     String?               @db.Uuid
+  createdById         String?               @db.Uuid
+  source              String                @default("MANAGER")
+  revision            Int                   @default(0)
+  position            Int                   @default(0)
+  syntheticBatchId    String?               @db.Uuid
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  restaurant          Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  assignedTable       DiningTable?          @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
+  createdBy           Profile?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  diningSessions      DiningSession[]
+  seatingAssignments  SeatingAssignment[]
+  syntheticBatch      SyntheticImportBatch? @relation(fields: [syntheticBatchId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, status, joinedAt])
   @@index([restaurantId, assignedTableId])
   @@index([createdById, source, status])
+  @@index([restaurantId, position])
+  @@index([syntheticBatchId])
 }
 
 model Reservation {
-  id                String            @id @default(uuid()) @db.Uuid
-  restaurantId      String            @db.Uuid
-  partyName         String
-  partySize         Int
-  contact           String?
-  notes             String?
-  scheduledAt       DateTime
-  status            ReservationStatus @default(CONFIRMED)
-  assignedTableId   String?           @db.Uuid
-  createdById       String?           @db.Uuid
-  customerProfileId String?           @db.Uuid
-  arrivedAt         DateTime?
-  seatedAt          DateTime?
-  completedAt       DateTime?
-  cancelledAt       DateTime?
-  noShowAt          DateTime?
-  revision          Int               @default(0)
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  restaurant        Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  assignedTable     DiningTable?      @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
-  createdBy         Profile?          @relation("ReservationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  customerProfile   Profile?          @relation("ReservationCustomer", fields: [customerProfileId], references: [id], onDelete: SetNull)
-  diningSession     DiningSession?
+  id                 String                @id @default(uuid()) @db.Uuid
+  restaurantId       String                @db.Uuid
+  partyName          String
+  partySize          Int
+  contact            String?
+  notes              String?
+  scheduledAt        DateTime
+  status             ReservationStatus     @default(CONFIRMED)
+  assignedTableId    String?               @db.Uuid
+  createdById        String?               @db.Uuid
+  customerProfileId  String?               @db.Uuid
+  arrivedAt          DateTime?
+  seatedAt           DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  noShowAt           DateTime?
+  revision           Int                   @default(0)
+  syntheticBatchId   String?               @db.Uuid
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  restaurant         Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  assignedTable      DiningTable?          @relation(fields: [assignedTableId], references: [id], onDelete: SetNull)
+  createdBy          Profile?              @relation("ReservationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  customerProfile    Profile?              @relation("ReservationCustomer", fields: [customerProfileId], references: [id], onDelete: SetNull)
+  diningSessions     DiningSession[]
+  seatingAssignments SeatingAssignment[]
+  syntheticBatch     SyntheticImportBatch? @relation(fields: [syntheticBatchId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, status, scheduledAt])
   @@index([restaurantId, assignedTableId, scheduledAt])
   @@index([customerProfileId])
+  @@index([syntheticBatchId])
+}
+
+model SeatingAssignment {
+  id            String                   @id @default(uuid()) @db.Uuid
+  restaurantId  String                   @db.Uuid
+  queueEntryId  String?                  @db.Uuid
+  reservationId String?                  @db.Uuid
+  partySize     Int
+  status        SeatingAssignmentStatus  @default(ACTIVE)
+  seatedAt      DateTime
+  completedAt   DateTime?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  restaurant    Restaurant               @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  queueEntry    QueueEntry?              @relation(fields: [queueEntryId], references: [id], onDelete: SetNull)
+  reservation   Reservation?             @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  tables        SeatingAssignmentTable[]
+  sessions      DiningSession[]
+
+  @@index([restaurantId, status, seatedAt])
+  @@index([queueEntryId, seatedAt])
+  @@index([reservationId, seatedAt])
+}
+
+model SeatingAssignmentTable {
+  seatingAssignmentId String            @db.Uuid
+  diningTableId       String            @db.Uuid
+  diningSessionId     String            @unique @db.Uuid
+  seatingAssignment   SeatingAssignment @relation(fields: [seatingAssignmentId], references: [id], onDelete: Cascade)
+  diningTable         DiningTable       @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
+  diningSession       DiningSession     @relation(fields: [diningSessionId], references: [id], onDelete: Restrict)
+
+  @@id([seatingAssignmentId, diningTableId])
+  @@index([diningTableId])
+}
+
+model OperationCommand {
+  id                String               @id @db.Uuid
+  restaurantId      String               @db.Uuid
+  actorMembershipId String               @db.Uuid
+  commandType       String
+  entityType        String
+  entityId          String?
+  result            Json                 @default("{}")
+  completedAt       DateTime             @default(now())
+  restaurant        Restaurant           @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  actorMembership   RestaurantMembership @relation(fields: [actorMembershipId], references: [id], onDelete: Restrict)
+
+  @@index([restaurantId, completedAt])
+  @@index([actorMembershipId, completedAt])
+}
+
+model SyntheticImportBatch {
+  id                String                @id @default(uuid()) @db.Uuid
+  restaurantId      String                @db.Uuid
+  actorProfileId    String                @db.Uuid
+  actorMembershipId String?               @db.Uuid
+  originalFilename  String
+  sourceType        String
+  checksum          String
+  status            ImportBatchStatus     @default(STAGED)
+  normalizedRows    Json
+  validationResults Json
+  rowCount          Int
+  createdAt         DateTime              @default(now())
+  appliedAt         DateTime?
+  revertedAt        DateTime?
+  restaurant        Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  actorProfile      Profile               @relation(fields: [actorProfileId], references: [id], onDelete: Restrict)
+  actorMembership   RestaurantMembership? @relation(fields: [actorMembershipId], references: [id], onDelete: SetNull)
+  diningTables      DiningTable[]
+  tableStatusEvents TableStatusEvent[]
+  diningSessions    DiningSession[]
+  queueEntries      QueueEntry[]
+  reservations      Reservation[]
+
+  @@unique([restaurantId, checksum])
+  @@index([restaurantId, createdAt])
+}
+
+model AdminAuditLog {
+  id                String                @id @default(uuid()) @db.Uuid
+  restaurantId      String?               @db.Uuid
+  actorProfileId    String                @db.Uuid
+  actorMembershipId String?               @db.Uuid
+  action            String
+  targetType        String
+  targetId          String?
+  details           Json                  @default("{}")
+  ipHash            String?
+  createdAt         DateTime              @default(now())
+  restaurant        Restaurant?           @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  actorProfile      Profile               @relation(fields: [actorProfileId], references: [id], onDelete: Restrict)
+  actorMembership   RestaurantMembership? @relation(fields: [actorMembershipId], references: [id], onDelete: SetNull)
+
+  @@index([actorProfileId, createdAt])
+  @@index([restaurantId, createdAt])
+}
+
+model AdminAuthAttempt {
+  id          String   @id @default(uuid()) @db.Uuid
+  profileId   String   @db.Uuid
+  ipHash      String
+  successful  Boolean  @default(false)
+  attemptedAt DateTime @default(now())
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, attemptedAt])
+  @@index([ipHash, attemptedAt])
 }

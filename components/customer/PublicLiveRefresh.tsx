@@ -1,24 +1,33 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useTransition } from "react";
+import { useCallback, useEffect, useTransition } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 const REFRESH_INTERVAL_MS = 10_000;
 
-export function PublicLiveRefresh() {
+export function PublicLiveRefresh({ slug }: { slug: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     startTransition(() => router.refresh());
-  };
+  }, [router]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") refresh();
     }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [router]);
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`public-restaurant:${slug}`)
+      .on("broadcast", { event: "invalidated" }, refresh)
+      .subscribe();
+    return () => {
+      window.clearInterval(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [refresh, slug]);
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-stone-500">

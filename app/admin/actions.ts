@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import {
   isAdminEmail,
   isAdminUnlocked,
@@ -9,14 +10,13 @@ import {
   verifyAdminPassword,
 } from "@/lib/admin/auth";
 import { createRestaurantSlug } from "@/lib/auth/restaurant-onboarding";
+import { ensureProfile } from "@/lib/auth/profile";
 import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
-import {
-  createRestaurantAsAdmin,
-  deleteRestaurantAsAdmin,
-} from "@/lib/repositories/prisma/admin-restaurants";
+import { createRestaurantAsAdmin, setRestaurantArchivedAsAdmin } from "@/lib/repositories/prisma/admin-restaurants";
 import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
+import { hashRequestAddress } from "@/lib/staff/invitations";
 
 function formText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -34,8 +34,28 @@ async function requireAdminUser() {
 export async function unlockAdminPanel(formData: FormData) {
   const user = await requireAdminUser();
   const password = (formData.get("password") as string) || "";
+  await ensureProfile(user);
+  const requestHeaders = await headers();
+  const address = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ?? requestHeaders.get("x-real-ip") ?? "unknown";
+  const ipHash = hashRequestAddress(address);
+  const since = new Date(Date.now() - 15 * 60_000);
+  const recentFailures = await prisma.adminAuthAttempt.count({
+    where: {
+      successful: false,
+      attemptedAt: { gte: since },
+      OR: [{ profileId: user.id }, { ipHash }],
+    },
+  });
+  if (recentFailures >= 5) {
+    await setFlash("error", "Too many failed attempts. Wait 15 minutes before trying again.");
+    redirect("/admin");
+  }
 
-  if (!(await verifyAdminPassword(user.id, password))) {
+  const valid = await verifyAdminPassword(user.id, password);
+  await prisma.adminAuthAttempt.create({
+    data: { profileId: user.id, ipHash, successful: valid },
+  });
+  if (!valid) {
     await setFlash("error", "Incorrect admin password.");
     redirect("/admin");
   }
@@ -52,6 +72,7 @@ export async function createRestaurantByAdmin(formData: FormData) {
   const location = formText(formData.get("location"));
   const cuisineType = formText(formData.get("cuisineType"));
   const ownerEmail = formText(formData.get("ownerEmail")).toLowerCase();
+  const environment = formData.get("environment") === "TEST" ? "TEST" : "LIVE";
 
   if (name.length < 2 || name.length > 80) {
     await setFlash("error", "Restaurant name must be between 2 and 80 characters.");
@@ -83,6 +104,7 @@ export async function createRestaurantByAdmin(formData: FormData) {
       location,
       cuisineType: cuisineType || undefined,
       slug: createRestaurantSlug(name, randomUUID().replaceAll("-", "").slice(0, 8)),
+      environment,
     });
   } catch (error) {
     const reference = reportDataError("admin-create-restaurant", error);
@@ -173,16 +195,23 @@ export async function updateRestaurantByAdmin(formData: FormData) {
   redirect("/admin");
 }
 
-export async function deleteRestaurantByAdmin(formData: FormData) {
+export async function setRestaurantArchivedByAdmin(formData: FormData) {
   const user = await requireAdminUser();
   if (!(await isAdminUnlocked(user.id))) redirect("/admin");
 
   const restaurantId = formText(formData.get("restaurantId"));
+  const confirmation = formText(formData.get("confirmation"));
+  const reason = formText(formData.get("reason"));
+  const archived = formData.get("archived") === "true";
   if (!restaurantId) {
     await setFlash("error", "Missing restaurant.");
     redirect("/admin");
   }
 
+  if (reason.length < 4 || reason.length > 500) {
+    await setFlash("error", "Enter a short audit reason (4-500 characters).");
+    redirect("/admin");
+  }
   let restaurantName: string;
   try {
     const restaurant = await prisma.restaurant.findUnique({
@@ -194,13 +223,25 @@ export async function deleteRestaurantByAdmin(formData: FormData) {
       redirect("/admin");
     }
     restaurantName = restaurant.name;
-    await deleteRestaurantAsAdmin(prisma, restaurantId);
+    if (confirmation !== restaurant.name) {
+      await setFlash("error", `Type "${restaurant.name}" exactly to confirm.`);
+      redirect("/admin");
+    }
+    const requestHeaders = await headers();
+    const address = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ?? requestHeaders.get("x-real-ip") ?? "unknown";
+    await setRestaurantArchivedAsAdmin(prisma, {
+      restaurantId,
+      actorProfileId: user.id,
+      archived,
+      reason,
+      ipHash: hashRequestAddress(address),
+    });
   } catch (error) {
-    const reference = reportDataError("admin-delete-restaurant", error);
-    await setFlash("error", `Could not delete the restaurant. Support reference: ${reference}`);
+    const reference = reportDataError("admin-archive-restaurant", error);
+    await setFlash("error", `Could not update the restaurant archive. Support reference: ${reference}`);
     redirect("/admin");
   }
 
-  await setFlash("message", `Restaurant "${restaurantName}" deleted.`);
+  await setFlash("message", `Restaurant "${restaurantName}" ${archived ? "archived" : "restored"}.`);
   redirect("/admin");
 }

@@ -64,6 +64,13 @@ export async function createOwnedRestaurant(
               },
             },
           },
+          staffRoles: {
+            create: [
+              { name: "Floor Staff", presetKey: "FLOOR_STAFF", permissions: ["VIEW_LIVE_FLOOR", "CHANGE_TABLE_STATUS", "VIEW_QUEUE"] },
+              { name: "Host", presetKey: "HOST", permissions: ["VIEW_LIVE_FLOOR", "CHANGE_TABLE_STATUS", "VIEW_QUEUE", "VIEW_CONTACT_DETAILS", "MANAGE_QUEUE", "SEAT_PARTIES"] },
+              { name: "Shift Lead", presetKey: "SHIFT_LEAD", permissions: ["VIEW_LIVE_FLOOR", "CHANGE_TABLE_STATUS", "VIEW_QUEUE", "VIEW_CONTACT_DETAILS", "MANAGE_QUEUE", "SEAT_PARTIES", "CORRECT_RECENT_ACTION"] },
+            ],
+          },
         },
         include: {
           memberships: {

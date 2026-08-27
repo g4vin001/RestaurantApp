@@ -27,8 +27,8 @@ export default async function BookReservationPage({
   let restaurant: { id: string; name: string } | null;
   try {
     profile = await ensureProfile(user);
-    restaurant = await prisma.restaurant.findUnique({
-      where: { slug },
+    restaurant = await prisma.restaurant.findFirst({
+      where: { slug, environment: "LIVE", archivedAt: null },
       select: { id: true, name: true },
     });
   } catch (error) {

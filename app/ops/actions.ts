@@ -2,9 +2,14 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { canTransitionTable } from "@/lib/domain/transitions";
 import type { TableStatus } from "@/lib/domain/types";
+import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
+import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
+import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-commands";
+import { OperationsRepositoryError } from "@/lib/repositories/operations";
+import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
+import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 import { getActiveStaffAccess } from "@/lib/staff/access";
 
@@ -13,175 +18,151 @@ async function requireStaff() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("UNAUTHORIZED");
   const access = await getActiveStaffAccess(user.id);
-  if (!access || !access.staffRecord) throw new Error("FORBIDDEN");
-  return { user, access };
+  if (!access || !access.staffRecord?.staffRole || access.restaurant.archivedAt) {
+    throw new Error("FORBIDDEN");
+  }
+  return {
+    user,
+    access: {
+      ...access,
+      staffRecord: { ...access.staffRecord, staffRole: access.staffRecord.staffRole },
+    },
+  };
 }
 
-function revalidateRestaurant(slug: string) {
-  revalidatePath("/ops");
-  revalidatePath(`/restaurants/${slug}`);
-  revalidatePath("/");
+async function runStaffCommand(command: DatabaseOperationsCommand, success: string) {
+  try {
+    const { user, access } = await requireStaff();
+    await executeOperationsCommand(prisma, {
+      profileId: user.id,
+      restaurantId: access.restaurantId,
+      membershipId: access.id,
+      membershipRole: "STAFF",
+      permissions: access.staffRecord.staffRole.permissions,
+    }, command);
+    revalidatePath("/ops");
+    revalidatePath(`/restaurants/${access.restaurant.slug}`);
+    revalidatePath("/");
+    await broadcastRestaurantInvalidation(prisma, {
+      restaurantId: access.restaurantId,
+      restaurantSlug: access.restaurant.slug,
+      environment: access.restaurant.environment,
+      entity: command.type.includes("QUEUE") ? "queue" : "table",
+      revision: command.commandId,
+    }).catch((error) => console.error("[halina:ops-broadcast]", error));
+    await setFlash("message", success);
+  } catch (error) {
+    if (error instanceof OperationsRepositoryError) {
+      await setFlash("error", error.message);
+      return;
+    }
+    const reference = reportDataError("staff-operations-command", error);
+    await setFlash(
+      "error",
+      `Halina could not save that operation. Support reference: ${reference}`,
+    );
+  }
 }
 
 export async function transitionStaffTable(formData: FormData) {
-  const { user, access } = await requireStaff();
   const tableId = String(formData.get("tableId") ?? "");
-  const toStatus = String(formData.get("status") ?? "") as TableStatus;
+  const status = String(formData.get("status") ?? "") as TableStatus;
   const partySize = Number(formData.get("partySize") ?? 0);
-  const allowed: TableStatus[] = [
-    "AVAILABLE",
-    "HELD",
-    "RESERVED",
-    "OCCUPIED",
-    "CLEANING",
-    "OUT_OF_SERVICE",
-  ];
-  if (!allowed.includes(toStatus)) return;
+  const expectedRevision = Number(formData.get("expectedRevision") ?? -1);
+  await runStaffCommand({
+    type: "TRANSITION_TABLE",
+    commandId: randomUUID(),
+    tableId,
+    status,
+    expectedRevision,
+    ...(status === "OCCUPIED" ? { partySize } : {}),
+  }, "Table status saved.");
+}
 
-  await prisma.$transaction(async (tx) => {
-    const table = await tx.diningTable.findFirst({
-      where: {
-        id: tableId,
-        restaurantId: access.restaurantId,
-        active: true,
-        archivedAt: null,
-      },
-    });
-    if (!table || !canTransitionTable(table.currentStatus, toStatus)) return;
-    if (
-      toStatus === "OCCUPIED" &&
-      (!Number.isInteger(partySize) || partySize < 1 || partySize > table.capacity)
-    )
-      return;
+export async function correctStaffTable(formData: FormData) {
+  await runStaffCommand(
+    {
+      type: "CORRECT_TABLE",
+      commandId: randomUUID(),
+      tableId: String(formData.get("tableId") ?? ""),
+      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+      reason: String(formData.get("reason") ?? ""),
+    },
+    "The latest linked table action was corrected.",
+  );
+}
 
-    const changed = await tx.diningTable.updateMany({
-      where: {
-        id: table.id,
-        restaurantId: access.restaurantId,
-        currentStatus: table.currentStatus,
-        statusRevision: table.statusRevision,
+export async function addStaffQueueEntry(formData: FormData) {
+  await runStaffCommand(
+    {
+      type: "ADD_QUEUE",
+      commandId: randomUUID(),
+      input: {
+        partyName: String(formData.get("partyName") ?? ""),
+        partySize: Number(formData.get("partySize") ?? 0),
+        promisedWaitMinutes: Number(formData.get("promisedWaitMinutes") ?? 0),
+        contact: String(formData.get("contact") ?? "") || undefined,
+        notes: String(formData.get("notes") ?? "") || undefined,
       },
-      data: {
-        currentStatus: toStatus,
-        statusRevision: { increment: 1 },
-      },
-    });
-    if (changed.count !== 1) throw new Error("CONFLICT");
-    const now = new Date();
-    await tx.tableStatusEvent.create({
-      data: {
-        restaurantId: access.restaurantId,
-        diningTableId: table.id,
-        fromStatus: table.currentStatus,
-        toStatus,
-        actorProfileId: user.id,
-        sourceCommandId: randomUUID(),
-        reason: "Restricted staff operation",
-        occurredAt: now,
-      },
-    });
+    },
+    "Party added to the queue.",
+  );
+}
 
-    if (toStatus === "OCCUPIED") {
-      await tx.diningSession.create({
-        data: {
-          restaurantId: access.restaurantId,
-          diningTableId: table.id,
-          partySize,
-          seatedAt: now,
-        },
-      });
-    } else if (
-      table.currentStatus === "OCCUPIED" &&
-      toStatus === "CLEANING"
-    ) {
-      const session = await tx.diningSession.findFirst({
-        where: {
-          restaurantId: access.restaurantId,
-          diningTableId: table.id,
-          status: "ACTIVE",
-        },
-        orderBy: { seatedAt: "desc" },
-      });
-      if (session)
-        await tx.diningSession.update({
-          where: { id: session.id },
-          data: {
-            status: "CLEANING",
-            clearedAt: now,
-            cleaningStartedAt: now,
-          },
-        });
-    } else if (
-      table.currentStatus === "CLEANING" &&
-      toStatus === "AVAILABLE"
-    ) {
-      const session = await tx.diningSession.findFirst({
-        where: {
-          restaurantId: access.restaurantId,
-          diningTableId: table.id,
-          status: "CLEANING",
-        },
-        orderBy: { seatedAt: "desc" },
-      });
-      if (session)
-        await tx.diningSession.update({
-          where: { id: session.id },
-          data: {
-            status: "COMPLETED",
-            availableAt: now,
-            completedAt: now,
-          },
-        });
-    }
-    await tx.restaurant.update({
-      where: { id: access.restaurantId },
-      data: { lastOperationalUpdateAt: now },
-    });
-  });
-  revalidateRestaurant(access.restaurant.slug);
+export async function editStaffQueueEntry(formData: FormData) {
+  await runStaffCommand(
+    {
+      type: "UPDATE_QUEUE",
+      commandId: randomUUID(),
+      entryId: String(formData.get("queueId") ?? ""),
+      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+      input: {
+        partyName: String(formData.get("partyName") ?? ""),
+        partySize: Number(formData.get("partySize") ?? 0),
+        promisedWaitMinutes: Number(formData.get("promisedWaitMinutes") ?? 0),
+        contact: String(formData.get("contact") ?? "") || undefined,
+        notes: String(formData.get("notes") ?? "") || undefined,
+      },
+    },
+    "Queue entry updated.",
+  );
+}
+
+export async function reorderStaffQueueEntry(formData: FormData) {
+  await runStaffCommand(
+    {
+      type: "REORDER_QUEUE",
+      commandId: randomUUID(),
+      entryId: String(formData.get("queueId") ?? ""),
+      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+      direction: Number(formData.get("direction")) === -1 ? -1 : 1,
+    },
+    "Queue order updated.",
+  );
 }
 
 export async function updateStaffQueueStatus(formData: FormData) {
-  const { access } = await requireStaff();
-  if (access.staffRecord?.permissionPreset !== "HOST") return;
-  const queueId = String(formData.get("queueId") ?? "");
-  const status = String(formData.get("status") ?? "");
-  if (!["CALLED", "CANCELLED", "NO_SHOW"].includes(status)) return;
-  const now = new Date();
-  const data =
-    status === "CALLED"
-      ? {
-          status: "CALLED" as const,
-          calledAt: now,
-          revision: { increment: 1 },
-        }
-      : status === "CANCELLED"
-        ? {
-            status: "CANCELLED" as const,
-            cancelledAt: now,
-            revision: { increment: 1 },
-          }
-        : {
-            status: "NO_SHOW" as const,
-            noShowAt: now,
-            revision: { increment: 1 },
-          };
+  const entryId = String(formData.get("queueId") ?? "");
+  const status = String(formData.get("status") ?? "") as "CALLED" | "CANCELLED" | "NO_SHOW";
+  const expectedRevision = Number(formData.get("expectedRevision") ?? -1);
+  await runStaffCommand({
+    type: "SET_QUEUE_STATUS",
+    commandId: randomUUID(),
+    entryId,
+    expectedRevision,
+    status,
+  }, status === "CALLED" ? "Party marked called. No message was sent." : `Party marked ${status.toLowerCase()}.`);
+}
 
-  await prisma.$transaction(async (tx) => {
-    const changed = await tx.queueEntry.updateMany({
-      where: {
-        id: queueId,
-        restaurantId: access.restaurantId,
-        status: { in: ["WAITING", "CALLED"] },
-      },
-      data,
-    });
-    if (changed.count) {
-      await tx.restaurant.update({
-        where: { id: access.restaurantId },
-        data: { lastOperationalUpdateAt: now },
-      });
-    }
-  });
-  revalidateRestaurant(access.restaurant.slug);
+export async function seatStaffQueueEntry(formData: FormData) {
+  const entryId = String(formData.get("queueId") ?? "");
+  const tableId = String(formData.get("tableId") ?? "");
+  const expectedRevision = Number(formData.get("expectedRevision") ?? -1);
+  await runStaffCommand({
+    type: "SEAT_QUEUE",
+    commandId: randomUUID(),
+    entryId,
+    expectedRevision,
+    tableIds: [tableId],
+  }, "Party seated and the table status was updated.");
 }

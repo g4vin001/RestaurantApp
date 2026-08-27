@@ -6,7 +6,10 @@ node_modules
 /lib/generated/prisma
 
 .vercel
+playwright-report
+test-results
 .env*
+!.env.example
 # Prisma's auto-generated AI-agent reference docs (from `prisma init`) —
 # vendor documentation, not project code; symlinks are Windows-fragile.
 /.agents/

@@ -9,11 +9,10 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env["DIRECT_URL"],
   },
-  // This installed Prisma version's config schema has no `directUrl` field.
-  // DATABASE_URL (port 6543, transaction-mode pooler) is fine for runtime
-  // queries. Migration commands must override DATABASE_URL with the Supabase
-  // direct/session connection on port 5432, then use `prisma migrate status`
-  // and `prisma migrate deploy`. Do not use `db push` for shared databases.
+  // Runtime Prisma uses DATABASE_URL (port 6543 pooler). Prisma CLI migration
+  // commands require DIRECT_URL (port 5432 direct/session connection) through
+  // this config. There is deliberately no DATABASE_URL fallback: migration
+  // commands must never reach the transaction pooler by accident.
 });
