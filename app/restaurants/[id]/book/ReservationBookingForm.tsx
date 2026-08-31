@@ -65,7 +65,7 @@ export function ReservationBookingForm({
 
       <label className={labelClass}>
         Notes <span className="font-normal text-stone-400">(optional)</span>
-        <textarea name="notes" maxLength={500} rows={3} className={inputClass} />
+        <textarea name="notes" maxLength={500} rows={3} className={inputClass} placeholder="Dietary restrictions, special occasions, etc."/>
       </label>
 
       {state.error && (
