@@ -66,11 +66,20 @@ async function attemptCreate(
 ): Promise<CreateCustomerReservationResult> {
   return client.$transaction(
     async (tx) => {
-      const restaurant = await tx.restaurant.findUnique({
-        where: { id: input.restaurantId },
-        select: { id: true },
-      });
-      if (!restaurant) {
+      // Capacity is a restaurant-wide invariant. Lock one durable tenant row
+      // before reading the aggregate so two simultaneous customer requests
+      // cannot both observe the same remaining seats and overbook them.
+      // READ COMMITTED gives the waiter a fresh snapshot after the first
+      // transaction releases this row lock.
+      const restaurant = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id"
+        FROM "Restaurant"
+        WHERE "id" = ${input.restaurantId}::uuid
+          AND "environment" = 'LIVE'::"RestaurantEnvironment"
+          AND "archivedAt" IS NULL
+        FOR UPDATE
+      `);
+      if (!restaurant.length) {
         throw new OperationsRepositoryError(
           "VALIDATION",
           "This restaurant is no longer available.",
@@ -119,14 +128,12 @@ async function attemptCreate(
 
       return { reservationId: created.id };
     },
-    { isolationLevel: "Serializable" },
+    { isolationLevel: "ReadCommitted" },
   );
 }
 
-// Postgres SERIALIZABLE aborts one of two genuinely-conflicting concurrent
-// transactions with a 40001 error (Prisma code P2034) rather than blocking —
-// retrying lets the loser re-run and correctly see the winner's committed
-// row. Business rejections (CONFLICT/VALIDATION) are never retried.
+// Deadlocks or transient write conflicts may still surface as P2034. Retrying
+// reacquires the tenant row lock, while business rejections are never retried.
 export async function createCustomerReservation(
   client: PrismaClient,
   input: CreateCustomerReservationInput,

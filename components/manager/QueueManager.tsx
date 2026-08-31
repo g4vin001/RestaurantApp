@@ -363,9 +363,13 @@ export function QueueManager() {
     setToast({ tone, message });
     window.setTimeout(() => setToast(null), 3500);
   }, []);
-  const handle = (result: { ok: boolean; error?: string }, success: string) => {
-    if (!result.ok) {
-      notify("error", result.error ?? "That action failed.");
+  const handle = async (
+    result: Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string },
+    success: string,
+  ) => {
+    const resolved = await result;
+    if (!resolved.ok) {
+      notify("error", resolved.error ?? "That action failed.");
       return false;
     }
     notify("success", success);
@@ -407,7 +411,7 @@ export function QueueManager() {
       )
     : [];
 
-  const submitQueue = (form: FormData) => {
+  const submitQueue = async (form: FormData) => {
     const input = {
       partyName: String(form.get("partyName") ?? ""),
       partySize: Number(form.get("partySize")),
@@ -421,8 +425,8 @@ export function QueueManager() {
         ? demo.updateQueue(queueModal.id, input)
         : demo.addQueue(input);
     if (
-      handle(
-        result,
+      await handle(
+        await result,
         queueModal === "new"
           ? "Party added to the queue."
           : "Queue entry updated.",
@@ -431,7 +435,7 @@ export function QueueManager() {
       setQueueModal(null);
   };
 
-  const submitReservation = (form: FormData) => {
+  const submitReservation = async (form: FormData) => {
     const localSchedule = String(form.get("scheduledAt") ?? "");
     const scheduledAt = Date.parse(`${localSchedule}:00+08:00`);
     if (Number.isNaN(scheduledAt)) {
@@ -451,8 +455,8 @@ export function QueueManager() {
         ? demo.updateReservationRecord(reservationModal.id, input)
         : demo.addReservation(input);
     if (
-      handle(
-        result,
+      await handle(
+        await result,
         reservationModal === "new"
           ? "Reservation created."
           : "Reservation updated.",
@@ -461,17 +465,17 @@ export function QueueManager() {
       setReservationModal(null);
   };
 
-  const confirmSeat = (tableIds: string[]) => {
+  const confirmSeat = async (tableIds: string[]) => {
     if (!seatTarget) return;
     const result =
       seatTarget.kind === "queue"
         ? demo.seatQueue(seatTarget.id, tableIds)
         : demo.seatReservationRecord(seatTarget.id, tableIds);
-    if (handle(result, "Party seated and table session started."))
+    if (await handle(result, "Party seated and table session started."))
       setSeatTarget(null);
   };
 
-  const confirmResolve = () => {
+  const confirmResolve = async () => {
     if (!resolveTarget) return;
     const result =
       resolveTarget.kind === "queue"
@@ -483,8 +487,8 @@ export function QueueManager() {
             resolveTarget.action === "cancel" ? "CANCELLED" : "NO_SHOW",
           );
     if (
-      handle(
-        result,
+      await handle(
+        await result,
         resolveTarget.action === "cancel"
           ? "Record cancelled."
           : "Record marked no-show.",

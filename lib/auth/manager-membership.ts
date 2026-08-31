@@ -14,6 +14,7 @@ export async function getActiveManagerMembership(
       profileId,
       active: true,
       role: { in: ["OWNER", "MANAGER"] },
+      restaurant: { archivedAt: null },
     },
     orderBy: { createdAt: "asc" },
     select: {
@@ -28,6 +29,7 @@ export async function getActiveManagerMembership(
           slug: true,
           timezone: true,
           locale: true,
+          environment: true,
         },
       },
     },

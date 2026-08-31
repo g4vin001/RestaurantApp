@@ -11,7 +11,7 @@ export default async function WaitlistPage({ params }: { params: Promise<{ id: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirectTo=${encodeURIComponent(`/restaurants/${slug}/waitlist`)}`);
   const profile = await ensureProfile(user);
-  const restaurant = await prisma.restaurant.findUnique({ where: { slug }, select: { id: true, name: true, walkInAvailability: true } });
+  const restaurant = await prisma.restaurant.findFirst({ where: { slug, environment: "LIVE", archivedAt: null }, select: { id: true, name: true, walkInAvailability: true } });
   if (!restaurant) notFound();
 
   const existing = await prisma.queueEntry.findFirst({

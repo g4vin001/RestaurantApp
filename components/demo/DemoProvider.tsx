@@ -43,11 +43,15 @@ import type {
 } from "@/lib/domain/types";
 import { createDemoState } from "@/lib/demo/seed";
 import {
-  databaseWritePending,
   type OperationsRepositoryMode,
 } from "@/lib/repositories/operations";
+import { newCommandId, type DatabaseOperationsCommand } from "@/lib/repositories/commands";
+import { loadManagerSnapshotAction, runManagerCommand } from "@/app/manager/actions";
+import { createClient as createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
+  createFloorPlanAction,
   publishFloorPlanAction,
+  restoreFloorPlanVersionAction,
   saveFloorPlanDraftAction,
 } from "@/app/manager/floor/actions";
 
@@ -132,12 +136,14 @@ interface DemoContextValue {
   mode: OperationsRepositoryMode;
   state: DemoState;
   hydrated: boolean;
+  connectionStatus: "live" | "reconnecting" | "offline" | "stale";
+  changedOnAnotherDevice: boolean;
   transitionTable: (
     tableId: string,
     status: TableStatus,
     partySize?: number,
-  ) => CommandFeedback;
-  correctTable: (tableId: string, reason: string) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
+  correctTable: (tableId: string, reason: string) => Promise<CommandFeedback>;
   saveFloor: (
     planId: string,
     name: string,
@@ -148,35 +154,35 @@ interface DemoContextValue {
     name: string,
     elements: FloorElement[],
   ) => Promise<CommandFeedback>;
-  restoreFloor: (planId: string, versionId: string) => CommandFeedback;
-  createFloor: (name: string) => string | null;
-  addQueue: (input: QueueInput) => CommandFeedback;
-  updateQueue: (entryId: string, input: QueueInput) => CommandFeedback;
-  callQueue: (entryId: string) => CommandFeedback;
-  cancelQueue: (entryId: string) => CommandFeedback;
-  noShowQueue: (entryId: string) => CommandFeedback;
+  restoreFloor: (planId: string, versionId: string) => Promise<CommandFeedback>;
+  createFloor: (name: string) => Promise<string | null>;
+  addQueue: (input: QueueInput) => Promise<CommandFeedback>;
+  updateQueue: (entryId: string, input: QueueInput) => Promise<CommandFeedback>;
+  callQueue: (entryId: string) => Promise<CommandFeedback>;
+  cancelQueue: (entryId: string) => Promise<CommandFeedback>;
+  noShowQueue: (entryId: string) => Promise<CommandFeedback>;
   seatQueue: (
     entryId: string,
     tableIdOrIds: string | string[],
-  ) => CommandFeedback;
-  reorderQueue: (entryId: string, direction: -1 | 1) => CommandFeedback;
-  addReservation: (input: ReservationInput) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
+  reorderQueue: (entryId: string, direction: -1 | 1) => Promise<CommandFeedback>;
+  addReservation: (input: ReservationInput) => Promise<CommandFeedback>;
   updateReservationRecord: (
     reservationId: string,
     input: ReservationInput,
-  ) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
   changeReservationStatus: (
     reservationId: string,
     status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
-  ) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
   seatReservationRecord: (
     reservationId: string,
     tableIdOrIds: string | string[],
-  ) => CommandFeedback;
-  addStaff: (input: StaffInput) => CommandFeedback;
-  updateStaff: (staffId: string, input: StaffInput) => CommandFeedback;
-  setStaffStatus: (staffId: string, active: boolean) => CommandFeedback;
-  removeStaff: (staffId: string) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
+  addStaff: (input: StaffInput) => Promise<CommandFeedback>;
+  updateStaff: (staffId: string, input: StaffInput) => Promise<CommandFeedback>;
+  setStaffStatus: (staffId: string, active: boolean) => Promise<CommandFeedback>;
+  removeStaff: (staffId: string) => Promise<CommandFeedback>;
   updateRestaurant: (
     input: Pick<
       RestaurantIdentity,
@@ -187,7 +193,7 @@ interface DemoContextValue {
       | "opensAtHour"
       | "closesAtHour"
     >,
-  ) => CommandFeedback;
+  ) => Promise<CommandFeedback>;
   reset: () => void;
 }
 
@@ -207,6 +213,8 @@ export function OperationsProvider({
     initialState ?? createDemoState(),
   );
   const [hydrated, setHydrated] = useState(repositoryMode === "database");
+  const [connectionStatus, setConnectionStatus] = useState<DemoContextValue["connectionStatus"]>("live");
+  const [changedOnAnotherDevice, setChangedOnAnotherDevice] = useState(false);
 
   useEffect(() => {
     if (repositoryMode !== "demo") return;
@@ -247,6 +255,51 @@ export function OperationsProvider({
     return () => channel.close();
   }, [repositoryMode, state.lastUpdatedAt]);
 
+  const refreshDatabaseSnapshot = useCallback(async (remoteChange = false) => {
+    if (repositoryMode !== "database") return;
+    if (!navigator.onLine) {
+      setConnectionStatus("offline");
+      return;
+    }
+    setConnectionStatus("reconnecting");
+    const result = await loadManagerSnapshotAction();
+    if (!result.ok) {
+      setConnectionStatus("stale");
+      return;
+    }
+    dispatch({ type: "REPLACE", state: result.state });
+    setChangedOnAnotherDevice(remoteChange);
+    setConnectionStatus("live");
+  }, [repositoryMode]);
+
+  useEffect(() => {
+    if (repositoryMode !== "database") return;
+    const offline = () => setConnectionStatus("offline");
+    const online = () => void refreshDatabaseSnapshot(false);
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+
+    const supabase = createBrowserSupabaseClient();
+    const channel = supabase
+      .channel(`restaurant:${state.restaurant.id}`, { config: { private: true } })
+      .on("broadcast", { event: "invalidated" }, () => {
+        void refreshDatabaseSnapshot(true);
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") setConnectionStatus("live");
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
+        }
+        if (status === "CLOSED" && navigator.onLine) setConnectionStatus("stale");
+      });
+
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+      void supabase.removeChannel(channel);
+    };
+  }, [refreshDatabaseSnapshot, repositoryMode, state.restaurant.id]);
+
   const applyResult = useCallback(
     (result: {
       ok: boolean;
@@ -254,7 +307,6 @@ export function OperationsProvider({
       error?: string;
       errors?: string[];
     }) => {
-      if (repositoryMode === "database") return databaseWritePending();
       if (!result.ok || !result.state) {
         return {
           ok: false,
@@ -267,12 +319,45 @@ export function OperationsProvider({
       dispatch({ type: "REPLACE", state: result.state });
       return { ok: true } as const;
     },
-    [repositoryMode],
+    [],
+  );
+
+  const runDatabaseCommand = useCallback(
+    async (command: DatabaseOperationsCommand): Promise<CommandFeedback> => {
+      if (!navigator.onLine) {
+        setConnectionStatus("offline");
+        return { ok: false, error: "You are offline. Reconnect before saving this change." };
+      }
+      const result = await runManagerCommand(command);
+      if (!result.ok) {
+        if (result.code === "CONFLICT") {
+          await refreshDatabaseSnapshot(true);
+        } else if (result.code === "PERSISTENCE") {
+          setConnectionStatus("stale");
+        }
+        return { ok: false, error: result.error };
+      }
+      dispatch({ type: "REPLACE", state: result.state });
+      return { ok: true, state: result.state };
+    },
+    [refreshDatabaseSnapshot],
   );
 
   const transitionTable = useCallback(
-    (tableId: string, status: TableStatus, partySize?: number) =>
-      applyResult(
+    async (tableId: string, status: TableStatus, partySize?: number) => {
+      if (repositoryMode === "database") {
+        const table = state.tables.find((item) => item.id === tableId);
+        if (!table) return { ok: false, error: "Table was not found." };
+        return runDatabaseCommand({
+          type: "TRANSITION_TABLE",
+          commandId: newCommandId(),
+          tableId,
+          expectedRevision: table.revision ?? 0,
+          status,
+          partySize,
+        });
+      }
+      return applyResult(
         transitionTableCommand(
           state,
           tableId,
@@ -281,12 +366,24 @@ export function OperationsProvider({
           "Demo manager",
           partySize,
         ),
-      ),
-    [applyResult, state],
+      );
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const correctTable = useCallback(
-    (tableId: string, reason: string) =>
-      applyResult(
+    async (tableId: string, reason: string) => {
+      if (repositoryMode === "database") {
+        const table = state.tables.find((item) => item.id === tableId);
+        if (!table) return { ok: false, error: "Table was not found." };
+        return runDatabaseCommand({
+          type: "CORRECT_TABLE",
+          commandId: newCommandId(),
+          tableId,
+          expectedRevision: table.revision ?? 0,
+          reason,
+        });
+      }
+      return applyResult(
         correctLastTableTransition(
           state,
           tableId,
@@ -294,8 +391,9 @@ export function OperationsProvider({
           new Date().toISOString(),
           "Demo manager",
         ),
-      ),
-    [applyResult, state],
+      );
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const saveFloor = useCallback(
     async (planId: string, name: string, elements: FloorElement[]) => {
@@ -307,6 +405,7 @@ export function OperationsProvider({
       const plan = state.floorPlans.find((item) => item.id === planId);
       if (!plan) return { ok: false, error: "Floor plan was not found." } as const;
       const result = await saveFloorPlanDraftAction({
+        commandId: newCommandId(),
         planId,
         name,
         elements,
@@ -335,6 +434,7 @@ export function OperationsProvider({
       const plan = state.floorPlans.find((item) => item.id === planId);
       if (!plan) return { ok: false, error: "Floor plan was not found." } as const;
       const result = await publishFloorPlanAction({
+        commandId: newCommandId(),
         planId,
         name,
         elements,
@@ -347,15 +447,34 @@ export function OperationsProvider({
     [applyResult, repositoryMode, state],
   );
   const restoreFloor = useCallback(
-    (planId: string, versionId: string) =>
-      applyResult(
+    async (planId: string, versionId: string): Promise<CommandFeedback> => {
+      if (repositoryMode === "database") {
+        const plan = state.floorPlans.find((item) => item.id === planId);
+        if (!plan) return { ok: false, error: "Floor plan was not found." } as const;
+        const result = await restoreFloorPlanVersionAction({
+          commandId: newCommandId(),
+          planId,
+          versionId,
+          expectedRevision: plan.draft.baseVersion,
+        });
+        if (!result.ok) return result;
+        dispatch({ type: "REPLACE", state: result.state });
+        return { ok: true, state: result.state } as const;
+      }
+      return applyResult(
         restoreFloorVersion(state, planId, versionId, new Date().toISOString()),
-      ),
-    [applyResult, state],
+      );
+    },
+    [applyResult, repositoryMode, state],
   );
   const createFloor = useCallback(
-    (name: string) => {
-      if (repositoryMode === "database") return null;
+    async (name: string) => {
+      if (repositoryMode === "database") {
+        const result = await createFloorPlanAction(name, newCommandId());
+        if (!result.ok) return null;
+        dispatch({ type: "REPLACE", state: result.state });
+        return result.planId;
+      }
       const occurredAt = new Date().toISOString();
       const id = `floor-${occurredAt}`;
       const plan: FloorPlan = {
@@ -386,40 +505,64 @@ export function OperationsProvider({
   );
 
   const addQueue = useCallback(
-    (input: QueueInput) =>
-      applyResult(addQueueEntry(state, input, new Date().toISOString())),
-    [applyResult, state],
+    async (input: QueueInput) =>
+      repositoryMode === "database"
+        ? runDatabaseCommand({ type: "ADD_QUEUE", commandId: newCommandId(), input })
+        : applyResult(addQueueEntry(state, input, new Date().toISOString())),
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const updateQueue = useCallback(
-    (entryId: string, input: QueueInput) =>
-      applyResult(
-        updateQueueEntry(state, entryId, input, new Date().toISOString()),
-      ),
-    [applyResult, state],
+    async (entryId: string, input: QueueInput) => {
+      if (repositoryMode === "database") {
+        const entry = state.queue.find((item) => item.id === entryId);
+        if (!entry) return { ok: false, error: "Queue entry was not found." };
+        return runDatabaseCommand({ type: "UPDATE_QUEUE", commandId: newCommandId(), entryId, expectedRevision: entry.revision ?? 0, input });
+      }
+      return applyResult(updateQueueEntry(state, entryId, input, new Date().toISOString()));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const queueStatus = useCallback(
-    (entryId: string, status: "CALLED" | "CANCELLED" | "NO_SHOW") =>
-      applyResult(
-        setQueueStatus(state, entryId, status, new Date().toISOString()),
-      ),
-    [applyResult, state],
+    async (entryId: string, status: "CALLED" | "CANCELLED" | "NO_SHOW") => {
+      if (repositoryMode === "database") {
+        const entry = state.queue.find((item) => item.id === entryId);
+        if (!entry) return { ok: false, error: "Queue entry was not found." };
+        return runDatabaseCommand({ type: "SET_QUEUE_STATUS", commandId: newCommandId(), entryId, expectedRevision: entry.revision ?? 0, status });
+      }
+      return applyResult(setQueueStatus(state, entryId, status, new Date().toISOString()));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const seatQueue = useCallback(
-    (entryId: string, tableIdOrIds: string | string[]) =>
-      applyResult(
-        seatQueueEntry(
+    async (entryId: string, tableIdOrIds: string | string[]) => {
+      if (repositoryMode === "database") {
+        const entry = state.queue.find((item) => item.id === entryId);
+        if (!entry) return { ok: false, error: "Queue entry was not found." };
+        return runDatabaseCommand({
+          type: "SEAT_QUEUE",
+          commandId: newCommandId(),
+          entryId,
+          expectedRevision: entry.revision ?? 0,
+          tableIds: Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds],
+        });
+      }
+      return applyResult(seatQueueEntry(
           state,
           entryId,
           tableIdOrIds,
           new Date().toISOString(),
           "Demo manager",
-        ),
-      ),
-    [applyResult, state],
+        ));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const reorderQueue = useCallback(
-    (entryId: string, direction: -1 | 1): CommandFeedback => {
-      if (repositoryMode === "database") return databaseWritePending();
+    async (entryId: string, direction: -1 | 1): Promise<CommandFeedback> => {
+      if (repositoryMode === "database") {
+        const entry = state.queue.find((item) => item.id === entryId);
+        if (!entry) return { ok: false, error: "Queue entry was not found." };
+        return runDatabaseCommand({ type: "REORDER_QUEUE", commandId: newCommandId(), entryId, expectedRevision: entry.revision ?? 0, direction });
+      }
       const active = state.queue.filter((entry) =>
         ["WAITING", "CALLED"].includes(entry.status),
       );
@@ -445,77 +588,107 @@ export function OperationsProvider({
       });
       return { ok: true };
     },
-    [repositoryMode, state],
+    [repositoryMode, runDatabaseCommand, state],
   );
 
   const addReservation = useCallback(
-    (input: ReservationInput) =>
-      applyResult(createReservation(state, input, new Date().toISOString())),
-    [applyResult, state],
+    async (input: ReservationInput) =>
+      repositoryMode === "database"
+        ? runDatabaseCommand({ type: "ADD_RESERVATION", commandId: newCommandId(), input })
+        : applyResult(createReservation(state, input, new Date().toISOString())),
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const updateReservationRecord = useCallback(
-    (reservationId: string, input: ReservationInput) =>
-      applyResult(
-        updateReservation(
+    async (reservationId: string, input: ReservationInput) => {
+      if (repositoryMode === "database") {
+        const reservation = state.reservations.find((item) => item.id === reservationId);
+        if (!reservation) return { ok: false, error: "Reservation was not found." };
+        return runDatabaseCommand({ type: "UPDATE_RESERVATION", commandId: newCommandId(), reservationId, expectedRevision: reservation.revision ?? 0, input });
+      }
+      return applyResult(updateReservation(
           state,
           reservationId,
           input,
           new Date().toISOString(),
-        ),
-      ),
-    [applyResult, state],
+        ));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const changeReservationStatus = useCallback(
     (
       reservationId: string,
       status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
-    ) =>
-      applyResult(
-        setReservationStatus(
+    ) => {
+      if (repositoryMode === "database") {
+        const reservation = state.reservations.find((item) => item.id === reservationId);
+        if (!reservation) return Promise.resolve({ ok: false, error: "Reservation was not found." } as const);
+        return runDatabaseCommand({ type: "SET_RESERVATION_STATUS", commandId: newCommandId(), reservationId, expectedRevision: reservation.revision ?? 0, status });
+      }
+      return Promise.resolve(applyResult(setReservationStatus(
           state,
           reservationId,
           status,
           new Date().toISOString(),
-        ),
-      ),
-    [applyResult, state],
+        )));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const seatReservationRecord = useCallback(
-    (reservationId: string, tableIdOrIds: string | string[]) =>
-      applyResult(
-        seatReservation(
+    async (reservationId: string, tableIdOrIds: string | string[]) => {
+      if (repositoryMode === "database") {
+        const reservation = state.reservations.find((item) => item.id === reservationId);
+        if (!reservation) return { ok: false, error: "Reservation was not found." };
+        return runDatabaseCommand({ type: "SEAT_RESERVATION", commandId: newCommandId(), reservationId, expectedRevision: reservation.revision ?? 0, tableIds: Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds] });
+      }
+      return applyResult(seatReservation(
           state,
           reservationId,
           tableIdOrIds,
           new Date().toISOString(),
           "Demo manager",
-        ),
-      ),
-    [applyResult, state],
+        ));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const addStaff = useCallback(
-    (input: StaffInput) =>
-      applyResult(addStaffMember(state, input, new Date().toISOString())),
-    [applyResult, state],
+    async (input: StaffInput) =>
+      repositoryMode === "database"
+        ? runDatabaseCommand({ type: "ADD_STAFF", commandId: newCommandId(), input })
+        : applyResult(addStaffMember(state, input, new Date().toISOString())),
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const updateStaff = useCallback(
-    (staffId: string, input: StaffInput) =>
-      applyResult(
-        updateStaffMember(state, staffId, input, new Date().toISOString()),
-      ),
-    [applyResult, state],
+    async (staffId: string, input: StaffInput) => {
+      if (repositoryMode === "database") {
+        const staff = state.staff.find((item) => item.id === staffId);
+        if (!staff) return { ok: false, error: "Staff record was not found." };
+        return runDatabaseCommand({ type: "UPDATE_STAFF", commandId: newCommandId(), staffId, expectedRevision: staff.revision ?? 0, input });
+      }
+      return applyResult(updateStaffMember(state, staffId, input, new Date().toISOString()));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const setStaffStatus = useCallback(
-    (staffId: string, active: boolean) =>
-      applyResult(
-        setStaffActive(state, staffId, active, new Date().toISOString()),
-      ),
-    [applyResult, state],
+    async (staffId: string, active: boolean) => {
+      if (repositoryMode === "database") {
+        const staff = state.staff.find((item) => item.id === staffId);
+        if (!staff) return { ok: false, error: "Staff record was not found." };
+        return runDatabaseCommand({ type: "SET_STAFF_ACTIVE", commandId: newCommandId(), staffId, expectedRevision: staff.revision ?? 0, active });
+      }
+      return applyResult(setStaffActive(state, staffId, active, new Date().toISOString()));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const removeStaff = useCallback(
-    (staffId: string) =>
-      applyResult(removeStaffMember(state, staffId, new Date().toISOString())),
-    [applyResult, state],
+    async (staffId: string) => {
+      if (repositoryMode === "database") {
+        const staff = state.staff.find((item) => item.id === staffId);
+        if (!staff) return { ok: false, error: "Staff record was not found." };
+        return runDatabaseCommand({ type: "ARCHIVE_STAFF", commandId: newCommandId(), staffId, expectedRevision: staff.revision ?? 0 });
+      }
+      return applyResult(removeStaffMember(state, staffId, new Date().toISOString()));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const updateRestaurant = useCallback(
     (
@@ -528,34 +701,36 @@ export function OperationsProvider({
         | "opensAtHour"
         | "closesAtHour"
       >,
-    ): CommandFeedback => {
-      if (repositoryMode === "database") return databaseWritePending();
+    ): Promise<CommandFeedback> => {
+      if (repositoryMode === "database") {
+        return runDatabaseCommand({ type: "UPDATE_RESTAURANT", commandId: newCommandId(), expectedRevision: state.restaurant.revision ?? 0, input });
+      }
       const name = input.name.trim();
       const location = input.location.trim();
       if (!name || !location)
-        return {
+        return Promise.resolve({
           ok: false,
           error: "Restaurant name and location are required.",
-        };
+        });
       if (
         input.opensAtHour < 0 ||
         input.opensAtHour > 23 ||
         input.closesAtHour < 1 ||
         input.closesAtHour > 24
       ) {
-        return { ok: false, error: "Opening and closing hours must be valid." };
+        return Promise.resolve({ ok: false, error: "Opening and closing hours must be valid." });
       }
       if (input.closesAtHour <= input.opensAtHour) {
-        return { ok: false, error: "Closing time must be after opening time." };
+        return Promise.resolve({ ok: false, error: "Closing time must be after opening time." });
       }
       if (
         input.cleaningTargetMinutes < 1 ||
         input.cleaningTargetMinutes > 120
       ) {
-        return {
+        return Promise.resolve({
           ok: false,
           error: "Cleaning target must be between 1 and 120 minutes.",
-        };
+        });
       }
       const occurredAt = new Date().toISOString();
       dispatch({
@@ -566,9 +741,9 @@ export function OperationsProvider({
           lastUpdatedAt: occurredAt,
         },
       });
-      return { ok: true };
+      return Promise.resolve({ ok: true });
     },
-    [repositoryMode, state],
+    [repositoryMode, runDatabaseCommand, state],
   );
   const reset = useCallback(
     () => {
@@ -584,6 +759,8 @@ export function OperationsProvider({
       mode: repositoryMode,
       state,
       hydrated,
+      connectionStatus,
+      changedOnAnotherDevice,
       transitionTable,
       correctTable,
       saveFloor,
@@ -612,6 +789,8 @@ export function OperationsProvider({
       state,
       repositoryMode,
       hydrated,
+      connectionStatus,
+      changedOnAnotherDevice,
       transitionTable,
       correctTable,
       saveFloor,

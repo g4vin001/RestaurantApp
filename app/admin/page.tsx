@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
 import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
@@ -10,7 +11,7 @@ import {
   unlockAdminPanel,
   updateRestaurantByAdmin,
 } from "./actions";
-import { DeleteRestaurantButton } from "./DeleteRestaurantButton";
+import { ArchiveRestaurantButton } from "./DeleteRestaurantButton";
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm";
@@ -56,6 +57,8 @@ export default async function AdminPage() {
       slug: true,
       location: true,
       cuisineType: true,
+      environment: true,
+      archivedAt: true,
       memberships: {
         where: { active: true },
         select: { role: true, profile: { select: { email: true } } },
@@ -68,10 +71,10 @@ export default async function AdminPage() {
     <main className="mx-auto max-w-3xl px-5 py-16">
       <h1 className="text-2xl font-bold text-emerald-800">Admin panel</h1>
       <p className="mt-1 text-sm text-stone-600">
-        Temporary tool for creating test restaurants and assigning managers.
-        Not linked anywhere else in the app — this will be replaced by a real
-        onboarding/invite system later.
+        Manage restaurant access and isolated test data. Every archive, restore,
+        and Data Lab change is audited.
       </p>
+      <Link href="/admin/data-lab" className="mt-4 inline-flex rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800">Open Operations Data Lab</Link>
 
       {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
@@ -97,6 +100,13 @@ export default async function AdminPage() {
           <label className={labelClass}>
             Owner email
             <input name="ownerEmail" type="email" required className={inputClass} />
+          </label>
+          <label className={labelClass}>
+            Environment
+            <select name="environment" className={`${inputClass} bg-white`}>
+              <option value="LIVE">Live restaurant</option>
+              <option value="TEST">Test restaurant (Data Lab only)</option>
+            </select>
           </label>
           <button type="submit" className="mt-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">
             Create restaurant
@@ -144,7 +154,7 @@ export default async function AdminPage() {
           <ul className="mt-4 space-y-4">
             {restaurants.map((restaurant) => (
               <li key={restaurant.id} className="rounded-lg border border-stone-200 p-4">
-                <p className="text-xs text-stone-400">/{restaurant.slug}</p>
+                <p className="text-xs text-stone-400">/{restaurant.slug} · {restaurant.environment}{restaurant.archivedAt ? " · ARCHIVED" : ""}</p>
                 <form action={updateRestaurantByAdmin} className="mt-2 flex flex-col gap-3">
                   <input type="hidden" name="restaurantId" value={restaurant.id} />
                   <label className={labelClass}>
@@ -193,9 +203,10 @@ export default async function AdminPage() {
                           .map((membership) => `${membership.profile.email} (${membership.role})`)
                           .join(", ")}
                   </div>
-                  <DeleteRestaurantButton
+                  <ArchiveRestaurantButton
                     restaurantId={restaurant.id}
                     restaurantName={restaurant.name}
+                    archived={Boolean(restaurant.archivedAt)}
                   />
                 </div>
               </li>

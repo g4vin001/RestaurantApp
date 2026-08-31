@@ -9,7 +9,9 @@ import {
   recommendTables,
   removeStaffMember,
   seatQueueEntry,
+  seatReservation,
   setQueueStatus,
+  setReservationStatus,
   setStaffActive,
   transitionTable,
   updateQueueEntry,
@@ -264,6 +266,78 @@ describe("manager operation commands", () => {
       seatedState.queue.find((item) => item.id === entry.id)
         ?.assignedTableIds,
     ).toEqual(["table-03", "table-04"]);
+
+    const cleaningAt = new Date(now.getTime() + 60_000).toISOString();
+    const cleaning = transitionTable(
+      seatedState,
+      "table-03",
+      "CLEANING",
+      cleaningAt,
+      "Manager",
+    );
+    const cleaningState = successful(cleaning);
+    expect(
+      cleaningState.tables
+        .filter((table) => recommendation!.tableIds.includes(table.id))
+        .map((table) => table.status),
+    ).toEqual(["CLEANING", "CLEANING"]);
+
+    const corrected = correctLastTableTransition(
+      cleaningState,
+      "table-04",
+      "Party is still dining",
+      new Date(now.getTime() + 2 * 60_000).toISOString(),
+      "Manager",
+    );
+    const correctedState = successful(corrected);
+    expect(
+      correctedState.tables
+        .filter((table) => recommendation!.tableIds.includes(table.id))
+        .every((table) => table.status === "OCCUPIED"),
+    ).toBe(true);
+    expect(
+      correctedState.sessions
+        .filter((session) => recommendation!.tableIds.includes(session.tableId))
+        .filter((session) => session.seatedAt === occurredAt)
+        .every((session) => !session.clearedAt),
+    ).toBe(true);
+  });
+
+  it("moves a completed demo reservation and its linked table into cleaning", () => {
+    const state = createDemoState(now);
+    const reservation = state.reservations.find(
+      (item) => item.tableId === "table-06",
+    )!;
+    const seated = seatReservation(
+      state,
+      reservation.id,
+      "table-06",
+      occurredAt,
+      "Manager",
+    );
+    const completedAt = new Date(now.getTime() + 60_000).toISOString();
+    const completed = setReservationStatus(
+      successful(seated),
+      reservation.id,
+      "COMPLETED",
+      completedAt,
+      "Manager",
+    );
+    const completedState = successful(completed);
+
+    expect(
+      completedState.tables.find((table) => table.id === "table-06")?.status,
+    ).toBe("CLEANING");
+    expect(
+      completedState.reservations.find((item) => item.id === reservation.id)
+        ?.status,
+    ).toBe("COMPLETED");
+    expect(
+      completedState.sessions.find(
+        (session) =>
+          session.tableId === "table-06" && session.seatedAt === occurredAt,
+      )?.clearedAt,
+    ).toBe(completedAt);
   });
 
   it("returns a party-size-aware wait suggestion", () => {

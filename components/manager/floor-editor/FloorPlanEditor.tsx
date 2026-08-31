@@ -290,9 +290,9 @@ export function FloorPlanEditor() {
     notify("success", "Floor published. Live floor now uses this version.");
   };
 
-  const restore = (planId: string, versionId: string) => {
+  const restore = async (planId: string, versionId: string) => {
     const version = plan.versions.find((item) => item.id === versionId);
-    const result = restoreFloor(planId, versionId);
+    const result = await restoreFloor(planId, versionId);
     if (!result.ok || !version) {
       notify("error", result.ok ? "Version not found." : result.error);
       return;
@@ -626,12 +626,12 @@ export function FloorPlanEditor() {
           <button
             type="button"
             disabled={!newFloorName.trim()}
-            onClick={() => {
-              const id = createFloor(newFloorName);
+            onClick={async () => {
+              const id = await createFloor(newFloorName);
               if (!id) {
                 notify(
                   "error",
-                  "Creating a database-backed floor is not enabled yet.",
+                  "Halina could not create that floor plan.",
                 );
                 setNewFloorOpen(false);
                 return;

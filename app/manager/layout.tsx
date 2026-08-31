@@ -67,6 +67,8 @@ export default async function ManagerLayout({
   const repository = new PrismaOperationsRepository(prisma, {
     profileId: user.id,
     restaurantId: membership.restaurantId,
+    membershipId: membership.id,
+    membershipRole: membership.role,
   });
 
   let initialState: OperationsState;

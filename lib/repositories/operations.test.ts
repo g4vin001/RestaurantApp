@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DemoOperationsRepository } from "./demo/demo-operations";
-import {
-  databaseWritePending,
-  resolveOperationsRepositoryMode,
-} from "./operations";
+import { resolveOperationsRepositoryMode } from "./operations";
 
 describe("operations repository selection", () => {
   it("uses the browser repository only for explicit demo mode", () => {
@@ -22,11 +19,4 @@ describe("operations repository selection", () => {
     expect(repository.mode).toBe("demo");
   });
 
-  it("returns an explicit error while database commands are pending", () => {
-    expect(databaseWritePending()).toEqual({
-      ok: false,
-      error:
-        "This screen is reading shared restaurant data, but database writes are not enabled for this action yet.",
-    });
-  });
 });

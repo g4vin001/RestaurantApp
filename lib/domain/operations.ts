@@ -15,6 +15,34 @@ function touch(state: DemoState, occurredAt: string): DemoState {
   return { ...state, lastUpdatedAt: occurredAt };
 }
 
+function latestLinkedQueue(state: DemoState, tableId: string) {
+  return state.queue
+    .filter(
+      (entry) =>
+        entry.status === "SEATED" &&
+        (entry.assignedTableId === tableId ||
+          entry.assignedTableIds?.includes(tableId)),
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(right.seatedAt ?? "") - Date.parse(left.seatedAt ?? ""),
+    )[0];
+}
+
+function latestLinkedReservation(state: DemoState, tableId: string) {
+  return state.reservations
+    .filter(
+      (reservation) =>
+        ["SEATED", "COMPLETED"].includes(reservation.status) &&
+        (reservation.tableId === tableId ||
+          reservation.tableIds?.includes(tableId)),
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(right.seatedAt ?? "") - Date.parse(left.seatedAt ?? ""),
+    )[0];
+}
+
 export function transitionTable(
   state: DemoState,
   tableId: string,
@@ -42,8 +70,37 @@ export function transitionTable(
     };
   }
 
+  const linkedQueue = latestLinkedQueue(state, tableId);
+  const linkedReservation = latestLinkedReservation(state, tableId);
+  const linkedIds =
+    linkedQueue?.assignedTableIds ??
+    linkedReservation?.tableIds ??
+    (linkedQueue?.assignedTableId
+      ? [linkedQueue.assignedTableId]
+      : linkedReservation?.tableId
+        ? [linkedReservation.tableId]
+        : [tableId]);
+  const affectedIds =
+    table.status === "OCCUPIED" || table.status === "CLEANING"
+      ? [...new Set(linkedIds)]
+      : [tableId];
+  const affectedTables = affectedIds.map((id) =>
+    state.tables.find((item) => item.id === id && item.active),
+  );
+  if (
+    affectedTables.some(
+      (item) => !item || item.status !== table.status,
+    )
+  ) {
+    return {
+      ok: false,
+      error: "The linked table group changed and must be refreshed.",
+    };
+  }
+
   const sessions = state.sessions.map((session) => {
-    if (session.tableId !== table.id || session.readyAt) return session;
+    if (!affectedIds.includes(session.tableId) || session.readyAt)
+      return session;
     if (
       table.status === "OCCUPIED" &&
       status === "CLEANING" &&
@@ -76,20 +133,20 @@ export function transitionTable(
       {
         ...state,
         tables: state.tables.map((item) =>
-          item.id === table.id
+          affectedIds.includes(item.id)
             ? { ...item, status, statusChangedAt: occurredAt }
             : item,
         ),
         sessions,
         events: [
-          {
-            id: `event-${occurredAt}-${table.id}`,
-            tableId: table.id,
+          ...affectedIds.map((affectedId) => ({
+            id: `event-${occurredAt}-${affectedId}`,
+            tableId: affectedId,
             previousStatus: table.status,
             newStatus: status,
             occurredAt,
             actor,
-          },
+          })),
           ...state.events,
         ],
       },
@@ -128,20 +185,28 @@ export function correctLastTableTransition(
       error: "Only the most recent 15 minutes can be corrected. Use a new status change instead.",
     };
 
-  const linkedQueue = state.queue.find(
+  const seatedQueue = state.queue.find(
     (entry) =>
       entry.status === "SEATED" &&
       entry.seatedAt === event.occurredAt &&
       (entry.assignedTableId === tableId ||
         entry.assignedTableIds?.includes(tableId)),
   );
-  const linkedReservation = state.reservations.find(
+  const seatedReservation = state.reservations.find(
     (reservation) =>
       reservation.status === "SEATED" &&
       reservation.seatedAt === event.occurredAt &&
       (reservation.tableId === tableId ||
         reservation.tableIds?.includes(tableId)),
   );
+  const activeQueue = latestLinkedQueue(state, tableId);
+  const activeReservation = latestLinkedReservation(state, tableId);
+  const linkedQueue =
+    event.newStatus === "OCCUPIED" ? seatedQueue : activeQueue;
+  const linkedReservation =
+    event.newStatus === "OCCUPIED"
+      ? seatedReservation
+      : activeReservation;
   const linkedIds =
     linkedQueue?.assignedTableIds ??
     linkedReservation?.tableIds ??
@@ -150,8 +215,7 @@ export function correctLastTableTransition(
       : linkedReservation?.tableId
         ? [linkedReservation.tableId]
         : [tableId]);
-  const affectedIds =
-    event.newStatus === "OCCUPIED" ? [...new Set(linkedIds)] : [tableId];
+  const affectedIds = [...new Set(linkedIds)];
 
   const originals = affectedIds.map((id) =>
     state.events.find(
@@ -182,7 +246,7 @@ export function correctLastTableTransition(
     event.newStatus === "CLEANING"
   ) {
     sessions = sessions.map((session) =>
-      session.tableId === tableId &&
+      affectedIds.includes(session.tableId) &&
       session.clearedAt === event.occurredAt &&
       !session.readyAt
         ? { ...session, clearedAt: undefined }
@@ -193,7 +257,8 @@ export function correctLastTableTransition(
     event.newStatus === "AVAILABLE"
   ) {
     sessions = sessions.map((session) =>
-      session.tableId === tableId && session.readyAt === event.occurredAt
+      affectedIds.includes(session.tableId) &&
+      session.readyAt === event.occurredAt
         ? { ...session, readyAt: undefined }
         : session,
     );
@@ -232,7 +297,7 @@ export function correctLastTableTransition(
         }),
         sessions,
         queue: state.queue.map((entry) =>
-          entry.id === linkedQueue?.id
+          entry.id === linkedQueue?.id && event.newStatus === "OCCUPIED"
             ? {
                 ...entry,
                 status: "WAITING" as const,
@@ -243,19 +308,33 @@ export function correctLastTableTransition(
               }
             : entry,
         ),
-        reservations: state.reservations.map((reservation) =>
-          reservation.id === linkedReservation?.id
-            ? {
-                ...reservation,
-                status: reservation.arrivedAt
-                  ? ("ARRIVED" as const)
-                  : ("CONFIRMED" as const),
-                seatedAt: undefined,
-                tableIds: undefined,
-                updatedAt: occurredAt,
-              }
-            : reservation,
-        ),
+        reservations: state.reservations.map((reservation) => {
+          if (reservation.id !== linkedReservation?.id) return reservation;
+          if (event.newStatus === "OCCUPIED") {
+            return {
+              ...reservation,
+              status: reservation.arrivedAt
+                ? ("ARRIVED" as const)
+                : ("CONFIRMED" as const),
+              seatedAt: undefined,
+              tableIds: undefined,
+              updatedAt: occurredAt,
+            };
+          }
+          if (
+            event.previousStatus === "OCCUPIED" &&
+            event.newStatus === "CLEANING" &&
+            reservation.status === "COMPLETED"
+          ) {
+            return {
+              ...reservation,
+              status: "SEATED" as const,
+              completedAt: undefined,
+              updatedAt: occurredAt,
+            };
+          }
+          return reservation;
+        }),
         events: [...correctionEvents, ...state.events],
       },
       occurredAt,
@@ -819,6 +898,7 @@ export function setReservationStatus(
   reservationId: string,
   status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
   occurredAt: string,
+  actor = "Demo manager",
 ): DomainResult {
   const reservation = state.reservations.find(
     (item) => item.id === reservationId,
@@ -838,12 +918,32 @@ export function setReservationStatus(
   };
   if (!allowed[reservation.status].includes(status))
     return { ok: false, error: "That reservation action is no longer valid." };
+  let nextState = state;
+  if (status === "COMPLETED") {
+    const tableIds = reservation.tableIds ??
+      (reservation.tableId ? [reservation.tableId] : []);
+    if (!tableIds.length) {
+      return {
+        ok: false,
+        error: "This seated reservation has no linked table group.",
+      };
+    }
+    const transitioned = transitionTable(
+      state,
+      tableIds[0],
+      "CLEANING",
+      occurredAt,
+      actor,
+    );
+    if (!transitioned.ok) return transitioned;
+    nextState = transitioned.state;
+  }
   return {
     ok: true,
     state: touch(
       {
-        ...state,
-        reservations: state.reservations.map((item) =>
+        ...nextState,
+        reservations: nextState.reservations.map((item) =>
           item.id === reservationId
             ? {
                 ...item,
@@ -909,7 +1009,7 @@ export type StaffInput = Pick<
   StaffMember,
   "name" | "jobTitle" | "permissionPreset"
 > &
-  Partial<Pick<StaffMember, "contact">>;
+  Partial<Pick<StaffMember, "contact" | "email" | "staffRoleId">>;
 
 export function addStaffMember(
   state: DemoState,
@@ -923,6 +1023,8 @@ export function addStaffMember(
     name: input.name.trim(),
     jobTitle: input.jobTitle.trim(),
     contact: input.contact?.trim() || undefined,
+    email: input.email?.trim().toLowerCase() || undefined,
+    staffRoleId: input.staffRoleId,
     permissionPreset: input.permissionPreset,
     active: true,
     accessStatus: "NOT_INVITED",
@@ -957,6 +1059,8 @@ export function updateStaffMember(
                 name: input.name.trim(),
                 jobTitle: input.jobTitle.trim(),
                 contact: input.contact?.trim() || undefined,
+                email: input.email?.trim().toLowerCase() || undefined,
+                staffRoleId: input.staffRoleId,
                 permissionPreset: input.permissionPreset,
                 updatedAt: occurredAt,
               }

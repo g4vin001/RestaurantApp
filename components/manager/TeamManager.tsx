@@ -25,13 +25,25 @@ const presetLabels: Record<StaffPermissionPreset, string> = {
 
 function StaffForm({
   member,
+  roles,
   onSubmit,
   onCancel,
 }: {
   member?: StaffMember;
-  onSubmit: (form: FormData) => void;
+  roles: Array<{ id: string; name: string; presetKey: string | null }>;
+  onSubmit: (form: FormData) => void | Promise<void>;
   onCancel: () => void;
 }) {
+  const [roleId, setRoleId] = useState(
+    member?.staffRoleId ?? roles[0]?.id ?? "",
+  );
+  const selectedRole = roles.find((role) => role.id === roleId);
+  const permissionPreset: StaffPermissionPreset =
+    selectedRole?.presetKey === "FLOOR_STAFF"
+      ? "FLOOR_STAFF"
+      : selectedRole?.presetKey === "HOST"
+        ? "HOST"
+        : "MANAGER";
   return (
     <form action={onSubmit} className="space-y-4">
       <label className="block text-sm font-semibold text-stone-700">
@@ -55,16 +67,18 @@ function StaffForm({
           />
         </label>
         <label className="block text-sm font-semibold text-stone-700">
-          Permission preset
+          Staff role
           <select
-            name="permissionPreset"
-            defaultValue={member?.permissionPreset ?? "FLOOR_STAFF"}
+            name="staffRoleId"
+            value={roleId}
+            onChange={(event) => setRoleId(event.target.value)}
             className={inputClass}
           >
-            <option value="MANAGER">Manager</option>
-            <option value="HOST">Host</option>
-            <option value="FLOOR_STAFF">Floor staff</option>
+            {roles.map((role) => (
+              <option key={role.id} value={role.id}>{role.name}</option>
+            ))}
           </select>
+          <input type="hidden" name="permissionPreset" value={permissionPreset} />
         </label>
       </div>
       <label className="block text-sm font-semibold text-stone-700">
@@ -77,8 +91,8 @@ function StaffForm({
         />
       </label>
       <p className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-        Login access is disabled in this prototype. This record does not send an
-        invitation or create an employee account.
+        This directory record does not create an account by itself. Use Invite
+        staff access after saving when this person needs restricted operations.
       </p>
       <div className="flex justify-end gap-3">
         <button
@@ -99,7 +113,11 @@ function StaffForm({
   );
 }
 
-export function TeamManager() {
+export function TeamManager({
+  roles,
+}: {
+  roles: Array<{ id: string; name: string; presetKey: string | null }>;
+}) {
   const { state, addStaff, updateStaff, setStaffStatus, removeStaff } =
     useDemo();
   const [editing, setEditing] = useState<StaffMember | "new" | null>(null);
@@ -117,19 +135,21 @@ export function TeamManager() {
     window.setTimeout(() => setToast(null), 3500);
   }, []);
 
-  const submit = (form: FormData) => {
+  const submit = async (form: FormData) => {
     const input = {
       name: String(form.get("name") ?? ""),
       jobTitle: String(form.get("jobTitle") ?? ""),
       contact: String(form.get("contact") ?? ""),
+      staffRoleId: String(form.get("staffRoleId") ?? "") || undefined,
       permissionPreset: String(
         form.get("permissionPreset"),
       ) as StaffPermissionPreset,
     };
-    const result =
+    const result = await (
       editing && editing !== "new"
         ? updateStaff(editing.id, input)
-        : addStaff(input);
+        : addStaff(input)
+    );
     if (!result.ok) {
       notify("error", result.error);
       return;
@@ -141,12 +161,13 @@ export function TeamManager() {
     setEditing(null);
   };
 
-  const confirmAction = () => {
+  const confirmAction = async () => {
     if (!confirming) return;
-    const result =
+    const result = await (
       confirming.action === "remove"
         ? removeStaff(confirming.member.id)
-        : setStaffStatus(confirming.member.id, false);
+        : setStaffStatus(confirming.member.id, false)
+    );
     if (!result.ok) {
       notify("error", result.error);
       return;
@@ -196,7 +217,7 @@ export function TeamManager() {
         <section className="rounded-2xl border border-stone-200 bg-white p-5">
           <p className="text-sm text-stone-500">Login access</p>
           <p className="mt-2 text-lg font-bold text-amber-800">
-            Disabled in prototype
+            Invitation-based
           </p>
         </section>
       </div>
@@ -205,8 +226,7 @@ export function TeamManager() {
         <div className="border-b border-stone-200 px-5 py-4">
           <h2 className="font-semibold text-stone-900">Staff directory</h2>
           <p className="mt-1 text-xs text-stone-500">
-            Permission presets are informational until invitation-based access
-            is implemented.
+            Role permissions are enforced server-side for invited staff.
           </p>
         </div>
         {state.staff.length ? (
@@ -243,10 +263,16 @@ export function TeamManager() {
                     </p>
                     <p className="mt-1 flex items-center gap-1.5 text-xs text-stone-400">
                       <ShieldCheck size={13} />{" "}
-                      {presetLabels[member.permissionPreset]} ·{" "}
+                      {member.staffRoleName ??
+                        roles.find((role) => role.id === member.staffRoleId)?.name ??
+                        presetLabels[member.permissionPreset]} ·{" "}
                       {member.accessStatus === "NOT_INVITED"
                         ? "Not invited"
-                        : "Access disabled"}
+                        : member.accessStatus === "INVITED"
+                          ? "Invite pending"
+                          : member.accessStatus === "ACTIVE"
+                            ? "Login active"
+                            : "Access disabled"}
                     </p>
                   </div>
                 </div>
@@ -271,8 +297,8 @@ export function TeamManager() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        const result = setStaffStatus(member.id, true);
+                      onClick={async () => {
+                        const result = await setStaffStatus(member.id, true);
                         if (result.ok)
                           notify("success", "Staff member reactivated.");
                       }}
@@ -311,12 +337,13 @@ export function TeamManager() {
       <Modal
         open={editing !== null}
         title={editing === "new" ? "Add staff member" : "Edit staff record"}
-        description="This stores an internal demo record only; no account or invitation is created."
+        description="This stores a staff directory record. Account access is granted separately with an email-bound invitation."
         onClose={() => setEditing(null)}
       >
         {editing && (
           <StaffForm
             member={editing === "new" ? undefined : editing}
+            roles={roles}
             onSubmit={submit}
             onCancel={() => setEditing(null)}
           />
@@ -331,7 +358,7 @@ export function TeamManager() {
         }
         description={
           confirming?.action === "remove"
-            ? "This removes the demo record. Use deactivate when you want to preserve it."
+            ? "This archives the staff record and disables any linked access. Use deactivate if you may restore it soon."
             : "The record stays in the directory, but is marked inactive and access-disabled."
         }
         onClose={() => setConfirming(null)}

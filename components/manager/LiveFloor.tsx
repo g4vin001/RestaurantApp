@@ -126,8 +126,8 @@ function TableDetailPanel({
   onChange: (
     status: TableStatus,
     partySize?: number,
-  ) => { ok: boolean; error?: string };
-  onCorrect: (reason: string) => { ok: boolean; error?: string };
+  ) => Promise<{ ok: boolean; error?: string }>;
+  onCorrect: (reason: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [seating, setSeating] = useState(false);
   const [partySize, setPartySize] = useState(Math.min(2, table.capacity));
@@ -143,17 +143,17 @@ function TableDetailPanel({
     setCorrectionReason("");
   }, [table.id, table.capacity]);
 
-  const run = (status: TableStatus) => {
+  const run = async (status: TableStatus) => {
     if (status === "OCCUPIED") {
       setSeating(true);
       return;
     }
-    const result = onChange(status);
+    const result = await onChange(status);
     if (!result.ok) setError(result.error ?? "That status change failed.");
   };
 
-  const confirmSeating = () => {
-    const result = onChange("OCCUPIED", partySize);
+  const confirmSeating = async () => {
+    const result = await onChange("OCCUPIED", partySize);
     if (!result.ok) {
       setError(result.error ?? "That table could not be seated.");
       return;
@@ -162,8 +162,8 @@ function TableDetailPanel({
     setError(null);
   };
 
-  const confirmCorrection = () => {
-    const result = onCorrect(correctionReason);
+  const confirmCorrection = async () => {
+    const result = await onCorrect(correctionReason);
     if (!result.ok) {
       setError(result.error ?? "That action could not be corrected.");
       return;
@@ -346,16 +346,16 @@ export function LiveFloor() {
 
   const selected =
     activeTables.find((table) => table.id === selectedId) ?? null;
-  const changeStatus = (status: TableStatus, partySize?: number) => {
+  const changeStatus = async (status: TableStatus, partySize?: number) => {
     if (!selected) return { ok: false, error: "Select a table first." };
-    const result = transitionTable(selected.id, status, partySize);
+    const result = await transitionTable(selected.id, status, partySize);
     if (result.ok)
       setAnnouncement(`${selected.label} is now ${tableStatusLabel(status)}.`);
     return result;
   };
-  const correctStatus = (reason: string) => {
+  const correctStatus = async (reason: string) => {
     if (!selected) return { ok: false, error: "Select a table first." };
-    const result = correctTable(selected.id, reason);
+    const result = await correctTable(selected.id, reason);
     if (result.ok)
       setAnnouncement(`${selected.label}'s last action was corrected.`);
     return result;

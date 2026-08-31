@@ -43,7 +43,7 @@ function ShellContent({
   profileName: string;
 }) {
   const pathname = usePathname();
-  const { mode, state, reset } = useDemo();
+  const { mode, state, reset, connectionStatus, changedOnAnotherDevice } = useDemo();
   const isDemoRepository = mode === "demo";
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -146,7 +146,7 @@ function ShellContent({
             <p className="mt-1 leading-5 text-amber-100/80">
               {isDemoRepository
                 ? "Changes stay in this browser and sync across open tabs."
-                : "Shared restaurant data is loaded from PostgreSQL. Write actions are not enabled yet."}
+                : "Writes are stored in PostgreSQL and shared with authorized restaurant devices."}
             </p>
             {isDemoRepository && (
               <button
@@ -215,13 +215,22 @@ function ShellContent({
           >
             <Menu size={20} />
           </button>
-          <div className="hidden items-center gap-2 text-sm text-stone-500 sm:flex">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            Updated {formatLastUpdated(state.lastUpdatedAt)}
+          <div className="hidden items-center gap-2 text-sm text-stone-500 sm:flex" role="status">
+            <span className={`h-2 w-2 rounded-full ${connectionStatus === "live" ? "bg-emerald-500" : connectionStatus === "offline" ? "bg-rose-500" : "bg-amber-500"}`} />
+            {connectionStatus === "live"
+              ? `${changedOnAnotherDevice ? "Changed on another device · " : ""}Updated ${formatLastUpdated(state.lastUpdatedAt)}`
+              : connectionStatus === "offline"
+                ? "Offline · changes cannot be saved"
+                : connectionStatus === "stale"
+                  ? "Data may be stale"
+                  : "Reconnecting…"}
           </div>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
-            {isDemoRepository ? "Demo data" : "Database snapshot"}
-          </span>
+          <div className="flex items-center gap-2">
+            {state.restaurant.environment === "TEST" && <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800">Test restaurant</span>}
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
+              {isDemoRepository ? "Demo data" : "Shared database"}
+            </span>
+          </div>
         </header>
         <main>{children}</main>
       </div>

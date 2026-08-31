@@ -1,5 +1,9 @@
 import "server-only";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type {
+  MembershipRole,
+  PrismaClient,
+  StaffPermission,
+} from "@/lib/generated/prisma/client";
 import type {
   FloorElement,
   FloorElementType,
@@ -9,8 +13,10 @@ import type {
 } from "@/lib/domain/types";
 import {
   OperationsRepositoryError,
-  type OperationsRepository,
+  type WritableOperationsRepository,
 } from "@/lib/repositories/operations";
+import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
+import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-commands";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
 
 const FLOOR_ELEMENT_TYPES = new Set<FloorElementType>([
@@ -37,6 +43,9 @@ const TABLE_SHAPES = new Set<TableShape>([
 export type PrismaOperationsScope = {
   profileId: string;
   restaurantId: string;
+  membershipId?: string;
+  membershipRole?: MembershipRole;
+  permissions?: StaffPermission[];
 };
 
 function optionalString(value: unknown) {
@@ -160,6 +169,7 @@ async function fetchRestaurantSnapshot(
       id: scope.restaurantId,
       memberships: {
         some: {
+          ...(scope.membershipId ? { id: scope.membershipId } : {}),
           profileId: scope.profileId,
           active: true,
           role: { in: ["OWNER", "MANAGER"] },
@@ -195,6 +205,7 @@ async function fetchRestaurantSnapshot(
         where: { seatedAt: { gte: historyStart } },
         orderBy: { seatedAt: "desc" },
         take: 1_000,
+        include: { seatingAssignment: { include: { tables: true } } },
       },
       queueEntries: {
         where: {
@@ -203,8 +214,9 @@ async function fetchRestaurantSnapshot(
             { joinedAt: { gte: historyStart } },
           ],
         },
-        orderBy: { joinedAt: "asc" },
+        orderBy: [{ position: "asc" }, { joinedAt: "asc" }],
         take: 1_000,
+        include: { seatingAssignments: { orderBy: { seatedAt: "desc" }, take: 1, include: { tables: true } } },
       },
       reservations: {
         where: {
@@ -215,10 +227,18 @@ async function fetchRestaurantSnapshot(
         },
         orderBy: { scheduledAt: "asc" },
         take: 1_000,
+        include: {
+          seatingAssignments: {
+            orderBy: { seatedAt: "desc" },
+            take: 1,
+            include: { tables: true },
+          },
+        },
       },
       staffMembers: {
         where: { archivedAt: null },
         orderBy: { name: "asc" },
+        include: { staffRole: true },
       },
     },
   });
@@ -311,6 +331,8 @@ export function mapRestaurantSnapshot(
       ),
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
+      environment: restaurant.environment,
+      revision: restaurant.revision,
     },
     tables: restaurant.diningTables.map((table) => {
       const geometry = geometryByTableId.get(table.id);
@@ -332,6 +354,7 @@ export function mapRestaurantSnapshot(
         rotation: geometry?.rotation ?? 0,
         shape: table.shape,
         active: table.active && table.archivedAt === null,
+        revision: table.statusRevision,
       };
     }),
     floorPlans,
@@ -351,10 +374,12 @@ export function mapRestaurantSnapshot(
       cancelledAt: entry.cancelledAt?.toISOString(),
       noShowAt: entry.noShowAt?.toISOString(),
       assignedTableId: entry.assignedTableId ?? undefined,
-      assignedTableIds: entry.assignedTableId
-        ? [entry.assignedTableId]
-        : undefined,
+      assignedTableIds:
+        entry.seatingAssignments[0]?.tables.map((item) => item.diningTableId) ??
+        (entry.assignedTableId ? [entry.assignedTableId] : undefined),
       updatedAt: entry.updatedAt.toISOString(),
+      revision: entry.revision,
+      position: entry.position,
     })),
     sessions: restaurant.diningSessions.map((session) => ({
       id: session.id,
@@ -382,9 +407,9 @@ export function mapRestaurantSnapshot(
       scheduledAt: reservation.scheduledAt.toISOString(),
       status: reservation.status,
       tableId: reservation.assignedTableId ?? undefined,
-      tableIds: reservation.assignedTableId
-        ? [reservation.assignedTableId]
-        : undefined,
+      tableIds:
+        reservation.seatingAssignments[0]?.tables.map((item) => item.diningTableId) ??
+        (reservation.assignedTableId ? [reservation.assignedTableId] : undefined),
       contact: reservation.contact ?? undefined,
       notes: reservation.notes ?? undefined,
       arrivedAt: reservation.arrivedAt?.toISOString(),
@@ -393,13 +418,19 @@ export function mapRestaurantSnapshot(
       cancelledAt: reservation.cancelledAt?.toISOString(),
       noShowAt: reservation.noShowAt?.toISOString(),
       updatedAt: reservation.updatedAt.toISOString(),
+      revision: reservation.revision,
     })),
     staff: restaurant.staffMembers.map((staff) => ({
       id: staff.id,
       name: staff.name,
       jobTitle: staff.jobTitle,
       contact: staff.contact ?? undefined,
+      email: staff.email ?? undefined,
       permissionPreset: staff.permissionPreset,
+      staffRoleId: staff.staffRoleId ?? undefined,
+      staffRoleName: staff.staffRole?.name,
+      permissions: staff.staffRole?.permissions,
+      revision: staff.revision,
       active: staff.active,
       accessStatus: staff.accessStatus,
       createdAt: staff.createdAt.toISOString(),
@@ -421,7 +452,7 @@ export function mapRestaurantSnapshot(
   return state;
 }
 
-export class PrismaOperationsRepository implements OperationsRepository {
+export class PrismaOperationsRepository implements WritableOperationsRepository {
   readonly mode = "database" as const;
 
   constructor(
@@ -447,5 +478,22 @@ export class PrismaOperationsRepository implements OperationsRepository {
         { cause: error },
       );
     }
+  }
+
+  async execute(command: DatabaseOperationsCommand): Promise<OperationsState> {
+    if (!this.scope.membershipId || !this.scope.membershipRole) {
+      throw new OperationsRepositoryError(
+        "FORBIDDEN",
+        "An active restaurant membership is required to save changes.",
+      );
+    }
+    await executeOperationsCommand(this.client, {
+      profileId: this.scope.profileId,
+      restaurantId: this.scope.restaurantId,
+      membershipId: this.scope.membershipId,
+      membershipRole: this.scope.membershipRole,
+      permissions: this.scope.permissions,
+    }, command);
+    return this.loadSnapshot();
   }
 }
