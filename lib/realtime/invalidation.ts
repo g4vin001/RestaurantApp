@@ -28,7 +28,7 @@ export async function broadcastRestaurantInvalidation(
     timestamp: new Date().toISOString(),
   };
 
-  await client.$queryRaw(
+  await client.$executeRaw(
     Prisma.sql`SELECT realtime.send(
       ${JSON.stringify(payload)}::jsonb,
       'invalidated',
@@ -38,7 +38,7 @@ export async function broadcastRestaurantInvalidation(
   );
 
   if (input.environment === "LIVE") {
-    await client.$queryRaw(
+    await client.$executeRaw(
       Prisma.sql`SELECT realtime.send(
         ${JSON.stringify({
           restaurantSlug: input.restaurantSlug,

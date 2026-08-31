@@ -94,9 +94,10 @@ npm run build
 
 `npm run test:e2e` starts the app in explicit demo mode on port 3100 and checks
 the manager shell, queue persistence, cross-tab synchronization, and mobile
-operation without requiring database credentials. Authenticated tenant,
-migration, and Data API security browser flows still require the isolated
-Preview Supabase project and dedicated test accounts.
+operation without requiring database credentials. Authenticated tenant and
+database command behavior is covered by the isolated Preview PostgreSQL
+integration suite. Full authenticated browser flows still require dedicated
+test accounts.
 
 ## Available routes
 
@@ -118,12 +119,11 @@ There is intentionally no `/employee` route. Staff use normal Supabase-authentic
 
 ## Known limitations
 
-- The new shared-operations and RLS migrations are committed but must not be applied to production until an isolated Preview Supabase project passes migration, Data API denial, runtime-log, and browser verification.
-- Preview deployment is blocked while no isolated Supabase project is available; production is intentionally not used as a substitute.
-- Automatic Vercel deployment is disabled for `agent/shared-operations-staff-data-lab` in `vercel.json`. Remove that branch gate only after its isolated Preview environment variables are configured, then deploy and inspect runtime logs explicitly.
-- `npm audit` currently reports seven advisories (three moderate and four high) in the Prisma, Next/PostCSS, and ExcelJS dependency paths. npm's remaining automated proposals are breaking version changes, so `--force` is intentionally not used; recheck and upgrade through supported framework releases.
+- Vercel builds do not run database migrations. Every release must run `migrate status`, review pending SQL, and run `migrate deploy` through `DIRECT_URL` on port 5432 before deploying code that depends on it.
+- Automatic Vercel deployment remains disabled for `agent/shared-operations-staff-data-lab` in `vercel.json`; Preview deployments from that branch are deliberate and use the isolated Debug Supabase project.
+- Patched transitive versions for Prisma (`deepmerge-ts`), Next/PostCSS, and ExcelJS (`uuid`) are enforced with npm overrides. Remove an override only after its direct dependency ships an equivalent patched range and the full validation suite still passes.
 - The floor editor is intentionally limited to tablet-landscape and desktop widths.
 - No employee application, POS, payments, ordering, payroll, or invented revenue analytics are part of this milestone.
-- Demo browser end-to-end coverage runs locally. Authenticated cross-tenant, invitation, import, and Data API denial browser flows require the isolated Preview database and test accounts.
+- Demo browser end-to-end coverage runs locally. Authenticated cross-tenant commands run against the isolated Preview database; invitation, import, and Data API denial browser flows still need dedicated automated test accounts.
 
 Follow [AGENTS.md](AGENTS.md) for the production persistence and security phase.

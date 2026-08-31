@@ -281,6 +281,10 @@ model StaffInvite {
 
   @@index([restaurantId, expiresAt])
   @@index([staffMemberId, acceptedAt, revokedAt])
+  @@index([staffRoleId])
+  @@index([createdById])
+  @@index([createdByMembershipId])
+  @@index([redeemedById])
   @@index([recipientEmail, expiresAt])
 }
 
@@ -296,6 +300,7 @@ model StaffInviteAttempt {
 
   @@index([profileId, attemptedAt])
   @@index([ipHash, attemptedAt])
+  @@index([inviteId])
 }
 
 model FloorPlan {
@@ -337,6 +342,8 @@ model FloorPlanVersion {
 
   @@unique([floorPlanId, version])
   @@index([floorPlanId, publishedAt])
+  @@index([createdById])
+  @@index([publishedById])
 }
 
 model FloorElement {
@@ -418,6 +425,7 @@ model TableStatusEvent {
   @@index([restaurantId, sourceCommandId])
   @@index([restaurantId, occurredAt])
   @@index([diningTableId, occurredAt])
+  @@index([actorProfileId])
   @@index([actorMembershipId, occurredAt])
   @@index([syntheticBatchId])
 }
@@ -488,6 +496,7 @@ model QueueEntry {
 
   @@index([restaurantId, status, joinedAt])
   @@index([restaurantId, assignedTableId])
+  @@index([assignedTableId])
   @@index([createdById, source, status])
   @@index([restaurantId, position])
   @@index([syntheticBatchId])
@@ -524,6 +533,8 @@ model Reservation {
 
   @@index([restaurantId, status, scheduledAt])
   @@index([restaurantId, assignedTableId, scheduledAt])
+  @@index([assignedTableId])
+  @@index([createdById])
   @@index([customerProfileId])
   @@index([syntheticBatchId])
 }
@@ -604,6 +615,8 @@ model SyntheticImportBatch {
 
   @@unique([restaurantId, checksum])
   @@index([restaurantId, createdAt])
+  @@index([actorProfileId])
+  @@index([actorMembershipId])
 }
 
 model AdminAuditLog {
@@ -622,6 +635,7 @@ model AdminAuditLog {
   actorMembership   RestaurantMembership? @relation(fields: [actorMembershipId], references: [id], onDelete: SetNull)
 
   @@index([actorProfileId, createdAt])
+  @@index([actorMembershipId])
   @@index([restaurantId, createdAt])
 }
 
