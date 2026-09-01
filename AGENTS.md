@@ -26,22 +26,25 @@ Verify current GitHub and deployment state at the start of every task because br
 
 At the time of this update:
 
-- the complete high-fidelity implementation is on agent/manager-operations-prototype
-- the branch now includes auditable 15-minute table-action correction, combined same-zone table seating, a rush-mode queue form, explicit non-SMS "Mark called" wording, and party-size-aware wait suggestions
-- draft PR #1 targets main and remains open
-- main may still contain the older application skeleton even though it has the same AGENTS.md
-- the production deployment at https://halina-self.vercel.app has been observed working
+- `main` is the working database-backed implementation; do not restart from an old prototype branch
+- production Manager writes use authenticated, tenant-scoped Prisma commands with optimistic concurrency, idempotency, and transactions
+- customer reservation requests start at `PENDING_APPROVAL`; managers can approve them to `CONFIRMED` or reject them to `CANCELLED`
+- restricted invited staff operate Live Floor and Queue through `/ops`
+- the global-admin Data Lab at `/admin/data-lab` stages, validates, applies, and reverts synthetic history for TEST restaurants only
+- the public restaurant detail includes a privacy-safe published floor and safe aggregate live status
+- Supabase Realtime broadcasts privacy-safe invalidations; authorized clients refetch canonical snapshots
+- combined-table assignments are normalized and persisted as one seating group with per-table sessions
+- the production deployment at https://halina-self.vercel.app must be reverified before any release task
 - Prisma client generation is already handled by the package.json postinstall script
 - Prisma generated output remains ignored, as it should
-- the app has lint, typecheck, Vitest, and production-build commands
-- the current manager UI is still browser-backed through DemoProvider
-- prisma/schema.prisma and the shared-data migration now contain the restaurant, membership, staff, floor, table, session, event, queue, and reservation foundation
-- secure owner onboarding and membership-based manager guards exist, but normal manager operations are not yet connected to PrismaOperationsRepository
-- app/employee/page.tsx is a static legacy placeholder
+- the app has lint, typecheck, Vitest, Playwright, and production-build commands
+- `DemoProvider` selects an explicit deterministic browser repository or the shared `PrismaOperationsRepository`; database failures never fall back to demo data
+- secure owner onboarding and membership-based manager/staff guards exist
+- the legacy `/employee` route has been removed
 
 Do not recreate completed prototype features from stale main. If implementation begins from main and the manager prototype is absent, stop and report the branch mismatch. Continue from the implementation branch or bring it into the active branch only through a non-destructive workflow authorized by the user.
 
-Do not merge PR #1, change production settings, run a destructive database migration, or deploy production unless the user has authorized that action. Source changes requested by the user may still be prepared and tested safely.
+Do not merge a review branch, change production settings, run a destructive database migration, or deploy production unless the user has authorized that action. Source changes requested by the user may still be prepared and tested safely.
 
 ## 3. Completed baseline to preserve
 
@@ -83,31 +86,21 @@ Before assuming a completed behavior is correct, perform a brief audit and run i
 
 ### Release and access
 
-- PR #1 is not yet the official main codebase.
-- The legacy /employee route contradicts the manager-first product decision.
-- A real restaurant owner does not yet have a complete, secure first-restaurant onboarding path.
+- Keep review branches, migrations, and Vercel Preview deployments isolated until explicitly approved for production.
+- Authenticated production-mode browser coverage still depends on safe test accounts and an isolated database.
 - Deployment and dependency status must be rechecked from current evidence rather than assumed from old reports.
 
 ### Persistence and tenancy
 
-- Operational records live in one browser.
-- Clearing browser storage can erase the restaurant's operational history.
-- Another manager device cannot reliably share the same floor, queue, reservations, or table states.
-- Customer devices currently depend on browser demo data rather than a restaurant's server state.
-- Team entries are records, not authenticated memberships or invitations.
-- Profile contains a free-text restaurant field and a globally selected role.
-- Prisma does not yet represent restaurants, floors, tables, sessions, queues, reservations, or events.
-- Multi-record commands are atomic only inside a local reducer, not inside a database transaction.
+- Database mode persists shared operational state in PostgreSQL; demo mode remains intentionally browser-local.
+- Continue auditing every new query and mutation for membership-based tenant scoping and public-projection privacy.
+- Keep migrations forward-only and verify them first against an isolated test or Preview database.
 
 ### Reliability
 
-- Concurrent devices can race to seat the same party or table.
-- Browser-only BroadcastChannel is not real cross-device synchronization.
-- No browser end-to-end suite covers the defining editor-to-operations workflow.
+- Continue expanding authenticated multi-device and conflict browser coverage beyond the deterministic demo suite.
 - Network, authorization, stale-data, transaction-conflict, and reconnect behavior require production-grade states.
 - Restaurant hours still use one daily opening and closing time rather than weekday schedules, split shifts, overnight service, and exception dates.
-- Restricted staff operational access is not implemented; managers still carry the full data-entry burden.
-- Combined-table assignments work in demo operations, but the production schema and repository must persist the full table group rather than only one assigned table.
 - Wait suggestions remain advisory until they are calibrated against persisted sessions, reservation pressure, and cleaning progress.
 - Mobile rush operation needs browser verification on common restaurant tablets and phones.
 

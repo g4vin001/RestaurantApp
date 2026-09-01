@@ -173,7 +173,12 @@ interface DemoContextValue {
   ) => Promise<CommandFeedback>;
   changeReservationStatus: (
     reservationId: string,
-    status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+    status:
+      | "CONFIRMED"
+      | "ARRIVED"
+      | "CANCELLED"
+      | "NO_SHOW"
+      | "COMPLETED",
   ) => Promise<CommandFeedback>;
   seatReservationRecord: (
     reservationId: string,
@@ -617,7 +622,12 @@ export function OperationsProvider({
   const changeReservationStatus = useCallback(
     (
       reservationId: string,
-      status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+      status:
+        | "CONFIRMED"
+        | "ARRIVED"
+        | "CANCELLED"
+        | "NO_SHOW"
+        | "COMPLETED",
     ) => {
       if (repositoryMode === "database") {
         const reservation = state.reservations.find((item) => item.id === reservationId);

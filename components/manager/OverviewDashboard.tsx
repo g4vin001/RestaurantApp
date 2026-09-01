@@ -13,14 +13,12 @@ import { useDemo } from "@/components/demo/DemoProvider";
 import { StatusPill } from "@/components/manager/StatusPill";
 import { deriveOverview, minutesBetween } from "@/lib/domain/analytics";
 import { tableStatusLabel } from "@/lib/domain/transitions";
+import { useLiveNow } from "@/lib/hooks/use-live-now";
+import {
+  formatRestaurantTime,
+  restaurantTimeZone,
+} from "@/lib/time/restaurant-time";
 
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat("en-PH", {
-    timeZone: "Asia/Manila",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
 
 function MetricCard({
   label,
@@ -63,16 +61,17 @@ function MetricCard({
 
 export function OverviewDashboard() {
   const { state } = useDemo();
-  const now = new Date();
+  const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const timeZone = restaurantTimeZone(state.restaurant.timezone);
   const manilaHour = Number(
     new Intl.DateTimeFormat("en-PH", {
-      timeZone: "Asia/Manila",
+      timeZone,
       hour: "numeric",
       hourCycle: "h23",
     }).format(now),
   );
   const dayLabel = new Intl.DateTimeFormat("en-PH", {
-    timeZone: "Asia/Manila",
+    timeZone,
     weekday: "long",
   })
     .format(now)
@@ -279,7 +278,7 @@ export function OverviewDashboard() {
                     </p>
                   </div>
                   <time className="text-sm font-semibold text-stone-700">
-                    {formatTime(reservation.scheduledAt)}
+                    {formatRestaurantTime(reservation.scheduledAt, timeZone)}
                   </time>
                 </div>
               );
@@ -309,7 +308,8 @@ export function OverviewDashboard() {
                         {tableStatusLabel(event.newStatus)}
                       </p>
                       <p className="mt-1 text-xs text-stone-400">
-                        {formatTime(event.occurredAt)} · {event.actor}
+                        {formatRestaurantTime(event.occurredAt, timeZone)} ·{" "}
+                        {event.actor}
                       </p>
                     </div>
                   </div>

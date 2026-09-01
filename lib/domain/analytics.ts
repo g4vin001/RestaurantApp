@@ -1,6 +1,9 @@
 import type { DemoState, TableSession } from "@/lib/domain/types";
-
-const MANILA_OFFSET_MS = 8 * 60 * 60_000;
+import {
+  restaurantDateParts,
+  restaurantWallTimeToUtc,
+  startOfRestaurantDay,
+} from "@/lib/time/restaurant-time";
 
 export type AnalyticsPreset = "TODAY" | "LAST_7_DAYS" | "LAST_30_DAYS";
 
@@ -37,26 +40,21 @@ export function median(values: number[]) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function manilaDateParts(date: Date) {
-  const shifted = new Date(date.getTime() + MANILA_OFFSET_MS);
-  return {
-    year: shifted.getUTCFullYear(),
-    month: shifted.getUTCMonth(),
-    day: shifted.getUTCDate(),
-  };
-}
-
-function manilaBoundary(date: Date, hour: number) {
-  const parts = manilaDateParts(date);
-  return new Date(Date.UTC(parts.year, parts.month, parts.day, hour - 8));
+function restaurantBoundary(date: Date, hour: number, timeZone?: string) {
+  const parts = restaurantDateParts(date, timeZone);
+  return restaurantWallTimeToUtc(
+    `${parts.year}-${parts.month}-${parts.day}T${String(hour).padStart(2, "0")}:00`,
+    timeZone,
+  ) as Date;
 }
 
 export function getAnalyticsRange(
   preset: AnalyticsPreset,
   now = new Date(),
+  timeZone?: string,
 ): AnalyticsRange {
   const end = now;
-  const today = manilaBoundary(now, 0);
+  const today = startOfRestaurantDay(now, timeZone);
   if (preset === "TODAY") return { start: today, end, label: "Today" };
   const days = preset === "LAST_7_DAYS" ? 7 : 30;
   return {
@@ -68,16 +66,17 @@ export function getAnalyticsRange(
 
 function operatingMinutes(state: DemoState, range: AnalyticsRange) {
   let minutes = 0;
-  const firstDay = manilaBoundary(range.start, 0);
-  const lastDay = manilaBoundary(range.end, 0);
+  const timeZone = state.restaurant.timezone;
+  const firstDay = startOfRestaurantDay(range.start, timeZone);
+  const lastDay = startOfRestaurantDay(range.end, timeZone);
   for (
     let day = firstDay.getTime();
     day <= lastDay.getTime();
     day += 24 * 60 * 60_000
   ) {
     const marker = new Date(day);
-    const open = manilaBoundary(marker, state.restaurant.opensAtHour);
-    const close = manilaBoundary(marker, state.restaurant.closesAtHour);
+    const open = restaurantBoundary(marker, state.restaurant.opensAtHour, timeZone);
+    const close = restaurantBoundary(marker, state.restaurant.closesAtHour, timeZone);
     minutes += overlapMinutes(open, close, range.start, range.end);
   }
   return minutes;
@@ -259,10 +258,13 @@ export function deriveAnalytics(
   );
   const hourCounts = new Map<number, number>();
   for (const session of completed) {
-    const manilaHour = new Date(
-      Date.parse(session.seatedAt) + MANILA_OFFSET_MS,
-    ).getUTCHours();
-    hourCounts.set(manilaHour, (hourCounts.get(manilaHour) ?? 0) + 1);
+    const restaurantHour = Number(
+      restaurantDateParts(session.seatedAt, state.restaurant.timezone).hour,
+    );
+    hourCounts.set(
+      restaurantHour,
+      (hourCounts.get(restaurantHour) ?? 0) + 1,
+    );
   }
   const busiest = [...hourCounts.entries()].sort((a, b) => b[1] - a[1])[0];
 

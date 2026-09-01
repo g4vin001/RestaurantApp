@@ -98,7 +98,12 @@ export type DatabaseOperationsCommand =
       type: "SET_RESERVATION_STATUS";
       reservationId: string;
       expectedRevision: number;
-      status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED";
+      status:
+        | "CONFIRMED"
+        | "ARRIVED"
+        | "CANCELLED"
+        | "NO_SHOW"
+        | "COMPLETED";
     })
   | (CommandBase & {
       type: "SEAT_RESERVATION";

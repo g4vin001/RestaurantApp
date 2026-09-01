@@ -15,9 +15,11 @@ export function PublicLiveRefresh({ slug }: { slug: string }) {
   }, [router]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") refresh();
-    }, REFRESH_INTERVAL_MS);
+    };
+    const timer = window.setInterval(refreshWhenVisible, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     const supabase = createClient();
     const channel = supabase
       .channel(`public-restaurant:${slug}`)
@@ -25,6 +27,7 @@ export function PublicLiveRefresh({ slug }: { slug: string }) {
       .subscribe();
     return () => {
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
       void supabase.removeChannel(channel);
     };
   }, [refresh, slug]);

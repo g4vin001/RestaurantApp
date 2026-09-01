@@ -18,18 +18,24 @@ import {
   type AnalyticsPreset,
   type AnalyticsRange,
 } from "@/lib/domain/analytics";
+import { useLiveNow } from "@/lib/hooks/use-live-now";
+import {
+  restaurantDateKey,
+  restaurantWallTimeToUtc,
+} from "@/lib/time/restaurant-time";
 
 type RangeChoice = AnalyticsPreset | "CUSTOM";
 
-function inputDate(date: Date) {
-  const shifted = new Date(date.getTime() + 8 * 60 * 60_000);
-  return shifted.toISOString().slice(0, 10);
+function inputDate(date: Date, timeZone: string) {
+  return restaurantDateKey(date, timeZone);
 }
 
-function customRange(start: string, end: string): AnalyticsRange {
+function customRange(start: string, end: string, timeZone: string): AnalyticsRange {
+  const startAt = restaurantWallTimeToUtc(`${start}T00:00`, timeZone);
+  const endAt = restaurantWallTimeToUtc(`${end}T23:59`, timeZone);
   return {
-    start: new Date(`${start}T00:00:00+08:00`),
-    end: new Date(`${end}T23:59:59.999+08:00`),
+    start: startAt ?? new Date(0),
+    end: endAt ? new Date(endAt.getTime() + 59_999) : new Date(0),
     label: `${start} to ${end}`,
   };
 }
@@ -98,35 +104,44 @@ function MetricCard({
 
 export function AnalyticsDashboard() {
   const { state } = useDemo();
-  const todayRange = getAnalyticsRange("LAST_7_DAYS");
+  const now = useLiveNow(60_000, state.lastUpdatedAt);
+  const todayRange = getAnalyticsRange(
+    "LAST_7_DAYS",
+    now,
+    state.restaurant.timezone,
+  );
   const [choice, setChoice] = useState<RangeChoice>("LAST_7_DAYS");
-  const [customStart, setCustomStart] = useState(inputDate(todayRange.start));
-  const [customEnd, setCustomEnd] = useState(inputDate(todayRange.end));
+  const [customStart, setCustomStart] = useState(
+    inputDate(todayRange.start, state.restaurant.timezone),
+  );
+  const [customEnd, setCustomEnd] = useState(
+    inputDate(todayRange.end, state.restaurant.timezone),
+  );
   const [zone, setZone] = useState("");
   const [tableId, setTableId] = useState("");
 
   const range = useMemo(
     () =>
       choice === "CUSTOM"
-        ? customRange(customStart, customEnd)
-        : getAnalyticsRange(choice),
-    [choice, customEnd, customStart],
+        ? customRange(customStart, customEnd, state.restaurant.timezone)
+        : getAnalyticsRange(choice, now, state.restaurant.timezone),
+    [choice, customEnd, customStart, now, state.restaurant.timezone],
   );
   const options = useMemo(
     () => ({ zone: zone || undefined, tableId: tableId || undefined }),
     [tableId, zone],
   );
   const analytics = useMemo(
-    () => deriveAnalytics(state, range, options),
-    [options, range, state],
+    () => deriveAnalytics(state, range, options, now),
+    [now, options, range, state],
   );
   const previous = useMemo(
-    () => deriveAnalytics(state, previousRange(range), options),
-    [options, range, state],
+    () => deriveAnalytics(state, previousRange(range), options, now),
+    [now, options, range, state],
   );
   const restaurantAverage = useMemo(
-    () => deriveAnalytics(state, range),
-    [range, state],
+    () => deriveAnalytics(state, range, {}, now),
+    [now, range, state],
   );
   const insights = useMemo(
     () => deriveInsights(state, analytics),

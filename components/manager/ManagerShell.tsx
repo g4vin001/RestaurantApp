@@ -22,6 +22,8 @@ import {
 import { useState, type ReactNode } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { formatLastUpdated } from "@/lib/helpers";
+import { useLiveNow } from "@/lib/hooks/use-live-now";
+import { isTimestampStale } from "@/lib/time/restaurant-time";
 
 const navigation = [
   { href: "/manager", label: "Overview", icon: LayoutDashboard },
@@ -48,6 +50,12 @@ function ShellContent({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const snapshotIsOld = isTimestampStale(
+    state.lastUpdatedAt,
+    now,
+    5 * 60_000,
+  );
 
   const sidebar = (
     <>
@@ -217,11 +225,11 @@ function ShellContent({
           </button>
           <div className="hidden items-center gap-2 text-sm text-stone-500 sm:flex" role="status">
             <span className={`h-2 w-2 rounded-full ${connectionStatus === "live" ? "bg-emerald-500" : connectionStatus === "offline" ? "bg-rose-500" : "bg-amber-500"}`} />
-            {connectionStatus === "live"
-              ? `${changedOnAnotherDevice ? "Changed on another device · " : ""}Updated ${formatLastUpdated(state.lastUpdatedAt)}`
+            {connectionStatus === "live" && !snapshotIsOld
+              ? `${changedOnAnotherDevice ? "Changed on another device · " : ""}Updated ${formatLastUpdated(state.lastUpdatedAt, state.restaurant.timezone)}`
               : connectionStatus === "offline"
                 ? "Offline · changes cannot be saved"
-                : connectionStatus === "stale"
+                : connectionStatus === "stale" || snapshotIsOld
                   ? "Data may be stale"
                   : "Reconnecting…"}
           </div>

@@ -896,7 +896,12 @@ export function updateReservation(
 export function setReservationStatus(
   state: DemoState,
   reservationId: string,
-  status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+  status:
+    | "CONFIRMED"
+    | "ARRIVED"
+    | "CANCELLED"
+    | "NO_SHOW"
+    | "COMPLETED",
   occurredAt: string,
   actor = "Demo manager",
 ): DomainResult {
@@ -905,10 +910,7 @@ export function setReservationStatus(
   );
   if (!reservation) return { ok: false, error: "Reservation was not found." };
   const allowed: Record<Reservation["status"], Reservation["status"][]> = {
-    // Demo-mode reservations never start PENDING_APPROVAL today (they're
-    // created CONFIRMED directly, same as staff-entered ones always were) —
-    // no transitions defined here until that changes.
-    PENDING_APPROVAL: [],
+    PENDING_APPROVAL: ["CONFIRMED", "CANCELLED"],
     CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
     ARRIVED: ["CANCELLED", "NO_SHOW"],
     SEATED: ["COMPLETED"],
@@ -951,6 +953,9 @@ export function setReservationStatus(
                 arrivedAt: status === "ARRIVED" ? occurredAt : item.arrivedAt,
                 completedAt:
                   status === "COMPLETED" ? occurredAt : item.completedAt,
+                cancelledAt:
+                  status === "CANCELLED" ? occurredAt : item.cancelledAt,
+                noShowAt: status === "NO_SHOW" ? occurredAt : item.noShowAt,
                 updatedAt: occurredAt,
               }
             : item,

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
+import { CustomerReservationsRefresh } from "@/components/customer/CustomerReservationsRefresh";
 import { PageCard } from "@/components/PageCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatScheduledAt, reservationStatusLabel } from "@/lib/helpers";
@@ -29,7 +30,10 @@ export default async function MyReservationsPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
-      <h1 className="text-2xl font-bold text-emerald-800">Your reservations</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold text-emerald-800">Your reservations</h1>
+        <CustomerReservationsRefresh />
+      </div>
       {reservations.length === 0 ? (
         <p className="mt-4 text-sm text-stone-500">
           You haven&apos;t booked a table yet.
@@ -50,7 +54,11 @@ export default async function MyReservationsPage() {
                 {reservation.partySize === 1 ? "guest" : "guests"}
               </p>
               <p className="mt-1 text-sm text-stone-500">
-                Reservation for: {formatScheduledAt(reservation.scheduledAt)}
+                Reservation for:{" "}
+                {formatScheduledAt(
+                  reservation.scheduledAt,
+                  reservation.restaurantTimezone,
+                )}
               </p>
             </PageCard>
           ))}

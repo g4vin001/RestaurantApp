@@ -1,8 +1,10 @@
 # Data model
 
-- `Restaurant`: customer-facing restaurant details, crowd level, wait estimate, and walk-in status.
-- `LayoutItem`: an item placed in a restaurant layout, such as a table, bar seat, or waiting area.
-- `QueueEntry`: a waiting customer group with a group size, arrival time, and queue status.
-- `AnalyticsSummary`: high-level manager metrics including occupancy and estimated wait time.
+- Identity and tenancy: `Profile`, `Restaurant`, and `RestaurantMembership`. Authorization comes from an active membership, never a client-supplied restaurant ID.
+- Staff access: `StaffMember`, restricted `StaffRole` permissions, hashed single-use `StaffInvite` credentials, and invite attempt limits.
+- Floor planning: mutable `FloorPlan` drafts, immutable `FloorPlanVersion` snapshots, `FloorElement` geometry, and durable `DiningTable` identities.
+- Operations: revisioned `QueueEntry` and `Reservation` rows, `DiningSession`, `TableStatusEvent`, and normalized `SeatingAssignment` groups for atomic combined-table service.
+- Reliability: `OperationCommand` records idempotent commands; audit rows retain actor and reason. Realtime messages contain invalidation identifiers only.
+- Data Lab: `SyntheticImportBatch` and source-row links isolate staged/applied TEST data from LIVE restaurants.
 
-The string-union types for statuses live in `lib/types.ts`, making allowed values easy to find and extend.
+Customer reservation status flows `PENDING_APPROVAL → CONFIRMED → ARRIVED → SEATED → COMPLETED`; rejection uses `CANCELLED`. Pending and confirmed requests reserve capacity, while cancelled, completed, and no-show records do not. Domain-facing types live under `lib/domain`; the authoritative database shape is `prisma/schema.prisma`.

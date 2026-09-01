@@ -136,5 +136,18 @@ describe("public floor projection", () => {
         },
       }),
     );
+
+    const listSelect = findMany.mock.calls[0][0].select;
+    expect(listSelect).not.toHaveProperty("reservations");
+    expect(listSelect).not.toHaveProperty("staffMembers");
+    expect(listSelect).not.toHaveProperty("tableStatusEvents");
+    expect(listSelect.queueEntries.select).toEqual({
+      partySize: true,
+      status: true,
+      joinedAt: true,
+    });
+    expect(listSelect.queueEntries.select).not.toHaveProperty("partyName");
+    expect(listSelect.queueEntries.select).not.toHaveProperty("contact");
+    expect(listSelect.queueEntries.select).not.toHaveProperty("notes");
   });
 });

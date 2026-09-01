@@ -17,21 +17,13 @@ import { StatusPill } from "@/components/manager/StatusPill";
 import { minutesBetween } from "@/lib/domain/analytics";
 import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
+import { useLiveNow } from "@/lib/hooks/use-live-now";
+import { formatRestaurantTime } from "@/lib/time/restaurant-time";
 import type {
   DiningTable,
   FloorElement,
   TableStatus,
 } from "@/lib/domain/types";
-
-function useLiveNow(lastUpdatedAt: string) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    setNow(new Date());
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, [lastUpdatedAt]);
-  return now;
-}
 
 function PublishedObject({ element }: { element: FloorElement }) {
   const styles: Record<string, string> = {
@@ -111,12 +103,14 @@ function PublishedTable({
 function TableDetailPanel({
   table,
   now,
+  timeZone,
   events,
   onChange,
   onCorrect,
 }: {
   table: DiningTable;
   now: Date;
+  timeZone: string;
   events: Array<{
     id: string;
     previousStatus: TableStatus;
@@ -309,11 +303,7 @@ function TableDetailPanel({
                 <strong>{tableStatusLabel(event.newStatus)}</strong>
               </p>
               <p className="mt-0.5 text-stone-400">
-                {new Intl.DateTimeFormat("en-PH", {
-                  timeZone: "Asia/Manila",
-                  hour: "numeric",
-                  minute: "2-digit",
-                }).format(new Date(event.occurredAt))}
+                {formatRestaurantTime(event.occurredAt, timeZone)}
               </p>
             </div>
           ))}
@@ -334,7 +324,7 @@ export function LiveFloor() {
   const [view, setView] = useState<"map" | "list">("map");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const now = useLiveNow(state.lastUpdatedAt);
+  const now = useLiveNow(30_000, state.lastUpdatedAt);
   const version = useMemo(() => getActiveFloorVersion(state), [state]);
   const activeTables = state.tables.filter((table) => table.active);
 
@@ -482,6 +472,7 @@ export function LiveFloor() {
             <TableDetailPanel
               table={selected}
               now={now}
+              timeZone={state.restaurant.timezone}
               events={state.events.filter(
                 (event) => event.tableId === selected.id,
               )}

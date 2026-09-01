@@ -1,4 +1,5 @@
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
+import { PublicHomeRefresh } from "@/components/customer/PublicHomeRefresh";
 import { RestaurantCard } from "@/components/RestaurantCard";
 import { prisma } from "@/lib/prisma";
 import {
@@ -18,6 +19,7 @@ export async function CustomerHome() {
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-10">
+      <PublicHomeRefresh />
       <p className="text-sm font-semibold text-emerald-700">
         LIVE RESTAURANT PULSE
       </p>

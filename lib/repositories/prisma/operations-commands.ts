@@ -5,6 +5,7 @@ import type {
   MembershipRole,
   Prisma,
   PrismaClient,
+  ReservationStatus,
   StaffPermission,
   TableStatus,
 } from "@/lib/generated/prisma/client";
@@ -754,7 +755,14 @@ async function executeInTransaction(
     }
     case "SET_RESERVATION_STATUS": {
       requireManager(scope);
-      const allowed = command.status === "ARRIVED" ? ["CONFIRMED" as const] : command.status === "COMPLETED" ? ["SEATED" as const] : ["PENDING_APPROVAL" as const, "CONFIRMED" as const, "ARRIVED" as const];
+      const allowed: ReservationStatus[] =
+        command.status === "CONFIRMED"
+          ? ["PENDING_APPROVAL"]
+          : command.status === "ARRIVED"
+            ? ["CONFIRMED"]
+            : command.status === "COMPLETED"
+              ? ["SEATED"]
+              : ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"];
       const reservation = await tx.reservation.findFirst({
         where: {
           id: command.reservationId,
