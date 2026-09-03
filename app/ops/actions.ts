@@ -10,43 +10,31 @@ import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-c
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
 import { reportDataError } from "@/lib/server/data-error";
-import { createClient } from "@/lib/supabase/server";
-import { getActiveStaffAccess } from "@/lib/staff/access";
+import { getCurrentWorkContext } from "@/lib/staff/access";
 
 async function requireStaff() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("UNAUTHORIZED");
-  const access = await getActiveStaffAccess(user.id);
-  if (!access || !access.staffRecord?.staffRole || access.restaurant.archivedAt) {
-    throw new Error("FORBIDDEN");
-  }
-  return {
-    user,
-    access: {
-      ...access,
-      staffRecord: { ...access.staffRecord, staffRole: access.staffRecord.staffRole },
-    },
-  };
+  const context = await getCurrentWorkContext();
+  if (!context) throw new Error("Your staff work session is no longer active.");
+  return context;
 }
 
 async function runStaffCommand(command: DatabaseOperationsCommand, success: string) {
   try {
-    const { user, access } = await requireStaff();
+    const context = await requireStaff();
     await executeOperationsCommand(prisma, {
-      profileId: user.id,
-      restaurantId: access.restaurantId,
-      membershipId: access.id,
+      profileId: context.profileId,
+      restaurantId: context.restaurantId,
+      membershipId: context.membershipId,
       membershipRole: "STAFF",
-      permissions: access.staffRecord.staffRole.permissions,
+      permissions: [...context.permissions],
     }, command);
     revalidatePath("/ops");
-    revalidatePath(`/restaurants/${access.restaurant.slug}`);
+    revalidatePath(`/restaurants/${context.restaurantSlug}`);
     revalidatePath("/");
     await broadcastRestaurantInvalidation(prisma, {
-      restaurantId: access.restaurantId,
-      restaurantSlug: access.restaurant.slug,
-      environment: access.restaurant.environment,
+      restaurantId: context.restaurantId,
+      restaurantSlug: context.restaurantSlug,
+      environment: context.restaurantEnvironment,
       entity: command.type.includes("QUEUE") ? "queue" : "table",
       revision: command.commandId,
     }).catch((error) => console.error("[halina:ops-broadcast]", error));
