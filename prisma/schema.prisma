@@ -31,6 +31,7 @@ enum StaffPermissionPreset {
 
 enum StaffAccessStatus {
   NOT_INVITED
+  WHITELISTED
   ACCESS_DISABLED
 }
 
@@ -116,6 +117,8 @@ model Profile {
   createdQueueEntries    QueueEntry[]
   createdReservations    Reservation[]          @relation("ReservationCreatedBy")
   customerReservations   Reservation[]          @relation("ReservationCustomer")
+  staffWorkSessions      StaffWorkSession[]
+  staffPinAttempts       StaffPinAttempt[]
 }
 
 model Restaurant {
@@ -128,11 +131,15 @@ model Restaurant {
   locale                  String                 @default("en-PH")
   operatingSettings       Json                   @default("{}")
   walkInAvailability      WalkInAvailability     @default(AVAILABLE)
+  staffPinHash            String?
+  staffPinChangedAt       DateTime?
   lastOperationalUpdateAt DateTime?
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
   memberships             RestaurantMembership[]
   staffMembers            StaffMember[]
+  staffWorkSessions       StaffWorkSession[]
+  staffPinAttempts        StaffPinAttempt[]
   floorPlans              FloorPlan[]
   diningTables            DiningTable[]
   tableStatusEvents       TableStatusEvent[]
@@ -159,22 +166,65 @@ model RestaurantMembership {
 }
 
 model StaffMember {
-  id               String                @id @default(uuid()) @db.Uuid
-  restaurantId     String                @db.Uuid
-  membershipId     String?               @unique @db.Uuid
-  name             String
-  jobTitle         String
-  contact          String?
-  permissionPreset StaffPermissionPreset
-  accessStatus     StaffAccessStatus     @default(NOT_INVITED)
-  active           Boolean               @default(true)
-  archivedAt       DateTime?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  restaurant       Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  membership       RestaurantMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  id                String                @id @default(uuid()) @db.Uuid
+  restaurantId      String                @db.Uuid
+  membershipId      String?               @unique @db.Uuid
+  name              String
+  jobTitle          String
+  contact           String?
+  email             String?
+  emailNormalized   String?
+  permissionPreset  StaffPermissionPreset
+  accessStatus      StaffAccessStatus     @default(NOT_INVITED)
+  workAccessEnabled Boolean                @default(false)
+  active            Boolean                @default(true)
+  archivedAt        DateTime?
+  lastClockedInAt   DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  restaurant        Restaurant             @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  membership        RestaurantMembership?  @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  workSessions      StaffWorkSession[]
+  tableStatusEvents TableStatusEvent[]
 
+  @@unique([restaurantId, emailNormalized])
   @@index([restaurantId, active])
+  @@index([restaurantId, workAccessEnabled, emailNormalized])
+}
+
+// Staff never gets a separate Halina account type. A normal authenticated
+// Halina Profile may enter restaurant work mode only when its verified email
+// matches an enabled StaffMember whitelist entry and a valid restaurant PIN is
+// supplied. This server-side session is the temporary clock-in grant.
+model StaffWorkSession {
+  id            String      @id @default(uuid()) @db.Uuid
+  restaurantId  String      @db.Uuid
+  staffMemberId String      @db.Uuid
+  profileId     String      @db.Uuid
+  tokenHash     String      @unique
+  startedAt     DateTime    @default(now())
+  lastSeenAt    DateTime    @default(now())
+  expiresAt     DateTime
+  endedAt       DateTime?
+  restaurant    Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staffMember   StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Restrict)
+  profile       Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, endedAt, expiresAt])
+  @@index([staffMemberId, endedAt, expiresAt])
+  @@index([restaurantId, endedAt, expiresAt])
+}
+
+model StaffPinAttempt {
+  id           String     @id @default(uuid()) @db.Uuid
+  restaurantId String     @db.Uuid
+  profileId    String     @db.Uuid
+  successful   Boolean    @default(false)
+  attemptedAt  DateTime   @default(now())
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  profile      Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, profileId, attemptedAt])
 }
 
 model FloorPlan {
@@ -226,16 +276,16 @@ model FloorElement {
   type               FloorElementType
   x                  Float
   y                  Float
-  width              Float
-  height             Float
+  width               Float
+  height              Float
   rotation           Float            @default(0)
-  zIndex             Int              @default(0)
-  locked             Boolean          @default(false)
-  visible            Boolean          @default(true)
-  label              String           @default("")
-  zone               String?
-  shape              TableShape?
-  properties         Json             @default("{}")
+  zIndex              Int              @default(0)
+  locked              Boolean          @default(false)
+  visible             Boolean          @default(true)
+  label               String           @default("")
+  zone                String?
+  shape               TableShape?
+  properties          Json             @default("{}")
   floorPlanVersion   FloorPlanVersion @relation(fields: [floorPlanVersionId], references: [id], onDelete: Cascade)
   diningTable        DiningTable?     @relation(fields: [diningTableId], references: [id], onDelete: SetNull)
 
@@ -272,22 +322,25 @@ model DiningTable {
 }
 
 model TableStatusEvent {
-  id              String      @id @default(uuid()) @db.Uuid
-  restaurantId    String      @db.Uuid
-  diningTableId   String      @db.Uuid
-  fromStatus      TableStatus
-  toStatus        TableStatus
-  occurredAt      DateTime    @default(now())
-  actorProfileId  String?     @db.Uuid
-  sourceCommandId String      @db.Uuid
-  reason          String?
-  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  diningTable     DiningTable @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
-  actorProfile    Profile?    @relation(fields: [actorProfileId], references: [id], onDelete: SetNull)
+  id                 String       @id @default(uuid()) @db.Uuid
+  restaurantId       String       @db.Uuid
+  diningTableId      String       @db.Uuid
+  fromStatus         TableStatus
+  toStatus           TableStatus
+  occurredAt         DateTime     @default(now())
+  actorProfileId     String?      @db.Uuid
+  actorStaffMemberId String?      @db.Uuid
+  sourceCommandId    String       @db.Uuid
+  reason             String?
+  restaurant         Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  diningTable        DiningTable  @relation(fields: [diningTableId], references: [id], onDelete: Restrict)
+  actorProfile       Profile?     @relation(fields: [actorProfileId], references: [id], onDelete: SetNull)
+  actorStaffMember   StaffMember? @relation(fields: [actorStaffMemberId], references: [id], onDelete: SetNull)
 
   @@unique([restaurantId, sourceCommandId])
   @@index([restaurantId, occurredAt])
   @@index([diningTableId, occurredAt])
+  @@index([actorStaffMemberId, occurredAt])
 }
 
 model DiningSession {

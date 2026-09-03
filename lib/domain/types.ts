@@ -176,9 +176,11 @@ export interface StaffMember {
   name: string;
   jobTitle: string;
   contact?: string;
+  email?: string;
   permissionPreset: StaffPermissionPreset;
   active: boolean;
-  accessStatus: "NOT_INVITED" | "ACCESS_DISABLED";
+  workAccessEnabled?: boolean;
+  accessStatus: "NOT_INVITED" | "WHITELISTED" | "ACCESS_DISABLED";
   createdAt: string;
   updatedAt: string;
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { logout } from "@/app/login/actions";
+import { hasEligibleWorkplace } from "@/lib/staff/access";
 import { createClient } from "@/lib/supabase/server";
 
 export async function Navbar() {
@@ -24,6 +25,16 @@ export async function Navbar() {
   const supabase = await createClient();
   const response = await supabase.auth.getUser();
   const user = response.data.user;
+  let hasWork = false;
+  if (user) {
+    try {
+      hasWork = await hasEligibleWorkplace(user);
+    } catch (error) {
+      // Keep the global navigation usable during a transient database problem.
+      // /work itself will surface the database error if the user opens it.
+      console.error("[halina:navbar-work-access]", error);
+    }
+  }
 
   return (
     <header className="border-b border-stone-200 bg-white">
@@ -32,6 +43,11 @@ export async function Navbar() {
           Halina
         </Link>
         <div className="flex items-center gap-4 text-sm text-stone-600">
+          {hasWork && (
+            <Link href="/work" className="font-semibold text-emerald-700">
+              Work
+            </Link>
+          )}
           <Link href="/manager">Manager</Link>
           {user ? (
             <form action={logout}>

@@ -6,6 +6,7 @@ import { ensureProfile } from "@/lib/auth/profile";
 import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { setFlash } from "@/lib/flash";
 import { reportDataError } from "@/lib/server/data-error";
+import { endCurrentWorkSession } from "@/lib/staff/access";
 import { createClient } from "@/lib/supabase/server";
 
 async function reportLoginDataFailure(context: string, error: unknown) {
@@ -97,6 +98,16 @@ export async function signup(formData: FormData) {
 
 export async function logout() {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  try {
+    await endCurrentWorkSession(user?.id);
+  } catch (error) {
+    // Authentication logout should still work if the restaurant database is
+    // temporarily unavailable. The work session remains server-expiring.
+    console.error("[halina:logout-work-session]", error);
+  }
   await supabase.auth.signOut();
   redirect("/login");
 }
