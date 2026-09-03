@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
+import { clockOut } from "@/app/work/actions";
 import { PageCard } from "@/components/PageCard";
 import { StaffOperationsRefresh } from "@/components/staff/StaffOperationsRefresh";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
-import { getActiveStaffAccess } from "@/lib/staff/access";
+import { getCurrentWorkContext } from "@/lib/staff/access";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { readFlash } from "@/lib/flash";
 import {
@@ -16,14 +16,13 @@ import {
   updateStaffQueueStatus,
 } from "./actions";
 
-export default async function StaffOperationsPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login?redirectTo=/ops");
-  const access = await getActiveStaffAccess(user.id);
-  if (!access || !access.staffRecord) redirect("/");
+export const dynamic = "force-dynamic";
 
-  const permissions = access.staffRecord.staffRole?.permissions ?? [];
+export default async function StaffOperationsPage() {
+  const context = await getCurrentWorkContext();
+  if (!context) redirect("/work");
+
+  const permissions = context.permissions;
   const canViewFloor = permissions.includes("VIEW_LIVE_FLOOR");
   const canViewQueue = permissions.includes("VIEW_QUEUE");
   const canViewContacts = permissions.includes("VIEW_CONTACT_DETAILS");
@@ -35,12 +34,12 @@ export default async function StaffOperationsPage() {
     readFlash("error"),
     readFlash("message"),
     canViewFloor ? prisma.diningTable.findMany({
-      where: { restaurantId: access.restaurantId, active: true, archivedAt: null },
+      where: { restaurantId: context.restaurantId, active: true, archivedAt: null },
       orderBy: [{ zone: "asc" }, { label: "asc" }],
       select: { id: true, label: true, capacity: true, zone: true, currentStatus: true, statusRevision: true },
     }) : Promise.resolve([]),
     canViewQueue ? prisma.queueEntry.findMany({
-      where: { restaurantId: access.restaurantId, status: { in: ["WAITING", "CALLED"] } },
+      where: { restaurantId: context.restaurantId, status: { in: ["WAITING", "CALLED"] } },
       orderBy: [{ position: "asc" }, { joinedAt: "asc" }],
       select: { id: true, partyName: true, partySize: true, status: true, promisedWaitMinutes: true, joinedAt: true, revision: true, contact: canViewContacts, notes: true },
     }) : Promise.resolve([]),
@@ -53,11 +52,22 @@ export default async function StaffOperationsPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Restricted operations</p>
-      <h1 className="mt-2 text-3xl font-bold">{access.restaurant.name}</h1>
-      <p className="mt-2 text-sm text-stone-600">Signed in as {access.staffRecord.name} · {access.staffRecord.jobTitle}. This staff view intentionally excludes analytics, floor editing, Team, settings, and owner controls.</p>
-      {access.restaurant.environment === "TEST" && <p className="mt-3 inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-bold text-violet-800">TEST restaurant</p>}
-      <StaffOperationsRefresh restaurantId={access.restaurantId} />
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">Restricted operations</p>
+          <h1 className="mt-2 text-3xl font-bold">{context.restaurantName}</h1>
+          <p className="mt-2 text-sm text-stone-600">
+            Clocked in as {context.staffName} · {context.jobTitle} · {context.staffRoleName ?? "Staff"}. This staff view intentionally excludes analytics, floor editing, Team, settings, and owner controls.
+          </p>
+          {context.restaurantEnvironment === "TEST" && <p className="mt-3 inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-bold text-violet-800">TEST restaurant</p>}
+        </div>
+        <form action={clockOut}>
+          <button className="min-h-10 rounded-xl border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-700 hover:bg-stone-50">
+            Clock out
+          </button>
+        </form>
+      </div>
+      <StaffOperationsRefresh restaurantId={context.restaurantId} />
       {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       {message && <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{message}</p>}
 
