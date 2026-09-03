@@ -6,6 +6,8 @@ import {
   getCurrentWorkContext,
   getEligibleWorkplaces,
   isVerifiedHalinaUser,
+  type EligibleWorkplace,
+  type WorkContext,
 } from "@/lib/staff/access";
 import { createClient } from "@/lib/supabase/server";
 
@@ -47,10 +49,25 @@ export default async function WorkPage() {
     );
   }
 
-  const [workplaces, current] = await Promise.all([
-    getEligibleWorkplaces(user),
-    getCurrentWorkContext(user),
-  ]);
+  let workplaces: EligibleWorkplace[];
+  let current: WorkContext | null;
+  try {
+    [workplaces, current] = await Promise.all([
+      getEligibleWorkplaces(user),
+      getCurrentWorkContext(user),
+    ]);
+  } catch (error) {
+    console.error("[halina:work-access-load]", error);
+    return (
+      <main className="mx-auto max-w-3xl px-5 py-12">
+        <p className="text-sm font-semibold text-emerald-700">WORK</p>
+        <h1 className="mt-2 text-3xl font-bold text-stone-950">Work access is being prepared</h1>
+        <p className="mt-3 max-w-xl text-stone-600">
+          Your personal Halina account is fine, but this environment is not ready for staff whitelist and PIN clock-in yet. Ask the restaurant manager to try again after the staff-work database migration is applied.
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-10">
