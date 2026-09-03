@@ -13,15 +13,12 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
+import { FloorMapCanvas } from "@/components/manager/FloorMapCanvas";
 import { StatusPill } from "@/components/manager/StatusPill";
 import { minutesBetween } from "@/lib/domain/analytics";
 import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
-import type {
-  DiningTable,
-  FloorElement,
-  TableStatus,
-} from "@/lib/domain/types";
+import type { DiningTable, TableStatus } from "@/lib/domain/types";
 
 function useLiveNow(lastUpdatedAt: string) {
   const [now, setNow] = useState(() => new Date());
@@ -31,81 +28,6 @@ function useLiveNow(lastUpdatedAt: string) {
     return () => window.clearInterval(timer);
   }, [lastUpdatedAt]);
   return now;
-}
-
-function PublishedObject({ element }: { element: FloorElement }) {
-  const styles: Record<string, string> = {
-    ZONE: "border-dashed border-stone-300 bg-stone-100/50 text-stone-400",
-    KITCHEN: "border-stone-300 bg-stone-200/80 text-stone-600",
-    WAITING_AREA: "border-sky-200 bg-sky-50 text-sky-700",
-    HOST_STAND: "border-amber-200 bg-amber-50 text-amber-700",
-    DOOR: "border-stone-700 bg-stone-700 text-white",
-  };
-  return (
-    <div
-      className={`absolute flex items-center justify-center overflow-hidden rounded-lg border text-center text-[10px] font-semibold ${styles[element.type] ?? "border-stone-300 bg-white text-stone-600"}`}
-      style={{
-        left: `${(element.x / 1600) * 100}%`,
-        top: `${(element.y / 1000) * 100}%`,
-        width: `${(element.width / 1600) * 100}%`,
-        height: `${(element.height / 1000) * 100}%`,
-        transform: `rotate(${element.rotation}deg)`,
-        zIndex: element.zIndex,
-      }}
-    >
-      {element.label}
-    </div>
-  );
-}
-
-function PublishedTable({
-  element,
-  table,
-  selected,
-  onSelect,
-}: {
-  element: FloorElement;
-  table: DiningTable;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const colors: Record<TableStatus, string> = {
-    AVAILABLE: "border-emerald-300 bg-emerald-50",
-    HELD: "border-sky-300 bg-sky-50",
-    RESERVED: "border-violet-300 bg-violet-50",
-    OCCUPIED: "border-rose-300 bg-rose-50",
-    CLEANING: "border-amber-300 bg-amber-50",
-    OUT_OF_SERVICE: "border-stone-400 bg-stone-200",
-  };
-  const shape =
-    element.shape === "ROUND"
-      ? "rounded-full"
-      : element.shape === "BOOTH"
-        ? "rounded-2xl"
-        : "rounded-xl";
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`absolute grid place-items-center border-2 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${shape} ${colors[table.status]} ${selected ? "ring-3 ring-emerald-700 ring-offset-2" : ""}`}
-      style={{
-        left: `${(element.x / 1600) * 100}%`,
-        top: `${(element.y / 1000) * 100}%`,
-        width: `${(element.width / 1600) * 100}%`,
-        height: `${(element.height / 1000) * 100}%`,
-        transform: `rotate(${element.rotation}deg)`,
-        zIndex: element.zIndex,
-      }}
-      aria-label={`${table.label}, ${table.capacity} seats, ${tableStatusLabel(table.status)}`}
-    >
-      <span>
-        <strong className="block text-sm text-stone-900">{table.label}</strong>
-        <span className="mt-0.5 block text-[9px] font-medium uppercase tracking-wide text-stone-600">
-          {tableStatusLabel(table.status)}
-        </span>
-      </span>
-    </button>
-  );
 }
 
 function TableDetailPanel({
@@ -126,12 +48,14 @@ function TableDetailPanel({
   onChange: (
     status: TableStatus,
     partySize?: number,
-  ) => Promise<{ ok: boolean; error?: string }>;
+    options?: { acknowledgeReservationClash?: boolean },
+  ) => Promise<{ ok: boolean; error?: string; code?: string }>;
   onCorrect: (reason: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [seating, setSeating] = useState(false);
   const [partySize, setPartySize] = useState(Math.min(2, table.capacity));
   const [error, setError] = useState<string | null>(null);
+  const [clash, setClash] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [correctionReason, setCorrectionReason] = useState("");
 
@@ -139,6 +63,7 @@ function TableDetailPanel({
     setSeating(false);
     setPartySize(Math.min(2, table.capacity));
     setError(null);
+    setClash(null);
     setCorrecting(false);
     setCorrectionReason("");
   }, [table.id, table.capacity]);
@@ -152,14 +77,24 @@ function TableDetailPanel({
     if (!result.ok) setError(result.error ?? "That status change failed.");
   };
 
-  const confirmSeating = async () => {
-    const result = await onChange("OCCUPIED", partySize);
+  const confirmSeating = async (acknowledgeReservationClash = false) => {
+    const result = await onChange("OCCUPIED", partySize, {
+      acknowledgeReservationClash,
+    });
     if (!result.ok) {
+      // A booking is about to claim this table. Surface it and let the manager
+      // decide rather than blocking outright.
+      if (result.code === "RESERVATION_CLASH") {
+        setClash(result.error ?? "This table is booked shortly.");
+        setError(null);
+        return;
+      }
       setError(result.error ?? "That table could not be seated.");
       return;
     }
     setSeating(false);
     setError(null);
+    setClash(null);
   };
 
   const confirmCorrection = async () => {
@@ -223,7 +158,10 @@ function TableDetailPanel({
             </p>
             <button
               type="button"
-              onClick={() => setSeating(false)}
+              onClick={() => {
+                setSeating(false);
+                setClash(null);
+              }}
               className="rounded p-1 text-emerald-700"
               aria-label="Cancel seating"
             >
@@ -237,17 +175,36 @@ function TableDetailPanel({
               min={1}
               max={table.capacity}
               value={partySize}
-              onChange={(event) => setPartySize(Number(event.target.value))}
+              onChange={(event) => {
+                setPartySize(Number(event.target.value));
+                setClash(null);
+              }}
               className="mt-1 min-h-10 w-full rounded-lg border border-emerald-300 bg-white px-3 text-sm"
             />
           </label>
-          <button
-            type="button"
-            onClick={confirmSeating}
-            className="mt-3 min-h-10 w-full rounded-lg bg-emerald-800 text-sm font-semibold text-white"
-          >
-            Confirm seating
-          </button>
+          {clash ? (
+            <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-950">{clash}</p>
+              <p className="mt-1 text-[11px] leading-4 text-amber-800">
+                Seating here may leave the booked party without their table.
+              </p>
+              <button
+                type="button"
+                onClick={() => confirmSeating(true)}
+                className="mt-3 min-h-10 w-full rounded-lg bg-amber-700 text-sm font-semibold text-white"
+              >
+                Seat here anyway
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => confirmSeating()}
+              className="mt-3 min-h-10 w-full rounded-lg bg-emerald-800 text-sm font-semibold text-white"
+            >
+              Confirm seating
+            </button>
+          )}
         </div>
       )}
       {error && (
@@ -346,9 +303,18 @@ export function LiveFloor() {
 
   const selected =
     activeTables.find((table) => table.id === selectedId) ?? null;
-  const changeStatus = async (status: TableStatus, partySize?: number) => {
+  const changeStatus = async (
+    status: TableStatus,
+    partySize?: number,
+    options?: { acknowledgeReservationClash?: boolean },
+  ) => {
     if (!selected) return { ok: false, error: "Select a table first." };
-    const result = await transitionTable(selected.id, status, partySize);
+    const result = await transitionTable(
+      selected.id,
+      status,
+      partySize,
+      options,
+    );
     if (result.ok)
       setAnnouncement(`${selected.label} is now ${tableStatusLabel(status)}.`);
     return result;
@@ -403,38 +369,12 @@ export function LiveFloor() {
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="min-h-[560px] overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {view === "map" && version ? (
-            <div className="overflow-auto bg-stone-200 p-5">
-              <div className="relative mx-auto aspect-[8/5] min-w-[760px] max-w-[1000px] overflow-hidden border-2 border-stone-300 bg-[#fffdf8] shadow-inner">
-                {version.elements
-                  .filter(
-                    (element) => element.visible && element.type !== "TABLE",
-                  )
-                  .map((element) => (
-                    <PublishedObject key={element.id} element={element} />
-                  ))}
-                {version.elements
-                  .filter(
-                    (element) =>
-                      element.visible &&
-                      element.type === "TABLE" &&
-                      element.tableId,
-                  )
-                  .map((element) => {
-                    const table = activeTables.find(
-                      (item) => item.id === element.tableId,
-                    );
-                    return table ? (
-                      <PublishedTable
-                        key={element.id}
-                        element={element}
-                        table={table}
-                        selected={selected?.id === table.id}
-                        onSelect={() => setSelectedId(table.id)}
-                      />
-                    ) : null;
-                  })}
-              </div>
-            </div>
+            <FloorMapCanvas
+              state={state}
+              activeTables={activeTables}
+              selectedIds={selected ? [selected.id] : []}
+              onSelectTable={(tableId) => setSelectedId(tableId)}
+            />
           ) : view === "map" ? (
             <div className="grid min-h-[560px] place-items-center p-8 text-center">
               <div>

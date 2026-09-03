@@ -5,6 +5,7 @@ import { selectPublicRestaurantState } from "@/lib/domain/analytics";
 import {
   buildPublicFloor,
   type PublicFloorSource,
+  type PublicReservationSource,
 } from "@/lib/customer/public-floor";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
 
@@ -25,7 +26,12 @@ type PublicRestaurantRow = {
   }[];
   queueEntries: { partySize: number; status: string; joinedAt: Date }[];
   floorPlans?: PublicFloorSource[];
+  reservations?: PublicReservationSource[];
 };
+
+// How far ahead the public floor looks when marking a table as booked. Covers a
+// full evening service including bookings that land after midnight.
+const PUBLIC_RESERVATION_LOOKAHEAD_MS = 12 * 60 * 60_000;
 
 // The public projection intentionally contains only safe aggregates plus the
 // explicitly published floor geometry. Raw queue entries, reservation details,
@@ -81,7 +87,10 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
   };
 
   const base = selectPublicRestaurantState(assembled, now);
-  const publicFloor = buildPublicFloor(restaurant.floorPlans?.[0]);
+  const publicFloor = buildPublicFloor(
+    restaurant.floorPlans?.[0],
+    restaurant.reservations ?? [],
+  );
   const available = restaurant.diningTables.filter(
     (table) => table.currentStatus === "AVAILABLE",
   );
@@ -108,9 +117,15 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     preparingTables: restaurant.diningTables.filter(
       (table) => table.currentStatus === "CLEANING",
     ).length,
-    reservedTables: restaurant.diningTables.filter(
-      (table) => table.currentStatus === "RESERVED",
-    ).length,
+    // Mirrors what the map actually shows when a floor is published, so the
+    // count and the blue tables can't disagree.
+    reservedTables:
+      publicFloor?.elements.filter(
+        (element) => element.type === "TABLE" && element.status === "RESERVED",
+      ).length ??
+      restaurant.diningTables.filter(
+        (table) => table.currentStatus === "RESERVED",
+      ).length,
   };
 }
 
@@ -142,6 +157,22 @@ export async function fetchPublicRestaurantBySlug(
       queueEntries: {
         where: { status: { in: ["WAITING", "CALLED"] } },
         select: { partySize: true, status: true, joinedAt: true },
+      },
+      // Approved bookings already tied to a specific table, for the rest of the
+      // service. PENDING_APPROVAL is excluded: an unreviewed request is not yet
+      // a commitment the restaurant has made. Only the table and the time are
+      // selected — party names, sizes, contacts and notes stay private.
+      reservations: {
+        where: {
+          status: { in: ["CONFIRMED", "ARRIVED"] },
+          assignedTableId: { not: null },
+          scheduledAt: {
+            gte: now,
+            lte: new Date(now.getTime() + PUBLIC_RESERVATION_LOOKAHEAD_MS),
+          },
+        },
+        select: { assignedTableId: true, scheduledAt: true },
+        orderBy: { scheduledAt: "asc" },
       },
       floorPlans: {
         where: {

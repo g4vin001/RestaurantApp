@@ -69,7 +69,8 @@ export function LiveRestaurantDetail({
         {restaurant.reservedTables > 0 && (
           <p className="mt-2 text-sm text-stone-600">
             {restaurant.reservedTables} table
-            {restaurant.reservedTables === 1 ? " is" : "s are"} currently reserved.
+            {restaurant.reservedTables === 1 ? " is" : "s are"} reserved for later
+            today.
           </p>
         )}
         {restaurant.stale && (

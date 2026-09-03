@@ -4,7 +4,52 @@ import {
   fetchPublicRestaurantBySlug,
   fetchPublicRestaurants,
 } from "@/lib/repositories/prisma/public-restaurant-view";
-import { buildPublicFloor, toPublicTableStatus } from "./public-floor";
+import {
+  buildPublicFloor,
+  toPublicTableStatus,
+  type PublicFloorSource,
+} from "./public-floor";
+
+function floorWithTables(
+  tables: Array<{ id: string; label: string; currentStatus: string }>,
+): PublicFloorSource {
+  return {
+    id: "plan-1",
+    name: "Main floor",
+    logicalWidth: 1000,
+    logicalHeight: 600,
+    activeVersion: {
+      id: "version-1",
+      version: 1,
+      publishedAt: new Date("2026-09-01T00:00:00Z"),
+      createdAt: new Date("2026-09-01T00:00:00Z"),
+      elements: tables.map((table, index) => ({
+        stableElementId: `element-${table.id}`,
+        type: "TABLE",
+        x: 100 * (index + 1),
+        y: 100,
+        width: 80,
+        height: 80,
+        rotation: 0,
+        zIndex: index + 1,
+        visible: true,
+        label: "",
+        zone: "Main",
+        shape: "SQUARE" as const,
+        diningTable: {
+          id: table.id,
+          label: table.label,
+          capacity: 4,
+          zone: "Main",
+          shape: "SQUARE" as const,
+          currentStatus: table.currentStatus,
+          active: true,
+          archivedAt: null,
+        },
+      })),
+    },
+  };
+}
 
 describe("public floor projection", () => {
   it("collapses internal table states into customer-safe statuses", () => {
@@ -110,6 +155,84 @@ describe("public floor projection", () => {
     });
     expect(floor?.elements.map((element) => String(element.type))).not.toContain("KITCHEN");
     expect(floor?.elements.some((element) => element.label === "Internal note")).toBe(false);
+  });
+
+  it("marks a free table as reserved when it has approved bookings, and lists their times", () => {
+    const floor = buildPublicFloor(
+      floorWithTables([
+        { id: "table-1", label: "T1", currentStatus: "AVAILABLE" },
+        { id: "table-2", label: "T2", currentStatus: "AVAILABLE" },
+      ]),
+      [
+        { assignedTableId: "table-1", scheduledAt: new Date("2026-09-04T14:00:00Z") },
+        { assignedTableId: "table-1", scheduledAt: new Date("2026-09-04T12:00:00Z") },
+      ],
+    );
+
+    const booked = floor?.elements.find((element) => element.tableId === "table-1");
+    const free = floor?.elements.find((element) => element.tableId === "table-2");
+
+    expect(booked?.status).toBe("RESERVED");
+    // Ascending, regardless of the order they arrive in.
+    expect(booked?.upcomingReservations).toEqual([
+      "2026-09-04T12:00:00.000Z",
+      "2026-09-04T14:00:00.000Z",
+    ]);
+    expect(free?.status).toBe("AVAILABLE");
+    expect(free?.upcomingReservations).toBeUndefined();
+  });
+
+  it("keeps the live status of a table that is busy right now but booked later", () => {
+    const floor = buildPublicFloor(
+      floorWithTables([
+        { id: "table-1", label: "T1", currentStatus: "OCCUPIED" },
+        { id: "table-2", label: "T2", currentStatus: "CLEANING" },
+      ]),
+      [
+        { assignedTableId: "table-1", scheduledAt: new Date("2026-09-04T14:00:00Z") },
+        { assignedTableId: "table-2", scheduledAt: new Date("2026-09-04T15:00:00Z") },
+      ],
+    );
+
+    const occupied = floor?.elements.find((element) => element.tableId === "table-1");
+    const cleaning = floor?.elements.find((element) => element.tableId === "table-2");
+
+    expect(occupied?.status).toBe("IN_USE");
+    expect(occupied?.upcomingReservations).toHaveLength(1);
+    expect(cleaning?.status).toBe("PREPARING");
+    expect(cleaning?.upcomingReservations).toHaveLength(1);
+  });
+
+  it("ignores bookings that are not assigned to a table", () => {
+    const floor = buildPublicFloor(
+      floorWithTables([{ id: "table-1", label: "T1", currentStatus: "AVAILABLE" }]),
+      [{ assignedTableId: null, scheduledAt: new Date("2026-09-04T14:00:00Z") }],
+    );
+
+    expect(floor?.elements[0].status).toBe("AVAILABLE");
+    expect(floor?.elements[0].upcomingReservations).toBeUndefined();
+  });
+
+  it("publishes only the table and time of approved upcoming bookings", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const client = {
+      restaurant: { findMany: vi.fn().mockResolvedValue([]), findFirst },
+    } as unknown as PrismaClient;
+    const now = new Date("2026-09-04T10:00:00Z");
+
+    await fetchPublicRestaurantBySlug(client, "salu-salo", now);
+
+    const reservations = findFirst.mock.calls[0][0].select.reservations;
+    expect(reservations.select).toEqual({
+      assignedTableId: true,
+      scheduledAt: true,
+    });
+    expect(reservations.where.status).toEqual({ in: ["CONFIRMED", "ARRIVED"] });
+    expect(reservations.where.assignedTableId).toEqual({ not: null });
+    expect(reservations.where.scheduledAt).toEqual({
+      gte: now,
+      lte: new Date("2026-09-04T22:00:00Z"),
+    });
   });
 
   it("excludes TEST and archived restaurants from every public query", async () => {

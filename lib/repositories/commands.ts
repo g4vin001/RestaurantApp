@@ -10,6 +10,7 @@ export type CommandFailureCode =
   | "FORBIDDEN"
   | "VALIDATION"
   | "CONFLICT"
+  | "RESERVATION_CLASH"
   | "OFFLINE"
   | "PERSISTENCE";
 
@@ -48,14 +49,23 @@ export type StaffCommandInput = {
   staffRoleId?: string;
 };
 
+/**
+ * Set only after a manager has been shown, and accepted, a RESERVATION_CLASH
+ * warning for this exact action. Never default it to true.
+ */
+type ReservationClashOverride = {
+  acknowledgeReservationClash?: boolean;
+};
+
 export type DatabaseOperationsCommand =
-  | (CommandBase & {
-      type: "TRANSITION_TABLE";
-      tableId: string;
-      expectedRevision: number;
-      status: TableStatus;
-      partySize?: number;
-    })
+  | (CommandBase &
+      ReservationClashOverride & {
+        type: "TRANSITION_TABLE";
+        tableId: string;
+        expectedRevision: number;
+        status: TableStatus;
+        partySize?: number;
+      })
   | (CommandBase & {
       type: "CORRECT_TABLE";
       tableId: string;
@@ -75,12 +85,13 @@ export type DatabaseOperationsCommand =
       expectedRevision: number;
       status: "CALLED" | "CANCELLED" | "NO_SHOW";
     })
-  | (CommandBase & {
-      type: "SEAT_QUEUE";
-      entryId: string;
-      expectedRevision: number;
-      tableIds: string[];
-    })
+  | (CommandBase &
+      ReservationClashOverride & {
+        type: "SEAT_QUEUE";
+        entryId: string;
+        expectedRevision: number;
+        tableIds: string[];
+      })
   | (CommandBase & {
       type: "REORDER_QUEUE";
       entryId: string;
@@ -98,14 +109,22 @@ export type DatabaseOperationsCommand =
       type: "SET_RESERVATION_STATUS";
       reservationId: string;
       expectedRevision: number;
-      status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED";
+      status: "CONFIRMED" | "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED";
     })
-  | (CommandBase & {
-      type: "SEAT_RESERVATION";
-      reservationId: string;
-      expectedRevision: number;
-      tableIds: string[];
-    })
+  | (CommandBase &
+      ReservationClashOverride & {
+        type: "SEAT_RESERVATION";
+        reservationId: string;
+        expectedRevision: number;
+        tableIds: string[];
+      })
+  | (CommandBase &
+      ReservationClashOverride & {
+        type: "MOVE_RESERVATION_TABLE";
+        reservationId: string;
+        expectedRevision: number;
+        tableIds: string[];
+      })
   | (CommandBase & { type: "ADD_STAFF"; input: StaffCommandInput })
   | (CommandBase & {
       type: "UPDATE_STAFF";

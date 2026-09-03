@@ -11,6 +11,10 @@ export type OperationsRepositoryErrorCode =
   | "FORBIDDEN"
   | "VALIDATION"
   | "CONFLICT"
+  // The table is claimed by a booking that starts soon. Unlike the codes above
+  // this one is a warning the manager can deliberately override, by resending
+  // the command with acknowledgeReservationClash set.
+  | "RESERVATION_CLASH"
   | "PERSISTENCE";
 
 export class OperationsRepositoryError extends Error {

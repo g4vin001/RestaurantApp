@@ -68,6 +68,17 @@ export type PublicFloorElement = {
   tableId?: string;
   capacity?: number;
   status?: PublicTableStatus;
+  /**
+   * Scheduled times (ISO) of approved bookings already assigned to this table,
+   * ascending. Times only — party names, sizes, contacts and notes are never
+   * part of the public projection.
+   */
+  upcomingReservations?: string[];
+};
+
+export type PublicReservationSource = {
+  assignedTableId: string | null;
+  scheduledAt: Date;
 };
 
 export type PublicFloorView = {
@@ -106,12 +117,28 @@ function publicStructureLabel(type: PublicFloorElementType, label: string) {
   return undefined;
 }
 
+function groupReservationsByTable(reservations: PublicReservationSource[]) {
+  const byTable = new Map<string, string[]>();
+  for (const reservation of reservations) {
+    if (!reservation.assignedTableId) continue;
+    const times = byTable.get(reservation.assignedTableId) ?? [];
+    times.push(reservation.scheduledAt.toISOString());
+    byTable.set(reservation.assignedTableId, times);
+  }
+  for (const times of byTable.values()) {
+    times.sort((left, right) => Date.parse(left) - Date.parse(right));
+  }
+  return byTable;
+}
+
 export function buildPublicFloor(
   plan: PublicFloorSource | null | undefined,
+  reservations: PublicReservationSource[] = [],
 ): PublicFloorView | null {
   const version = plan?.activeVersion;
   if (!plan || !version) return null;
 
+  const reservationsByTable = groupReservationsByTable(reservations);
   const elements: PublicFloorElement[] = [];
   for (const element of version.elements) {
     if (!element.visible) continue;
@@ -119,6 +146,14 @@ export function buildPublicFloor(
     if (element.type === "TABLE") {
       const table = element.diningTable;
       if (!table || !table.active || table.archivedAt) continue;
+      const upcoming = reservationsByTable.get(table.id) ?? [];
+      const liveStatus = toPublicTableStatus(table.currentStatus);
+      // A booking only recolors a table that is otherwise free. A table in use,
+      // being prepared, or out of service keeps its live colour — what is
+      // happening right now is the more useful signal for someone deciding
+      // whether to walk in — and its bookings still show on hover.
+      const status =
+        liveStatus === "AVAILABLE" && upcoming.length ? "RESERVED" : liveStatus;
       elements.push({
         id: element.stableElementId,
         type: "TABLE",
@@ -133,7 +168,8 @@ export function buildPublicFloor(
         shape: table.shape,
         tableId: table.id,
         capacity: table.capacity,
-        status: toPublicTableStatus(table.currentStatus),
+        status,
+        ...(upcoming.length ? { upcomingReservations: upcoming } : {}),
       });
       continue;
     }

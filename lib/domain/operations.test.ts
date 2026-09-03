@@ -340,6 +340,103 @@ describe("manager operation commands", () => {
     ).toBe(completedAt);
   });
 
+  it("warns before seating a walk-in on a table that is booked shortly", () => {
+    const state = createDemoState(now);
+    // table-06 is free right now but holds the Lim family booking 70 minutes out.
+    const blocked = seatQueueEntry(
+      state,
+      "queue-01",
+      "table-06",
+      occurredAt,
+      "Manager",
+    );
+
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) throw new Error("expected the clash to be reported");
+    expect(blocked.code).toBe("RESERVATION_CLASH");
+    expect(blocked.error).toContain("Lim family");
+    expect(state.tables.find((table) => table.id === "table-06")?.status).toBe(
+      "AVAILABLE",
+    );
+  });
+
+  it("seats the walk-in anyway once the manager acknowledges the clash", () => {
+    const state = createDemoState(now);
+    const seated = successful(
+      seatQueueEntry(state, "queue-01", "table-06", occurredAt, "Manager", {
+        acknowledgeReservationClash: true,
+      }),
+    );
+
+    expect(seated.tables.find((table) => table.id === "table-06")?.status).toBe(
+      "OCCUPIED",
+    );
+    expect(seated.queue.find((entry) => entry.id === "queue-01")?.status).toBe(
+      "SEATED",
+    );
+  });
+
+  it("does not treat a reservation's own booking as a clash", () => {
+    const state = createDemoState(now);
+    const reservation = state.reservations.find(
+      (item) => item.tableId === "table-06",
+    )!;
+    const seated = successful(
+      seatReservation(state, reservation.id, "table-06", occurredAt, "Manager"),
+    );
+
+    expect(
+      seated.reservations.find((item) => item.id === reservation.id)?.status,
+    ).toBe("SEATED");
+  });
+
+  it("warns before a manager marks a booked table occupied from the floor", () => {
+    const state = createDemoState(now);
+    const blocked = transitionTable(
+      state,
+      "table-06",
+      "OCCUPIED",
+      occurredAt,
+      "Manager",
+      2,
+    );
+
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) throw new Error("expected the clash to be reported");
+    expect(blocked.code).toBe("RESERVATION_CLASH");
+
+    const acknowledged = successful(
+      transitionTable(state, "table-06", "OCCUPIED", occurredAt, "Manager", 2, {
+        acknowledgeReservationClash: true,
+      }),
+    );
+    expect(
+      acknowledged.tables.find((table) => table.id === "table-06")?.status,
+    ).toBe("OCCUPIED");
+  });
+
+  it("leaves seating alone when the next booking is beyond the window", () => {
+    const state = createDemoState(now);
+    const later = {
+      ...state,
+      reservations: state.reservations.map((reservation) =>
+        reservation.tableId === "table-06"
+          ? {
+              ...reservation,
+              scheduledAt: new Date(now.getTime() + 4 * 60 * 60_000).toISOString(),
+            }
+          : reservation,
+      ),
+    };
+
+    const seated = successful(
+      seatQueueEntry(later, "queue-01", "table-06", occurredAt, "Manager"),
+    );
+    expect(seated.tables.find((table) => table.id === "table-06")?.status).toBe(
+      "OCCUPIED",
+    );
+  });
+
   it("returns a party-size-aware wait suggestion", () => {
     const state = createDemoState(now);
     expect(estimateWaitForParty(state, 2, now)).toBe(0);

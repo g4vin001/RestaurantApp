@@ -9,7 +9,42 @@ import type {
 
 export type DomainResult =
   | { ok: true; state: DemoState }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: "RESERVATION_CLASH" };
+
+const RESERVATION_CLASH_WINDOW_MS = 90 * 60_000;
+
+function clockTime(value: string) {
+  return new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+// Mirrors assertNoReservationClash in the Prisma command layer: occupying a
+// table a booking is about to claim is reported so a manager can decide, not
+// refused outright.
+function reservationClash(
+  state: DemoState,
+  tableIds: string[],
+  occurredAt: string,
+  excludeReservationId?: string,
+) {
+  const from = Date.parse(occurredAt);
+  return (
+    state.reservations.find((reservation) => {
+      if (reservation.id === excludeReservationId) return false;
+      if (!["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status))
+        return false;
+      const claimed =
+        reservation.tableIds ??
+        (reservation.tableId ? [reservation.tableId] : []);
+      if (!claimed.some((id) => tableIds.includes(id))) return false;
+      const scheduled = Date.parse(reservation.scheduledAt);
+      return scheduled >= from && scheduled <= from + RESERVATION_CLASH_WINDOW_MS;
+    }) ?? null
+  );
+}
 
 function touch(state: DemoState, occurredAt: string): DemoState {
   return { ...state, lastUpdatedAt: occurredAt };
@@ -50,6 +85,7 @@ export function transitionTable(
   occurredAt: string,
   actor: string,
   partySize?: number,
+  options: { acknowledgeReservationClash?: boolean } = {},
 ): DomainResult {
   const table = state.tables.find((item) => item.id === tableId && item.active);
   if (!table)
@@ -96,6 +132,20 @@ export function transitionTable(
       ok: false,
       error: "The linked table group changed and must be refreshed.",
     };
+  }
+
+  if (status === "OCCUPIED" && !options.acknowledgeReservationClash) {
+    const clash = reservationClash(state, affectedIds, occurredAt);
+    if (clash) {
+      const clashTable = state.tables.find(
+        (item) => item.id === (clash.tableId ?? affectedIds[0]),
+      );
+      return {
+        ok: false,
+        code: "RESERVATION_CLASH",
+        error: `${clashTable?.label ?? "That table"} is booked for ${clash.partyName} at ${clockTime(clash.scheduledAt)}.`,
+      };
+    }
   }
 
   const sessions = state.sessions.map((session) => {
@@ -171,6 +221,11 @@ export function correctLastTableTransition(
     return { ok: false, error: "There is no recent table action to correct." };
   if (event.note?.startsWith("Correction:"))
     return { ok: false, error: "The latest table action is already a correction." };
+  if (event.note?.startsWith("Reservation moved"))
+    return {
+      ok: false,
+      error: "A table move can't be undone with Correct — move the reservation back instead.",
+    };
   if (table.status !== event.newStatus)
     return { ok: false, error: "The table changed again; refresh before correcting it." };
 
@@ -677,6 +732,10 @@ function seatTables(
   partySize: number,
   occurredAt: string,
   actor: string,
+  options: {
+    acknowledgeReservationClash?: boolean;
+    excludeReservationId?: string;
+  } = {},
 ): DomainResult {
   const tableIds = normalizeTableIds(tableIdOrIds);
   const tables = tableIds
@@ -704,6 +763,23 @@ function seatTables(
       error: "The party is too small to occupy every selected table.",
     };
 
+  if (!options.acknowledgeReservationClash) {
+    const clash = reservationClash(
+      state,
+      tableIds,
+      occurredAt,
+      options.excludeReservationId,
+    );
+    if (clash) {
+      const clashTable = tables.find((table) => table.id === clash.tableId);
+      return {
+        ok: false,
+        code: "RESERVATION_CLASH",
+        error: `${clashTable?.label ?? "That table"} is booked for ${clash.partyName} at ${clockTime(clash.scheduledAt)}.`,
+      };
+    }
+  }
+
   let nextState = state;
   for (let index = 0; index < tables.length; index += 1) {
     const transitioned = transitionTable(
@@ -713,6 +789,8 @@ function seatTables(
       occurredAt,
       actor,
       allocations[index],
+      // Already checked above, with the seated party's own booking excluded.
+      { acknowledgeReservationClash: true },
     );
     if (!transitioned.ok) return transitioned;
     nextState = transitioned.state;
@@ -726,6 +804,7 @@ export function seatQueueEntry(
   tableIdOrIds: string | string[],
   occurredAt: string,
   actor: string,
+  options: { acknowledgeReservationClash?: boolean } = {},
 ): DomainResult {
   const entry = state.queue.find((item) => item.id === entryId);
   if (!entry || !["WAITING", "CALLED"].includes(entry.status)) {
@@ -741,6 +820,7 @@ export function seatQueueEntry(
     entry.partySize,
     occurredAt,
     actor,
+    { acknowledgeReservationClash: options.acknowledgeReservationClash },
   );
   if (!seated.ok) return seated;
   return {
@@ -896,7 +976,7 @@ export function updateReservation(
 export function setReservationStatus(
   state: DemoState,
   reservationId: string,
-  status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+  status: "CONFIRMED" | "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
   occurredAt: string,
   actor = "Demo manager",
 ): DomainResult {
@@ -905,10 +985,9 @@ export function setReservationStatus(
   );
   if (!reservation) return { ok: false, error: "Reservation was not found." };
   const allowed: Record<Reservation["status"], Reservation["status"][]> = {
-    // Demo-mode reservations never start PENDING_APPROVAL today (they're
-    // created CONFIRMED directly, same as staff-entered ones always were) —
-    // no transitions defined here until that changes.
-    PENDING_APPROVAL: [],
+    // NO_SHOW is intentionally excluded here — it doesn't apply before a
+    // reservation is even confirmed.
+    PENDING_APPROVAL: ["CONFIRMED", "CANCELLED"],
     CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
     ARRIVED: ["CANCELLED", "NO_SHOW"],
     SEATED: ["COMPLETED"],
@@ -967,6 +1046,7 @@ export function seatReservation(
   tableIdOrIds: string | string[],
   occurredAt: string,
   actor: string,
+  options: { acknowledgeReservationClash?: boolean } = {},
 ): DomainResult {
   const reservation = state.reservations.find(
     (item) => item.id === reservationId,
@@ -980,6 +1060,10 @@ export function seatReservation(
     reservation.partySize,
     occurredAt,
     actor,
+    {
+      acknowledgeReservationClash: options.acknowledgeReservationClash,
+      excludeReservationId: reservationId,
+    },
   );
   if (!seated.ok) return seated;
   return {
@@ -995,6 +1079,157 @@ export function seatReservation(
                 tableId: tableIds[0],
                 tableIds: tableIds.length > 1 ? tableIds : undefined,
                 seatedAt: occurredAt,
+                updatedAt: occurredAt,
+              }
+            : item,
+        ),
+      },
+      occurredAt,
+    ),
+  };
+}
+
+export function moveReservationTable(
+  state: DemoState,
+  reservationId: string,
+  tableIdOrIds: string | string[],
+  occurredAt: string,
+  actor: string,
+  options: { acknowledgeReservationClash?: boolean } = {},
+): DomainResult {
+  const reservation = state.reservations.find(
+    (item) => item.id === reservationId,
+  );
+  if (!reservation || reservation.status !== "SEATED")
+    return { ok: false, error: "Only a seated reservation can be moved." };
+
+  const fromTableIds =
+    reservation.tableIds ?? (reservation.tableId ? [reservation.tableId] : []);
+  if (!fromTableIds.length)
+    return {
+      ok: false,
+      error: "This seated reservation has no linked table group.",
+    };
+
+  const toTableIds = normalizeTableIds(tableIdOrIds);
+  if (toTableIds.some((id) => fromTableIds.includes(id)))
+    return { ok: false, error: "Choose a different table to move to." };
+
+  const destinationTables = toTableIds
+    .map((id) => state.tables.find((table) => table.id === id && table.active))
+    .filter((table): table is DemoState["tables"][number] => Boolean(table));
+  if (destinationTables.length !== toTableIds.length)
+    return { ok: false, error: "One or more selected tables were not found." };
+  if (destinationTables.some((table) => table.status !== "AVAILABLE"))
+    return { ok: false, error: "Every selected table must be available." };
+  if (
+    destinationTables.length > 1 &&
+    !destinationTables.every((table) => table.zone === destinationTables[0].zone)
+  )
+    return {
+      ok: false,
+      error: "Combined tables must be in the same floor zone.",
+    };
+  if (
+    destinationTables.reduce((sum, table) => sum + table.capacity, 0) <
+    reservation.partySize
+  )
+    return { ok: false, error: "The selected table capacity is too small." };
+
+  const allocations = allocatePartyAcrossTables(
+    destinationTables,
+    reservation.partySize,
+  );
+  if (!allocations)
+    return {
+      ok: false,
+      error: "The party is too small to occupy every selected table.",
+    };
+
+  if (!options.acknowledgeReservationClash) {
+    const clash = reservationClash(
+      state,
+      toTableIds,
+      occurredAt,
+      reservationId,
+    );
+    if (clash) {
+      const clashTable = destinationTables.find(
+        (table) => table.id === clash.tableId,
+      );
+      return {
+        ok: false,
+        code: "RESERVATION_CLASH",
+        error: `${clashTable?.label ?? "That table"} is booked for ${clash.partyName} at ${clockTime(clash.scheduledAt)}.`,
+      };
+    }
+  }
+
+  // Collapses the usual OCCUPIED -> CLEANING -> AVAILABLE cycle into one
+  // step: a move relocates an ongoing visit rather than vacating a table.
+  const sessions = state.sessions.map((session) =>
+    fromTableIds.includes(session.tableId) && !session.readyAt
+      ? {
+          ...session,
+          clearedAt: session.clearedAt ?? occurredAt,
+          readyAt: occurredAt,
+        }
+      : session,
+  );
+  destinationTables.forEach((table, index) => {
+    sessions.push({
+      id: `session-${occurredAt}-${table.id}`,
+      tableId: table.id,
+      partySize: allocations[index],
+      seatedAt: occurredAt,
+    });
+  });
+
+  const destinationLabel = destinationTables
+    .map((table) => table.label)
+    .join(" + ");
+  const events = [
+    ...fromTableIds.map((id) => ({
+      id: `event-${occurredAt}-${id}-out`,
+      tableId: id,
+      previousStatus: "OCCUPIED" as TableStatus,
+      newStatus: "AVAILABLE" as TableStatus,
+      occurredAt,
+      actor,
+      note: `Reservation moved to ${destinationLabel}`,
+    })),
+    ...destinationTables.map((table) => ({
+      id: `event-${occurredAt}-${table.id}-in`,
+      tableId: table.id,
+      previousStatus: "AVAILABLE" as TableStatus,
+      newStatus: "OCCUPIED" as TableStatus,
+      occurredAt,
+      actor,
+      note: "Reservation moved here",
+    })),
+    ...state.events,
+  ];
+
+  return {
+    ok: true,
+    state: touch(
+      {
+        ...state,
+        tables: state.tables.map((table) => {
+          if (fromTableIds.includes(table.id))
+            return { ...table, status: "AVAILABLE" as TableStatus, statusChangedAt: occurredAt };
+          if (toTableIds.includes(table.id))
+            return { ...table, status: "OCCUPIED" as TableStatus, statusChangedAt: occurredAt };
+          return table;
+        }),
+        sessions,
+        events,
+        reservations: state.reservations.map((item) =>
+          item.id === reservationId
+            ? {
+                ...item,
+                tableId: toTableIds[0],
+                tableIds: toTableIds.length > 1 ? toTableIds : undefined,
                 updatedAt: occurredAt,
               }
             : item,

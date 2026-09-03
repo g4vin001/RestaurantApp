@@ -20,6 +20,7 @@ import {
   addStaffMember,
   createReservation,
   correctLastTableTransition,
+  moveReservationTable as moveReservationTableCommand,
   removeStaffMember,
   seatQueueEntry,
   seatReservation,
@@ -45,7 +46,11 @@ import { createDemoState } from "@/lib/demo/seed";
 import {
   type OperationsRepositoryMode,
 } from "@/lib/repositories/operations";
-import { newCommandId, type DatabaseOperationsCommand } from "@/lib/repositories/commands";
+import {
+  newCommandId,
+  type CommandFailureCode,
+  type DatabaseOperationsCommand,
+} from "@/lib/repositories/commands";
 import { loadManagerSnapshotAction, runManagerCommand } from "@/app/manager/actions";
 import { createClient as createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
@@ -66,7 +71,10 @@ type DemoAction =
 
 type CommandFeedback =
   | { ok: true; state?: DemoState }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: CommandFailureCode };
+
+/** Options accepted by every command that puts a party on a table. */
+export type SeatingOptions = { acknowledgeReservationClash?: boolean };
 
 function reducer(_state: DemoState, action: DemoAction): DemoState {
   return action.state;
@@ -142,6 +150,7 @@ interface DemoContextValue {
     tableId: string,
     status: TableStatus,
     partySize?: number,
+    options?: SeatingOptions,
   ) => Promise<CommandFeedback>;
   correctTable: (tableId: string, reason: string) => Promise<CommandFeedback>;
   saveFloor: (
@@ -164,6 +173,7 @@ interface DemoContextValue {
   seatQueue: (
     entryId: string,
     tableIdOrIds: string | string[],
+    options?: SeatingOptions,
   ) => Promise<CommandFeedback>;
   reorderQueue: (entryId: string, direction: -1 | 1) => Promise<CommandFeedback>;
   addReservation: (input: ReservationInput) => Promise<CommandFeedback>;
@@ -173,11 +183,17 @@ interface DemoContextValue {
   ) => Promise<CommandFeedback>;
   changeReservationStatus: (
     reservationId: string,
-    status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+    status: "CONFIRMED" | "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
   ) => Promise<CommandFeedback>;
   seatReservationRecord: (
     reservationId: string,
     tableIdOrIds: string | string[],
+    options?: SeatingOptions,
+  ) => Promise<CommandFeedback>;
+  moveReservationTable: (
+    reservationId: string,
+    tableIdOrIds: string | string[],
+    options?: SeatingOptions,
   ) => Promise<CommandFeedback>;
   addStaff: (input: StaffInput) => Promise<CommandFeedback>;
   updateStaff: (staffId: string, input: StaffInput) => Promise<CommandFeedback>;
@@ -306,6 +322,7 @@ export function OperationsProvider({
       state?: DemoState;
       error?: string;
       errors?: string[];
+      code?: CommandFailureCode;
     }) => {
       if (!result.ok || !result.state) {
         return {
@@ -314,6 +331,7 @@ export function OperationsProvider({
             result.error ??
             result.errors?.join(" ") ??
             "That action could not be completed.",
+          code: result.code,
         } as const;
       }
       dispatch({ type: "REPLACE", state: result.state });
@@ -335,7 +353,7 @@ export function OperationsProvider({
         } else if (result.code === "PERSISTENCE") {
           setConnectionStatus("stale");
         }
-        return { ok: false, error: result.error };
+        return { ok: false, error: result.error, code: result.code };
       }
       dispatch({ type: "REPLACE", state: result.state });
       return { ok: true, state: result.state };
@@ -344,7 +362,12 @@ export function OperationsProvider({
   );
 
   const transitionTable = useCallback(
-    async (tableId: string, status: TableStatus, partySize?: number) => {
+    async (
+      tableId: string,
+      status: TableStatus,
+      partySize?: number,
+      options: SeatingOptions = {},
+    ) => {
       if (repositoryMode === "database") {
         const table = state.tables.find((item) => item.id === tableId);
         if (!table) return { ok: false, error: "Table was not found." };
@@ -355,6 +378,7 @@ export function OperationsProvider({
           expectedRevision: table.revision ?? 0,
           status,
           partySize,
+          acknowledgeReservationClash: options.acknowledgeReservationClash,
         });
       }
       return applyResult(
@@ -365,6 +389,7 @@ export function OperationsProvider({
           new Date().toISOString(),
           "Demo manager",
           partySize,
+          options,
         ),
       );
     },
@@ -534,7 +559,11 @@ export function OperationsProvider({
     [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const seatQueue = useCallback(
-    async (entryId: string, tableIdOrIds: string | string[]) => {
+    async (
+      entryId: string,
+      tableIdOrIds: string | string[],
+      options: SeatingOptions = {},
+    ) => {
       if (repositoryMode === "database") {
         const entry = state.queue.find((item) => item.id === entryId);
         if (!entry) return { ok: false, error: "Queue entry was not found." };
@@ -544,6 +573,7 @@ export function OperationsProvider({
           entryId,
           expectedRevision: entry.revision ?? 0,
           tableIds: Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds],
+          acknowledgeReservationClash: options.acknowledgeReservationClash,
         });
       }
       return applyResult(seatQueueEntry(
@@ -552,6 +582,7 @@ export function OperationsProvider({
           tableIdOrIds,
           new Date().toISOString(),
           "Demo manager",
+          options,
         ));
     },
     [applyResult, repositoryMode, runDatabaseCommand, state],
@@ -617,7 +648,7 @@ export function OperationsProvider({
   const changeReservationStatus = useCallback(
     (
       reservationId: string,
-      status: "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+      status: "CONFIRMED" | "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
     ) => {
       if (repositoryMode === "database") {
         const reservation = state.reservations.find((item) => item.id === reservationId);
@@ -634,11 +665,15 @@ export function OperationsProvider({
     [applyResult, repositoryMode, runDatabaseCommand, state],
   );
   const seatReservationRecord = useCallback(
-    async (reservationId: string, tableIdOrIds: string | string[]) => {
+    async (
+      reservationId: string,
+      tableIdOrIds: string | string[],
+      options: SeatingOptions = {},
+    ) => {
       if (repositoryMode === "database") {
         const reservation = state.reservations.find((item) => item.id === reservationId);
         if (!reservation) return { ok: false, error: "Reservation was not found." };
-        return runDatabaseCommand({ type: "SEAT_RESERVATION", commandId: newCommandId(), reservationId, expectedRevision: reservation.revision ?? 0, tableIds: Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds] });
+        return runDatabaseCommand({ type: "SEAT_RESERVATION", commandId: newCommandId(), reservationId, expectedRevision: reservation.revision ?? 0, tableIds: Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds], acknowledgeReservationClash: options.acknowledgeReservationClash });
       }
       return applyResult(seatReservation(
           state,
@@ -646,6 +681,36 @@ export function OperationsProvider({
           tableIdOrIds,
           new Date().toISOString(),
           "Demo manager",
+          options,
+        ));
+    },
+    [applyResult, repositoryMode, runDatabaseCommand, state],
+  );
+  const moveReservationTable = useCallback(
+    async (
+      reservationId: string,
+      tableIdOrIds: string | string[],
+      options: SeatingOptions = {},
+    ) => {
+      if (repositoryMode === "database") {
+        const reservation = state.reservations.find((item) => item.id === reservationId);
+        if (!reservation) return { ok: false, error: "Reservation was not found." };
+        return runDatabaseCommand({
+          type: "MOVE_RESERVATION_TABLE",
+          commandId: newCommandId(),
+          reservationId,
+          expectedRevision: reservation.revision ?? 0,
+          tableIds: Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds],
+          acknowledgeReservationClash: options.acknowledgeReservationClash,
+        });
+      }
+      return applyResult(moveReservationTableCommand(
+          state,
+          reservationId,
+          tableIdOrIds,
+          new Date().toISOString(),
+          "Demo manager",
+          options,
         ));
     },
     [applyResult, repositoryMode, runDatabaseCommand, state],
@@ -778,6 +843,7 @@ export function OperationsProvider({
       updateReservationRecord,
       changeReservationStatus,
       seatReservationRecord,
+      moveReservationTable,
       addStaff,
       updateStaff,
       setStaffStatus,
@@ -806,6 +872,7 @@ export function OperationsProvider({
       updateReservationRecord,
       changeReservationStatus,
       seatReservationRecord,
+      moveReservationTable,
       addStaff,
       updateStaff,
       setStaffStatus,

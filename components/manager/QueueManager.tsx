@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
+import { ReservationTablePicker } from "@/components/manager/ReservationTablePicker";
 import { Modal } from "@/components/ui/Modal";
 import { minutesBetween } from "@/lib/domain/analytics";
 import {
@@ -349,10 +350,20 @@ export function QueueManager() {
     kind: "queue" | "reservation";
     id: string;
   } | null>(null);
+  const [tablePicker, setTablePicker] = useState<{
+    kind: "assign" | "move";
+    reservationId: string;
+  } | null>(null);
   const [resolveTarget, setResolveTarget] = useState<{
     kind: "queue" | "reservation";
     id: string;
     action: "cancel" | "no-show";
+  } | null>(null);
+  // Set when a seat/move was refused because the table is booked soon. Holds
+  // the retry so the manager can go ahead once they have seen the warning.
+  const [clashPrompt, setClashPrompt] = useState<{
+    message: string;
+    retry: () => Promise<void>;
   } | null>(null);
   const [toast, setToast] = useState<{
     tone: "success" | "error";
@@ -374,6 +385,41 @@ export function QueueManager() {
     }
     notify("success", success);
     return true;
+  };
+
+  // Seating actions can come back asking to be confirmed rather than failing:
+  // the table is free now but booked shortly. Show the booking and let the
+  // manager decide, instead of a dead end they would route around.
+  const handleSeating = async (
+    run: (options: {
+      acknowledgeReservationClash?: boolean;
+    }) => Promise<{ ok: boolean; error?: string; code?: string }>,
+    success: string,
+    onSettled: () => void,
+  ) => {
+    const result = await run({});
+    if (!result.ok && result.code === "RESERVATION_CLASH") {
+      setClashPrompt({
+        message: result.error ?? "That table is booked shortly.",
+        retry: async () => {
+          const overridden = await run({ acknowledgeReservationClash: true });
+          setClashPrompt(null);
+          if (!overridden.ok) {
+            notify("error", overridden.error ?? "That action failed.");
+            return;
+          }
+          notify("success", success);
+          onSettled();
+        },
+      });
+      return;
+    }
+    if (!result.ok) {
+      notify("error", result.error ?? "That action failed.");
+      return;
+    }
+    notify("success", success);
+    onSettled();
   };
 
   const activeQueue = state.queue.filter((entry) =>
@@ -467,12 +513,43 @@ export function QueueManager() {
 
   const confirmSeat = async (tableIds: string[]) => {
     if (!seatTarget) return;
-    const result =
-      seatTarget.kind === "queue"
-        ? demo.seatQueue(seatTarget.id, tableIds)
-        : demo.seatReservationRecord(seatTarget.id, tableIds);
-    if (await handle(result, "Party seated and table session started."))
-      setSeatTarget(null);
+    await handleSeating(
+      (options) =>
+        seatTarget.kind === "queue"
+          ? demo.seatQueue(seatTarget.id, tableIds, options)
+          : demo.seatReservationRecord(seatTarget.id, tableIds, options),
+      "Party seated and table session started.",
+      () => setSeatTarget(null),
+    );
+  };
+
+  const tablePickerReservation = tablePicker
+    ? state.reservations.find((item) => item.id === tablePicker.reservationId)
+    : undefined;
+
+  const confirmTablePicker = async (tableIds: string[]) => {
+    if (!tablePicker || !tablePickerReservation) return;
+    if (tablePicker.kind === "move") {
+      await handleSeating(
+        (options) =>
+          demo.moveReservationTable(tablePickerReservation.id, tableIds, options),
+        "Reservation moved.",
+        () => setTablePicker(null),
+      );
+      return;
+    }
+    const assigned = await handle(
+      demo.updateReservationRecord(tablePickerReservation.id, {
+        partyName: tablePickerReservation.partyName,
+        partySize: tablePickerReservation.partySize,
+        scheduledAt: tablePickerReservation.scheduledAt,
+        contact: tablePickerReservation.contact,
+        notes: tablePickerReservation.notes,
+        tableId: tableIds[0],
+      }),
+      "Table assigned.",
+    );
+    if (assigned) setTablePicker(null);
   };
 
   const confirmResolve = async () => {
@@ -798,6 +875,38 @@ export function QueueManager() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {reservation.status === "PENDING_APPROVAL" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handle(
+                              demo.changeReservationStatus(
+                                reservation.id,
+                                "CONFIRMED",
+                              ),
+                              "Reservation approved.",
+                            )
+                          }
+                          className="min-h-10 rounded-lg bg-emerald-800 px-3 text-xs font-semibold text-white"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setResolveTarget({
+                              kind: "reservation",
+                              id: reservation.id,
+                              action: "cancel",
+                            })
+                          }
+                          className="min-h-10 rounded-lg px-3 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
                     {["CONFIRMED", "ARRIVED"].includes(reservation.status) && (
                       <>
                         <button
@@ -806,6 +915,18 @@ export function QueueManager() {
                           className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-stone-200 px-3 text-xs font-semibold text-stone-600"
                         >
                           <Edit3 size={15} /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTablePicker({
+                              kind: "assign",
+                              reservationId: reservation.id,
+                            })
+                          }
+                          className="min-h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-800"
+                        >
+                          {reservation.tableId ? "Reassign table" : "Assign table"}
                         </button>
                         {reservation.status === "CONFIRMED" && (
                           <button
@@ -865,21 +986,35 @@ export function QueueManager() {
                       </>
                     )}
                     {reservation.status === "SEATED" && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handle(
-                            demo.changeReservationStatus(
-                              reservation.id,
-                              "COMPLETED",
-                            ),
-                            "Reservation completed.",
-                          )
-                        }
-                        className="min-h-10 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800"
-                      >
-                        Complete
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTablePicker({
+                              kind: "move",
+                              reservationId: reservation.id,
+                            })
+                          }
+                          className="min-h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-800"
+                        >
+                          Move table
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handle(
+                              demo.changeReservationStatus(
+                                reservation.id,
+                                "COMPLETED",
+                              ),
+                              "Reservation completed.",
+                            )
+                          }
+                          className="min-h-10 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800"
+                        >
+                          Complete
+                        </button>
+                      </>
                     )}
                   </div>
                 </article>
@@ -942,49 +1077,52 @@ export function QueueManager() {
       <Modal
         open={seatTarget !== null}
         title={`Seat ${seatRecord?.partyName ?? "party"}`}
-        description="Recommendations consider party size, combined same-zone tables, reservations, and current progress."
+        description="Tap a table on the map. The best match, weighing party size, combined same-zone tables, and current progress, is outlined in amber."
+        width="max-w-3xl"
         onClose={() => setSeatTarget(null)}
       >
-        {recommendations.length ? (
-          <div className="space-y-3">
-            {recommendations.map((recommendation, index) => {
-              const tables = recommendation.tableIds
-                .map((tableId) =>
-                  state.tables.find((item) => item.id === tableId),
-                )
-                .filter(
-                  (table): table is (typeof state.tables)[number] =>
-                    Boolean(table),
-                );
-              return tables.length ? (
-                <button
-                  key={recommendation.tableIds.join("-")}
-                  type="button"
-                  onClick={() => confirmSeat(recommendation.tableIds)}
-                  className="flex w-full items-center justify-between gap-4 rounded-xl border border-stone-200 p-4 text-left hover:border-emerald-300 hover:bg-emerald-50"
-                >
-                  <div>
-                    <p className="font-semibold text-stone-900">
-                      {index === 0 ? "Best match · " : ""}
-                      {tables.map((table) => table.label).join(" + ")}
-                      {recommendation.combined ? " · combined" : ""}
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-stone-500">
-                      {recommendation.reason}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-emerald-700">
-                    {recommendation.capacity} seats
-                  </span>
-                </button>
-              ) : null;
-            })}
-          </div>
-        ) : (
-          <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-            No available table safely fits this party without a near-term
-            conflict.
-          </p>
+        {seatRecord && (
+          <ReservationTablePicker
+            state={state}
+            mode="seat"
+            partySize={seatRecord.partySize}
+            recommendedTableIds={recommendations[0]?.tableIds ?? []}
+            onConfirm={confirmSeat}
+            onCancel={() => setSeatTarget(null)}
+          />
+        )}
+      </Modal>
+      <Modal
+        open={tablePicker !== null}
+        title={
+          tablePicker?.kind === "move"
+            ? `Move ${tablePickerReservation?.partyName ?? "party"}`
+            : `Assign a table to ${tablePickerReservation?.partyName ?? "party"}`
+        }
+        description={
+          tablePicker?.kind === "move"
+            ? "Tap the new table on the map."
+            : "Tap a table on the map. This only labels the reservation ahead of time."
+        }
+        width="max-w-3xl"
+        onClose={() => setTablePicker(null)}
+      >
+        {tablePicker && tablePickerReservation && (
+          <ReservationTablePicker
+            state={state}
+            mode={tablePicker.kind}
+            partySize={tablePickerReservation.partySize}
+            excludeTableIds={
+              tablePicker.kind === "move"
+                ? (tablePickerReservation.tableIds ??
+                    (tablePickerReservation.tableId
+                      ? [tablePickerReservation.tableId]
+                      : []))
+                : []
+            }
+            onConfirm={confirmTablePicker}
+            onCancel={() => setTablePicker(null)}
+          />
         )}
       </Modal>
       <Modal
@@ -1011,6 +1149,32 @@ export function QueueManager() {
             className="min-h-11 rounded-xl bg-rose-700 px-4 text-sm font-semibold text-white"
           >
             Confirm
+          </button>
+        </div>
+      </Modal>
+      <Modal
+        open={clashPrompt !== null}
+        title="This table is booked shortly"
+        description="Seating here may leave the booked party without their table."
+        onClose={() => setClashPrompt(null)}
+      >
+        <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+          {clashPrompt?.message}
+        </p>
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setClashPrompt(null)}
+            className="min-h-11 rounded-xl border border-stone-300 px-4 text-sm font-semibold text-stone-700"
+          >
+            Pick another table
+          </button>
+          <button
+            type="button"
+            onClick={() => clashPrompt?.retry()}
+            className="min-h-11 rounded-xl bg-amber-700 px-4 text-sm font-semibold text-white"
+          >
+            Seat here anyway
           </button>
         </div>
       </Modal>

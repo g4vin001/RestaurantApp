@@ -209,6 +209,59 @@ async function activeAssignmentForTable(
   });
 }
 
+function manilaClockTime(value: Date) {
+  return new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value);
+}
+
+// Occupying a table that a booking is about to claim is a real operational
+// mistake, but not always the wrong call — a host may know the walk-in will be
+// done in time. So this reports a clash the manager can deliberately override
+// rather than refusing outright, which would only push staff to work around it
+// through a different button.
+async function assertNoReservationClash(
+  tx: Prisma.TransactionClient,
+  scope: OperationsCommandScope,
+  tableIds: string[],
+  options: {
+    acknowledged?: boolean;
+    excludeReservationId?: string;
+  } = {},
+) {
+  if (options.acknowledged || !tableIds.length) return;
+  const now = new Date();
+  const clash = await tx.reservation.findFirst({
+    where: {
+      restaurantId: scope.restaurantId,
+      assignedTableId: { in: tableIds },
+      ...(options.excludeReservationId
+        ? { id: { not: options.excludeReservationId } }
+        : {}),
+      // Bookings still waiting for their table. SEATED parties already hold one,
+      // and a table they hold is not AVAILABLE for these commands anyway.
+      status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
+      scheduledAt: {
+        gte: now,
+        lte: new Date(now.getTime() + RESERVATION_CONFLICT_WINDOW_MS),
+      },
+    },
+    orderBy: { scheduledAt: "asc" },
+    select: {
+      partyName: true,
+      scheduledAt: true,
+      assignedTable: { select: { label: true } },
+    },
+  });
+  if (!clash) return;
+  fail(
+    "RESERVATION_CLASH",
+    `${clash.assignedTable?.label ?? "That table"} is booked for ${clash.partyName} at ${manilaClockTime(clash.scheduledAt)}.`,
+  );
+}
+
 async function changeTables(
   tx: Prisma.TransactionClient,
   scope: OperationsCommandScope,
@@ -352,6 +405,11 @@ async function transitionTable(
   }
   const assignment = await activeAssignmentForTable(tx, scope.restaurantId, table.id);
   const tableIds = assignment?.tables.map((item) => item.diningTableId) ?? [table.id];
+  if (command.status === "OCCUPIED") {
+    await assertNoReservationClash(tx, scope, tableIds, {
+      acknowledged: command.acknowledgeReservationClash,
+    });
+  }
   const now = await changeTables(
     tx,
     scope,
@@ -426,6 +484,12 @@ async function correctTable(
     fail(
       "VALIDATION",
       "A correction cannot be corrected again. Use a deliberate new table status change.",
+    );
+  }
+  if (latest.reason?.startsWith("Reservation moved")) {
+    fail(
+      "VALIDATION",
+      "A table move can't be undone with Correct — move the reservation back instead.",
     );
   }
   if (latest.toStatus !== table.currentStatus) fail("CONFLICT", "The latest table action no longer matches the table.");
@@ -542,6 +606,7 @@ async function seatSource(
   commandId: string,
   source: { kind: "queue"; id: string; expectedRevision: number } | { kind: "reservation"; id: string; expectedRevision: number },
   rawTableIds: string[],
+  acknowledgeReservationClash?: boolean,
 ) {
   requirePermission(scope, "SEAT_PARTIES");
   const tableIds = [...new Set(rawTableIds)];
@@ -558,6 +623,11 @@ async function seatSource(
   if (new Set(tables.map((table) => table.zone)).size > 1) {
     fail("VALIDATION", "Combined tables must be in the same zone.");
   }
+  await assertNoReservationClash(tx, scope, tableIds, {
+    acknowledged: acknowledgeReservationClash,
+    // A reservation never clashes with its own booking.
+    excludeReservationId: source.kind === "reservation" ? source.id : undefined,
+  });
 
   const now = new Date();
   let partySize: number;
@@ -614,6 +684,102 @@ async function seatSource(
       data: { seatingAssignmentId: assignment.id, diningTableId: table.id, diningSessionId: session.id },
     });
   }
+}
+
+async function moveReservationTable(
+  tx: Prisma.TransactionClient,
+  scope: OperationsCommandScope,
+  command: Extract<DatabaseOperationsCommand, { type: "MOVE_RESERVATION_TABLE" }>,
+) {
+  requirePermission(scope, "SEAT_PARTIES");
+  const tableIds = [...new Set(command.tableIds)];
+  if (tableIds.length < 1 || tableIds.length > 2) fail("VALIDATION", "Select one table or a same-zone pair.");
+  tableIds.forEach((id) => validateUuid(id, "Table ID"));
+
+  const reservation = await tx.reservation.findFirst({
+    where: { id: command.reservationId, restaurantId: scope.restaurantId },
+  });
+  if (!reservation) fail("VALIDATION", "Reservation was not found.");
+  if (reservation.revision !== command.expectedRevision || reservation.status !== "SEATED") {
+    fail("CONFLICT", "This reservation changed on another device.");
+  }
+
+  const assignment = await tx.seatingAssignment.findFirst({
+    where: { restaurantId: scope.restaurantId, reservationId: reservation.id, status: "ACTIVE" },
+    orderBy: { seatedAt: "desc" },
+    include: { tables: true },
+  });
+  if (!assignment) {
+    fail("PERSISTENCE", "This seated reservation has no active seating group. No table was changed.");
+  }
+  const fromTableIds = assignment.tables.map((table) => table.diningTableId);
+  if (!fromTableIds.length) {
+    fail("PERSISTENCE", "This seated reservation has an empty seating group. No table was changed.");
+  }
+  if (tableIds.some((id) => fromTableIds.includes(id))) {
+    fail("VALIDATION", "Choose a different table to move to.");
+  }
+
+  const destinationTables = await tx.diningTable.findMany({
+    where: { id: { in: tableIds }, restaurantId: scope.restaurantId, active: true, archivedAt: null },
+    orderBy: { id: "asc" },
+  });
+  if (destinationTables.length !== tableIds.length) fail("VALIDATION", "One of the selected tables was not found.");
+  if (destinationTables.some((table) => table.currentStatus !== "AVAILABLE")) {
+    fail("CONFLICT", "One of these tables was changed on another device.");
+  }
+  if (new Set(destinationTables.map((table) => table.zone)).size > 1) {
+    fail("VALIDATION", "Combined tables must be in the same zone.");
+  }
+  if (destinationTables.reduce((sum, table) => sum + table.capacity, 0) < reservation.partySize) {
+    fail("VALIDATION", "The selected table capacity is too small for this party.");
+  }
+  await assertNoReservationClash(tx, scope, tableIds, {
+    acknowledged: command.acknowledgeReservationClash,
+    excludeReservationId: reservation.id,
+  });
+
+  const destinationLabel = destinationTables.map((table) => table.label).join(" + ");
+  await changeTables(tx, scope, fromTableIds, "OCCUPIED", "AVAILABLE", command.commandId, `Reservation moved to ${destinationLabel}`);
+  await changeTables(tx, scope, tableIds, "AVAILABLE", "OCCUPIED", command.commandId, "Reservation moved here");
+
+  const now = new Date();
+  await tx.diningSession.updateMany({
+    where: { restaurantId: scope.restaurantId, seatingAssignmentId: assignment.id, status: "ACTIVE" },
+    data: { status: "COMPLETED", clearedAt: now, cleaningStartedAt: now, availableAt: now, completedAt: now },
+  });
+  await tx.seatingAssignment.update({
+    where: { id: assignment.id },
+    data: { status: "CORRECTED", completedAt: now },
+  });
+
+  // seatedAt is set to now (not the original seating time) so this new
+  // assignment always outranks the retired one in mapRestaurantSnapshot's
+  // `orderBy: seatedAt desc, take: 1` lookup — Reservation.seatedAt itself
+  // is left untouched so duration reporting still reflects the real start.
+  const newAssignment = await tx.seatingAssignment.create({
+    data: { restaurantId: scope.restaurantId, reservationId: reservation.id, partySize: reservation.partySize, seatedAt: now },
+  });
+  for (const table of destinationTables) {
+    const session = await tx.diningSession.create({
+      data: {
+        restaurantId: scope.restaurantId,
+        diningTableId: table.id,
+        reservationId: reservation.id,
+        seatingAssignmentId: newAssignment.id,
+        partySize: reservation.partySize,
+        seatedAt: now,
+      },
+    });
+    await tx.seatingAssignmentTable.create({
+      data: { seatingAssignmentId: newAssignment.id, diningTableId: table.id, diningSessionId: session.id },
+    });
+  }
+
+  await tx.reservation.update({
+    where: { id: reservation.id },
+    data: { assignedTableId: destinationTables[0].id, revision: { increment: 1 } },
+  });
 }
 
 async function executeInTransaction(
@@ -715,7 +881,7 @@ async function executeInTransaction(
       break;
     }
     case "SEAT_QUEUE":
-      await seatSource(tx, scope, command.commandId, { kind: "queue", id: command.entryId, expectedRevision: command.expectedRevision }, command.tableIds);
+      await seatSource(tx, scope, command.commandId, { kind: "queue", id: command.entryId, expectedRevision: command.expectedRevision }, command.tableIds, command.acknowledgeReservationClash);
       break;
     case "REORDER_QUEUE": {
       requirePermission(scope, "MANAGE_QUEUE");
@@ -754,7 +920,14 @@ async function executeInTransaction(
     }
     case "SET_RESERVATION_STATUS": {
       requireManager(scope);
-      const allowed = command.status === "ARRIVED" ? ["CONFIRMED" as const] : command.status === "COMPLETED" ? ["SEATED" as const] : ["PENDING_APPROVAL" as const, "CONFIRMED" as const, "ARRIVED" as const];
+      const allowed =
+        command.status === "CONFIRMED"
+          ? ["PENDING_APPROVAL" as const]
+          : command.status === "ARRIVED"
+            ? ["CONFIRMED" as const]
+            : command.status === "COMPLETED"
+              ? ["SEATED" as const]
+              : ["PENDING_APPROVAL" as const, "CONFIRMED" as const, "ARRIVED" as const];
       const reservation = await tx.reservation.findFirst({
         where: {
           id: command.reservationId,
@@ -802,7 +975,10 @@ async function executeInTransaction(
       break;
     }
     case "SEAT_RESERVATION":
-      await seatSource(tx, scope, command.commandId, { kind: "reservation", id: command.reservationId, expectedRevision: command.expectedRevision }, command.tableIds);
+      await seatSource(tx, scope, command.commandId, { kind: "reservation", id: command.reservationId, expectedRevision: command.expectedRevision }, command.tableIds, command.acknowledgeReservationClash);
+      break;
+    case "MOVE_RESERVATION_TABLE":
+      await moveReservationTable(tx, scope, command);
       break;
     case "ADD_STAFF": {
       requireManager(scope);
