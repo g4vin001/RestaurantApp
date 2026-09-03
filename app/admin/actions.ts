@@ -13,10 +13,22 @@ import { createRestaurantSlug } from "@/lib/auth/restaurant-onboarding";
 import { ensureProfile } from "@/lib/auth/profile";
 import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
+import { deleteAccountAsAdmin } from "@/lib/repositories/prisma/admin-accounts";
 import { createRestaurantAsAdmin, setRestaurantArchivedAsAdmin } from "@/lib/repositories/prisma/admin-restaurants";
 import { reportDataError } from "@/lib/server/data-error";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hashRequestAddress } from "@/lib/staff/invitations";
+import { Prisma } from "@/lib/generated/prisma/client";
+
+async function currentRequestIpHash() {
+  const requestHeaders = await headers();
+  const address =
+    requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    requestHeaders.get("x-real-ip") ??
+    "unknown";
+  return hashRequestAddress(address);
+}
 
 function formText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -243,5 +255,78 @@ export async function setRestaurantArchivedByAdmin(formData: FormData) {
   }
 
   await setFlash("message", `Restaurant "${restaurantName}" ${archived ? "archived" : "restored"}.`);
+  redirect("/admin");
+}
+
+export async function deleteAccountByAdmin(formData: FormData) {
+  const user = await requireAdminUser();
+  if (!(await isAdminUnlocked(user.id))) redirect("/admin");
+
+  const profileId = formText(formData.get("profileId"));
+  const confirmation = formText(formData.get("confirmation")).toLowerCase();
+  const reason = formText(formData.get("reason"));
+
+  if (!profileId) {
+    await setFlash("error", "Missing account.");
+    redirect("/admin");
+  }
+  if (profileId === user.id) {
+    await setFlash("error", "You can't delete the admin account you're signed in as.");
+    redirect("/admin");
+  }
+  if (reason.length < 4 || reason.length > 500) {
+    await setFlash("error", "Enter a short audit reason (4-500 characters).");
+    redirect("/admin");
+  }
+
+  const target = await prisma.profile.findUnique({
+    where: { id: profileId },
+    select: { email: true },
+  });
+  if (!target) {
+    await setFlash("error", "That account no longer exists.");
+    redirect("/admin");
+  }
+  if (confirmation !== target.email.toLowerCase()) {
+    await setFlash("error", `Type "${target.email}" exactly to confirm.`);
+    redirect("/admin");
+  }
+
+  try {
+    await deleteAccountAsAdmin(prisma, {
+      profileId,
+      actorProfileId: user.id,
+      reason,
+      ipHash: await currentRequestIpHash(),
+    });
+  } catch (error) {
+    if (error instanceof Error && !(error instanceof Prisma.PrismaClientKnownRequestError)) {
+      await setFlash("error", error.message);
+      redirect("/admin");
+    }
+    const reference = reportDataError("admin-delete-account", error);
+    await setFlash("error", `Could not delete the account. Support reference: ${reference}`);
+    redirect("/admin");
+  }
+
+  // The app-data row is gone at this point; the login itself is removed
+  // separately since Supabase Auth isn't part of the database transaction
+  // above. If this step fails, the account's data is already deleted but
+  // they could still log in — which would silently recreate a bare Profile
+  // via ensureProfile()'s upsert — so this failure needs its own clear flag.
+  try {
+    const admin = createAdminClient();
+    const { error: authError } = await admin.auth.admin.deleteUser(profileId);
+    if (authError) throw authError;
+  } catch (error) {
+    const reference = reportDataError("admin-delete-account-auth", error);
+    await setFlash(
+      "error",
+      `Account data for "${target.email}" was deleted, but removing their login failed — they can still log back in. Support reference: ${reference}`,
+    );
+    redirect("/admin");
+  }
+
+  await setFlash("message", `Account "${target.email}" was permanently deleted.`);
   redirect("/admin");
 }

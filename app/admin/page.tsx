@@ -12,6 +12,7 @@ import {
   updateRestaurantByAdmin,
 } from "./actions";
 import { ArchiveRestaurantButton } from "./DeleteRestaurantButton";
+import { DeleteAccountButton } from "./DeleteAccountButton";
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm";
@@ -62,6 +63,20 @@ export default async function AdminPage() {
       memberships: {
         where: { active: true },
         select: { role: true, profile: { select: { email: true } } },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const accounts = await prisma.profile.findMany({
+    where: { id: { not: user.id } },
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      memberships: {
+        where: { active: true },
+        select: { role: true, restaurant: { select: { name: true } } },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -208,6 +223,38 @@ export default async function AdminPage() {
                     restaurantName={restaurant.name}
                     archived={Boolean(restaurant.archivedAt)}
                   />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PageCard>
+
+      <PageCard className="mt-6">
+        <h2 className="font-semibold">Accounts</h2>
+        <p className="mt-1 text-xs text-stone-500">
+          Permanently deletes the account&apos;s data and login. This can&apos;t be undone,
+          and is blocked if the account created staff invites, has admin audit
+          history, or ran Data Lab imports.
+        </p>
+        {accounts.length === 0 ? (
+          <p className="mt-2 text-sm text-stone-500">No other accounts yet.</p>
+        ) : (
+          <ul className="mt-4 space-y-4">
+            {accounts.map((account) => (
+              <li key={account.id} className="rounded-lg border border-stone-200 p-4">
+                <p className="font-medium text-stone-800">
+                  {account.displayName} <span className="font-normal text-stone-400">· {account.email}</span>
+                </p>
+                <p className="mt-1 text-sm text-stone-500">
+                  {account.memberships.length === 0
+                    ? "No restaurant memberships"
+                    : account.memberships
+                        .map((membership) => `${membership.restaurant.name} (${membership.role})`)
+                        .join(", ")}
+                </p>
+                <div className="mt-3">
+                  <DeleteAccountButton profileId={account.id} email={account.email} />
                 </div>
               </li>
             ))}
