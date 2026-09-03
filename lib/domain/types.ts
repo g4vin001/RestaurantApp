@@ -192,6 +192,7 @@ export type StaffAccessStatus =
   | "NOT_INVITED"
   | "INVITED"
   | "ACTIVE"
+  | "WHITELISTED"
   | "ACCESS_DISABLED";
 
 export interface StaffMember {
