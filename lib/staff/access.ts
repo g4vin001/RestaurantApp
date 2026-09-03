@@ -265,7 +265,6 @@ export async function getCurrentWorkContext(
       .catch(() => undefined);
   }
 
-  const rolePermissions = session.staffMember.staffRole?.permissions;
   return {
     profileId: user.id,
     sessionId: session.id,
@@ -279,10 +278,9 @@ export async function getCurrentWorkContext(
     jobTitle: session.staffMember.jobTitle,
     permissionPreset: session.staffMember.permissionPreset,
     staffRoleName: session.staffMember.staffRole?.name ?? null,
-    permissions:
-      rolePermissions && rolePermissions.length > 0
-        ? rolePermissions
-        : permissionsForPreset(session.staffMember.permissionPreset),
+    permissions: session.staffMember.staffRole
+      ? session.staffMember.staffRole.permissions
+      : permissionsForPreset(session.staffMember.permissionPreset),
     startedAt: session.startedAt,
     expiresAt: session.expiresAt,
   };
