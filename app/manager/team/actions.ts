@@ -1,15 +1,21 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import { ensureProfile } from "@/lib/auth/profile";
 import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
+import { createStaffInviteSecrets } from "@/lib/staff/invitations";
+import { hashStaffPin, isValidStaffPin } from "@/lib/staff/pin";
+import {
+  isValidStaffEmail,
+  normalizeStaffEmail,
+} from "@/lib/staff/policy";
 import {
   sanitizeStaffPermissions,
   staffPermissionDependencyError,
 } from "@/lib/staff/permissions";
-import { createStaffInviteSecrets } from "@/lib/staff/invitations";
 import { createClient } from "@/lib/supabase/server";
 
 async function requireManager() {
@@ -20,6 +26,48 @@ async function requireManager() {
   const membership = await getActiveManagerMembership(user.id);
   if (!membership) throw new Error("Manager access is required.");
   return { user, membership };
+}
+
+function revalidateTeamWork() {
+  revalidatePath("/manager/team");
+  revalidatePath("/work");
+  revalidatePath("/ops");
+  revalidatePath("/");
+}
+
+async function finishStaffAction(message: string) {
+  revalidateTeamWork();
+  await setFlash("message", message);
+  redirect("/manager/team");
+}
+
+async function failStaffAction(message: string) {
+  await setFlash("error", message);
+  redirect("/manager/team");
+}
+
+function optionalText(formData: FormData, key: string, maxLength: number) {
+  const value = String(formData.get(key) ?? "").trim();
+  if (value.length > maxLength) throw new Error(`${key} is too long.`);
+  return value || null;
+}
+
+function presetForRole(role: {
+  presetKey: string | null;
+  permissions: readonly string[];
+}) {
+  if (role.presetKey === "FLOOR_STAFF") return "FLOOR_STAFF" as const;
+  if (role.presetKey === "HOST") return "HOST" as const;
+  if (role.presetKey === "SHIFT_LEAD") return "MANAGER" as const;
+  if (role.permissions.includes("CORRECT_RECENT_ACTION")) return "MANAGER" as const;
+  if (
+    role.permissions.some((permission) =>
+      ["VIEW_CONTACT_DETAILS", "MANAGE_QUEUE", "SEAT_PARTIES"].includes(permission),
+    )
+  ) {
+    return "HOST" as const;
+  }
+  return "FLOOR_STAFF" as const;
 }
 
 export async function createCustomStaffRole(formData: FormData) {
@@ -118,6 +166,7 @@ export async function revokeStaffInvite(formData: FormData) {
           id: invite.staffMemberId,
           restaurantId: membership.restaurantId,
           accessStatus: "INVITED",
+          workAccessEnabled: false,
         },
         data: { accessStatus: "NOT_INVITED", revision: { increment: 1 } },
       });
@@ -167,4 +216,387 @@ export async function regenerateStaffInvite(
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Could not regenerate that invitation." };
   }
+}
+
+export async function saveStaffMember(formData: FormData) {
+  let manager: Awaited<ReturnType<typeof requireManager>>;
+  try {
+    manager = await requireManager();
+  } catch (error) {
+    return failStaffAction(error instanceof Error ? error.message : "Manager access is required.");
+  }
+  const { membership } = manager;
+  const staffId = String(formData.get("staffId") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
+  const jobTitle = String(formData.get("jobTitle") ?? "").trim().replace(/\s+/g, " ");
+  const rawEmail = String(formData.get("email") ?? "").trim();
+  const requestedRoleId = String(formData.get("staffRoleId") ?? "").trim();
+  const workAccessEnabled = formData.get("workAccessEnabled") === "on";
+
+  if (name.length < 2 || name.length > 80) {
+    return failStaffAction("Enter a staff name between 2 and 80 characters.");
+  }
+  if (jobTitle.length < 2 || jobTitle.length > 80) {
+    return failStaffAction("Enter a job title between 2 and 80 characters.");
+  }
+  if (rawEmail && !isValidStaffEmail(rawEmail)) {
+    return failStaffAction("Enter a valid Halina account email address.");
+  }
+  if (workAccessEnabled && !rawEmail) {
+    return failStaffAction("A verified Halina email is required when work access is enabled.");
+  }
+
+  let contact: string | null;
+  try {
+    contact = optionalText(formData, "contact", 160);
+  } catch {
+    return failStaffAction("Contact details must be 160 characters or fewer.");
+  }
+  const email = rawEmail ? normalizeStaffEmail(rawEmail) : null;
+  const now = new Date();
+
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        const existing = staffId
+          ? await tx.staffMember.findFirst({
+              where: {
+                id: staffId,
+                restaurantId: membership.restaurantId,
+                archivedAt: null,
+              },
+              select: {
+                id: true,
+                emailNormalized: true,
+                workAccessEnabled: true,
+                staffRoleId: true,
+                membershipId: true,
+              },
+            })
+          : null;
+        if (staffId && !existing) {
+          throw new Error("That staff record is no longer available.");
+        }
+
+        if (email) {
+          const duplicate = await tx.staffMember.findFirst({
+            where: {
+              restaurantId: membership.restaurantId,
+              emailNormalized: email,
+              archivedAt: null,
+              ...(staffId ? { id: { not: staffId } } : {}),
+            },
+            select: { id: true },
+          });
+          if (duplicate) {
+            throw new Error(
+              "That email is already assigned to another staff record in this restaurant.",
+            );
+          }
+        }
+
+        let role = requestedRoleId
+          ? await tx.staffRole.findFirst({
+              where: {
+                id: requestedRoleId,
+                restaurantId: membership.restaurantId,
+                archivedAt: null,
+              },
+              select: { id: true, presetKey: true, permissions: true },
+            })
+          : null;
+        if (!role && existing?.staffRoleId) {
+          role = await tx.staffRole.findFirst({
+            where: {
+              id: existing.staffRoleId,
+              restaurantId: membership.restaurantId,
+              archivedAt: null,
+            },
+            select: { id: true, presetKey: true, permissions: true },
+          });
+        }
+        if (!role) {
+          role = await tx.staffRole.findFirst({
+            where: {
+              restaurantId: membership.restaurantId,
+              presetKey: "FLOOR_STAFF",
+              archivedAt: null,
+            },
+            select: { id: true, presetKey: true, permissions: true },
+          });
+        }
+        if (!role) throw new Error("Select a valid staff role.");
+        const permissionPreset = presetForRole(role);
+
+        if (existing) {
+          const identityChanged =
+            existing.emailNormalized !== email ||
+            existing.workAccessEnabled !== workAccessEnabled;
+          await tx.staffMember.update({
+            where: { id: existing.id },
+            data: {
+              name,
+              jobTitle,
+              contact,
+              email,
+              emailNormalized: email,
+              permissionPreset,
+              staffRoleId: role.id,
+              workAccessEnabled,
+              accessStatus: workAccessEnabled ? "WHITELISTED" : "ACCESS_DISABLED",
+              ...(identityChanged && existing.membershipId
+                ? { membershipId: null }
+                : {}),
+              revision: { increment: 1 },
+            },
+          });
+          if (identityChanged || !workAccessEnabled) {
+            await tx.staffWorkSession.updateMany({
+              where: { staffMemberId: existing.id, endedAt: null },
+              data: { endedAt: now },
+            });
+            if (existing.membershipId) {
+              await tx.restaurantMembership.updateMany({
+                where: {
+                  id: existing.membershipId,
+                  restaurantId: membership.restaurantId,
+                  role: "STAFF",
+                },
+                data: { active: false },
+              });
+            }
+            await tx.staffInvite.updateMany({
+              where: {
+                staffMemberId: existing.id,
+                acceptedAt: null,
+                revokedAt: null,
+              },
+              data: { revokedAt: now },
+            });
+          }
+        } else {
+          await tx.staffMember.create({
+            data: {
+              restaurantId: membership.restaurantId,
+              name,
+              jobTitle,
+              contact,
+              email,
+              emailNormalized: email,
+              permissionPreset,
+              staffRoleId: role.id,
+              workAccessEnabled,
+              accessStatus: workAccessEnabled ? "WHITELISTED" : "ACCESS_DISABLED",
+            },
+          });
+        }
+      },
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error) {
+    console.error("[halina:staff-save]", error);
+    return failStaffAction(
+      error instanceof Error ? error.message : "Halina could not save that staff record.",
+    );
+  }
+
+  return finishStaffAction(staffId ? "Staff record updated." : "Staff member added.");
+}
+
+export async function setStaffActive(formData: FormData) {
+  let manager: Awaited<ReturnType<typeof requireManager>>;
+  try {
+    manager = await requireManager();
+  } catch (error) {
+    return failStaffAction(error instanceof Error ? error.message : "Manager access is required.");
+  }
+  const { membership } = manager;
+  const staffId = String(formData.get("staffId") ?? "");
+  const active = String(formData.get("active") ?? "") === "true";
+  const now = new Date();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const staff = await tx.staffMember.findFirst({
+        where: {
+          id: staffId,
+          restaurantId: membership.restaurantId,
+          archivedAt: null,
+        },
+        select: { id: true, workAccessEnabled: true, membershipId: true },
+      });
+      if (!staff) throw new Error("That staff record is no longer available.");
+      await tx.staffMember.update({
+        where: { id: staff.id },
+        data: {
+          active,
+          accessStatus:
+            active && staff.workAccessEnabled ? "WHITELISTED" : "ACCESS_DISABLED",
+          ...(!active && staff.membershipId ? { membershipId: null } : {}),
+          revision: { increment: 1 },
+        },
+      });
+      if (!active) {
+        await tx.staffWorkSession.updateMany({
+          where: { staffMemberId: staff.id, endedAt: null },
+          data: { endedAt: now },
+        });
+        if (staff.membershipId) {
+          await tx.restaurantMembership.updateMany({
+            where: {
+              id: staff.membershipId,
+              restaurantId: membership.restaurantId,
+              role: "STAFF",
+            },
+            data: { active: false },
+          });
+        }
+      }
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    console.error("[halina:staff-status]", error);
+    return failStaffAction(
+      error instanceof Error ? error.message : "Halina could not change staff status.",
+    );
+  }
+
+  return finishStaffAction(
+    active ? "Staff member reactivated." : "Staff member deactivated and clocked out.",
+  );
+}
+
+export async function archiveStaffMember(formData: FormData) {
+  let manager: Awaited<ReturnType<typeof requireManager>>;
+  try {
+    manager = await requireManager();
+  } catch (error) {
+    return failStaffAction(error instanceof Error ? error.message : "Manager access is required.");
+  }
+  const { membership } = manager;
+  const staffId = String(formData.get("staffId") ?? "");
+  const now = new Date();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const staff = await tx.staffMember.findFirst({
+        where: {
+          id: staffId,
+          restaurantId: membership.restaurantId,
+          archivedAt: null,
+        },
+        select: { id: true, membershipId: true },
+      });
+      if (!staff) throw new Error("That staff record is no longer available.");
+      await tx.staffMember.update({
+        where: { id: staff.id },
+        data: {
+          active: false,
+          workAccessEnabled: false,
+          accessStatus: "ACCESS_DISABLED",
+          emailNormalized: null,
+          membershipId: null,
+          archivedAt: now,
+          revision: { increment: 1 },
+        },
+      });
+      await tx.staffWorkSession.updateMany({
+        where: { staffMemberId: staff.id, endedAt: null },
+        data: { endedAt: now },
+      });
+      await tx.staffInvite.updateMany({
+        where: { staffMemberId: staff.id, acceptedAt: null, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      if (staff.membershipId) {
+        await tx.restaurantMembership.updateMany({
+          where: {
+            id: staff.membershipId,
+            restaurantId: membership.restaurantId,
+            role: "STAFF",
+          },
+          data: { active: false },
+        });
+      }
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    console.error("[halina:staff-archive]", error);
+    return failStaffAction(
+      error instanceof Error ? error.message : "Halina could not archive that staff record.",
+    );
+  }
+
+  return finishStaffAction("Staff record archived and work access removed.");
+}
+
+export async function forceClockOutStaff(formData: FormData) {
+  let manager: Awaited<ReturnType<typeof requireManager>>;
+  try {
+    manager = await requireManager();
+  } catch (error) {
+    return failStaffAction(error instanceof Error ? error.message : "Manager access is required.");
+  }
+  const { membership } = manager;
+  const staffId = String(formData.get("staffId") ?? "");
+  const staff = await prisma.staffMember.findFirst({
+    where: {
+      id: staffId,
+      restaurantId: membership.restaurantId,
+      archivedAt: null,
+    },
+    select: { id: true },
+  });
+  if (!staff) return failStaffAction("That staff record is no longer available.");
+
+  await prisma.staffWorkSession.updateMany({
+    where: { staffMemberId: staff.id, endedAt: null },
+    data: { endedAt: new Date() },
+  });
+  return finishStaffAction("Active work sessions for that staff member were ended.");
+}
+
+export async function setRestaurantStaffPin(formData: FormData) {
+  let manager: Awaited<ReturnType<typeof requireManager>>;
+  try {
+    manager = await requireManager();
+  } catch (error) {
+    return failStaffAction(error instanceof Error ? error.message : "Manager access is required.");
+  }
+  const { membership } = manager;
+  const pin = String(formData.get("pin") ?? "").trim();
+  if (!isValidStaffPin(pin)) {
+    return failStaffAction("Staff clock-in PIN must contain exactly four digits.");
+  }
+
+  try {
+    await prisma.restaurant.update({
+      where: { id: membership.restaurantId },
+      data: {
+        staffPinHash: hashStaffPin(pin),
+        staffPinChangedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error("[halina:staff-pin-set]", error);
+    return failStaffAction("Halina could not save the staff PIN.");
+  }
+  return finishStaffAction(
+    "Restaurant staff PIN updated. Existing clocked-in sessions remain active.",
+  );
+}
+
+export async function endAllStaffWorkSessions() {
+  let manager: Awaited<ReturnType<typeof requireManager>>;
+  try {
+    manager = await requireManager();
+  } catch (error) {
+    return failStaffAction(error instanceof Error ? error.message : "Manager access is required.");
+  }
+  await prisma.staffWorkSession.updateMany({
+    where: {
+      restaurantId: manager.membership.restaurantId,
+      endedAt: null,
+    },
+    data: { endedAt: new Date() },
+  });
+  return finishStaffAction("All active staff work sessions were ended.");
 }
