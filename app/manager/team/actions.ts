@@ -235,6 +235,9 @@ export async function archiveStaffMember(formData: FormData) {
           active: false,
           workAccessEnabled: false,
           accessStatus: "ACCESS_DISABLED",
+          // Keep the display email for history, but release its normalized
+          // whitelist key so the restaurant can later hire/re-add that account.
+          emailNormalized: null,
           archivedAt: now,
         },
       });
