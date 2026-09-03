@@ -34,6 +34,7 @@ enum StaffAccessStatus {
   NOT_INVITED
   INVITED
   ACTIVE
+  WHITELISTED
   ACCESS_DISABLED
 }
 
@@ -151,6 +152,8 @@ model Profile {
   staffInvitesCreated    StaffInvite[]          @relation("StaffInviteCreatedBy")
   staffInvitesRedeemed   StaffInvite[]          @relation("StaffInviteRedeemedBy")
   inviteAttempts         StaffInviteAttempt[]
+  staffWorkSessions      StaffWorkSession[]
+  staffPinAttempts       StaffPinAttempt[]
   adminAuditLogs         AdminAuditLog[]
   adminAuthAttempts      AdminAuthAttempt[]
   importBatches          SyntheticImportBatch[]
@@ -169,12 +172,16 @@ model Restaurant {
   environment             RestaurantEnvironment  @default(LIVE)
   revision                Int                    @default(0)
   archivedAt              DateTime?
+  staffPinHash            String?
+  staffPinChangedAt       DateTime?
   lastOperationalUpdateAt DateTime?
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
   memberships             RestaurantMembership[]
   staffMembers            StaffMember[]
   staffInvites            StaffInvite[]
+  staffWorkSessions       StaffWorkSession[]
+  staffPinAttempts        StaffPinAttempt[]
   floorPlans              FloorPlan[]
   diningTables            DiningTable[]
   tableStatusEvents       TableStatusEvent[]
@@ -213,28 +220,34 @@ model RestaurantMembership {
 }
 
 model StaffMember {
-  id               String                @id @default(uuid()) @db.Uuid
-  restaurantId     String                @db.Uuid
-  membershipId     String?               @unique @db.Uuid
-  staffRoleId      String?               @db.Uuid
-  name             String
-  jobTitle         String
-  contact          String?
-  email            String?
-  permissionPreset StaffPermissionPreset
-  accessStatus     StaffAccessStatus     @default(NOT_INVITED)
-  active           Boolean               @default(true)
-  archivedAt       DateTime?
-  revision         Int                   @default(0)
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  restaurant       Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  membership       RestaurantMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
-  staffRole        StaffRole?            @relation(fields: [staffRoleId], references: [id], onDelete: SetNull)
-  invites          StaffInvite[]
+  id                String                @id @default(uuid()) @db.Uuid
+  restaurantId      String                @db.Uuid
+  membershipId      String?               @unique @db.Uuid
+  staffRoleId       String?               @db.Uuid
+  name              String
+  jobTitle          String
+  contact           String?
+  email             String?
+  emailNormalized   String?
+  permissionPreset  StaffPermissionPreset
+  accessStatus      StaffAccessStatus     @default(NOT_INVITED)
+  workAccessEnabled Boolean                @default(false)
+  active            Boolean               @default(true)
+  archivedAt        DateTime?
+  lastClockedInAt   DateTime?
+  revision          Int                   @default(0)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  restaurant        Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  membership        RestaurantMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  staffRole         StaffRole?            @relation(fields: [staffRoleId], references: [id], onDelete: SetNull)
+  invites           StaffInvite[]
+  workSessions      StaffWorkSession[]
 
+  @@unique([restaurantId, emailNormalized])
   @@index([restaurantId, active])
   @@index([restaurantId, email])
+  @@index([restaurantId, workAccessEnabled, emailNormalized])
   @@index([staffRoleId])
 }
 
@@ -301,6 +314,40 @@ model StaffInviteAttempt {
   @@index([profileId, attemptedAt])
   @@index([ipHash, attemptedAt])
   @@index([inviteId])
+}
+
+// Staff still authenticate with a normal Halina account. This temporary
+// server-side session records that the verified account has passed the
+// restaurant's work-mode PIN for the current shift.
+model StaffWorkSession {
+  id            String      @id @default(uuid()) @db.Uuid
+  restaurantId  String      @db.Uuid
+  staffMemberId String      @db.Uuid
+  profileId     String      @db.Uuid
+  tokenHash     String      @unique
+  startedAt     DateTime    @default(now())
+  lastSeenAt    DateTime    @default(now())
+  expiresAt     DateTime
+  endedAt       DateTime?
+  restaurant    Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staffMember   StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Restrict)
+  profile       Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, endedAt, expiresAt])
+  @@index([staffMemberId, endedAt, expiresAt])
+  @@index([restaurantId, endedAt, expiresAt])
+}
+
+model StaffPinAttempt {
+  id           String     @id @default(uuid()) @db.Uuid
+  restaurantId String     @db.Uuid
+  profileId    String     @db.Uuid
+  successful   Boolean    @default(false)
+  attemptedAt  DateTime   @default(now())
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  profile      Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, profileId, attemptedAt])
 }
 
 model FloorPlan {
