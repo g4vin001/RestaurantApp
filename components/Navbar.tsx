@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { logout } from "@/app/login/actions";
+import { hasEligibleWorkplace } from "@/lib/staff/access";
 import { createClient } from "@/lib/supabase/server";
 
 export async function Navbar() {
@@ -27,6 +28,16 @@ export async function Navbar() {
   const supabase = await createClient();
   const response = await supabase.auth.getUser();
   const user = response.data.user;
+  let showWork = false;
+  if (user) {
+    try {
+      showWork = await hasEligibleWorkplace(user);
+    } catch (error) {
+      // Keep the global navigation usable during a database outage or while an
+      // additive staff migration is still rolling out.
+      console.error("[halina:navbar-work-access]", error);
+    }
+  }
 
   return (
     <header className="border-b border-stone-200 bg-white">
@@ -42,6 +53,11 @@ export async function Navbar() {
           {user ? (
             <>
               <Link href="/reservations">My reservations</Link>
+              {showWork && (
+                <Link href="/work" className="font-medium text-emerald-700">
+                  Work
+                </Link>
+              )}
               <form action={logout}>
                 <button type="submit" className="font-medium text-stone-700">
                   Log out
