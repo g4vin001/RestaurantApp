@@ -435,6 +435,39 @@ describe("manager operation commands", () => {
     expect(seated.tables.find((table) => table.id === "table-06")?.status).toBe(
       "OCCUPIED",
     );
+  it("approves or rejects a pending reservation through the shared domain rule", () => {
+    const state = createDemoState(now);
+    const pending = {
+      ...state.reservations[0],
+      id: "pending-demo-reservation",
+      status: "PENDING_APPROVAL" as const,
+      updatedAt: occurredAt,
+    };
+    const withPending = {
+      ...state,
+      reservations: [...state.reservations, pending],
+    };
+
+    const approved = setReservationStatus(
+      withPending,
+      pending.id,
+      "CONFIRMED",
+      occurredAt,
+    );
+    expect(
+      successful(approved).reservations.find((item) => item.id === pending.id)
+        ?.status,
+    ).toBe("CONFIRMED");
+
+    const rejected = setReservationStatus(
+      withPending,
+      pending.id,
+      "CANCELLED",
+      occurredAt,
+    );
+    expect(
+      successful(rejected).reservations.find((item) => item.id === pending.id),
+    ).toMatchObject({ status: "CANCELLED", cancelledAt: occurredAt });
   });
 
   it("returns a party-size-aware wait suggestion", () => {

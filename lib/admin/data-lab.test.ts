@@ -1,7 +1,32 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { parseDataLabUpload, parseRestaurantTimestamp, validateDataLabRows } from "./data-lab";
 
 describe("Data Lab import", () => {
+  it("ships a valid synthetic history CSV for the documented demo tables", async () => {
+    const bytes = await readFile(
+      new URL("../../examples/data-lab/halina_demo_history.csv", import.meta.url),
+    );
+    const rows = await parseDataLabUpload({
+      filename: "halina_demo_history.csv",
+      csvKind: "history",
+      bytes,
+    });
+    const validation = validateDataLabRows(rows, [
+      { label: "T1", capacity: 2 },
+      { label: "T2", capacity: 4 },
+      { label: "T3", capacity: 6 },
+      { label: "B1", capacity: 4 },
+      { label: "B2", capacity: 6 },
+      { label: "P1", capacity: 2 },
+      { label: "P2", capacity: 4 },
+      { label: "VIP1", capacity: 8 },
+    ]);
+
+    expect(rows.history).toHaveLength(32);
+    expect(validation).toEqual({ errors: [], warnings: [] });
+  });
+
   it("interprets offset-less timestamps in Asia/Manila", () => {
     expect(parseRestaurantTimestamp("2026-08-27 18:30:00")).toBe("2026-08-27T10:30:00.000Z");
     expect(parseRestaurantTimestamp("2026-08-27T18:30:00+08:00")).toBe("2026-08-27T10:30:00.000Z");

@@ -306,6 +306,107 @@ describeWithDatabase("Prisma operations repository", () => {
     ).toEqual({ status: "SEATED", completedAt: null });
   });
 
+  it("approves and rejects pending reservations with revisions, tenancy, and idempotency", async () => {
+    const membership = await client.restaurantMembership.findUniqueOrThrow({
+      where: {
+        restaurantId_profileId: { restaurantId, profileId: ownerId },
+      },
+    });
+    const repository = new PrismaOperationsRepository(client, {
+      profileId: ownerId,
+      restaurantId,
+      membershipId: membership.id,
+      membershipRole: membership.role,
+    });
+    const [pendingApproval, pendingRejection, otherTenantReservation] =
+      await Promise.all([
+        client.reservation.create({
+          data: {
+            restaurantId,
+            partyName: "Synthetic approval",
+            partySize: 2,
+            scheduledAt: new Date(Date.now() + 3 * 60 * 60_000),
+            status: "PENDING_APPROVAL",
+          },
+        }),
+        client.reservation.create({
+          data: {
+            restaurantId,
+            partyName: "Synthetic rejection",
+            partySize: 2,
+            scheduledAt: new Date(Date.now() + 5 * 60 * 60_000),
+            status: "PENDING_APPROVAL",
+          },
+        }),
+        client.reservation.create({
+          data: {
+            restaurantId: otherRestaurantId,
+            partyName: "Other tenant request",
+            partySize: 2,
+            scheduledAt: new Date(Date.now() + 7 * 60 * 60_000),
+            status: "PENDING_APPROVAL",
+          },
+        }),
+      ]);
+
+    const approve = {
+      type: "SET_RESERVATION_STATUS" as const,
+      commandId: "12345678-1234-4234-8234-123456789abc",
+      reservationId: pendingApproval.id,
+      expectedRevision: pendingApproval.revision,
+      status: "CONFIRMED" as const,
+    };
+    await repository.execute(approve);
+    await repository.execute(approve);
+    expect(
+      await client.reservation.findUniqueOrThrow({
+        where: { id: pendingApproval.id },
+        select: { status: true, revision: true },
+      }),
+    ).toEqual({ status: "CONFIRMED", revision: 1 });
+    expect(
+      await client.operationCommand.count({ where: { id: approve.commandId } }),
+    ).toBe(1);
+
+    await expect(
+      repository.execute({
+        ...approve,
+        commandId: "12345678-1234-4234-8234-123456789abd",
+        status: "CANCELLED",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    await repository.execute({
+      type: "SET_RESERVATION_STATUS",
+      commandId: "12345678-1234-4234-8234-123456789abe",
+      reservationId: pendingRejection.id,
+      expectedRevision: pendingRejection.revision,
+      status: "CANCELLED",
+    });
+    expect(
+      await client.reservation.findUniqueOrThrow({
+        where: { id: pendingRejection.id },
+        select: { status: true, cancelledAt: true },
+      }),
+    ).toMatchObject({ status: "CANCELLED", cancelledAt: expect.any(Date) });
+
+    await expect(
+      repository.execute({
+        type: "SET_RESERVATION_STATUS",
+        commandId: "12345678-1234-4234-8234-123456789abf",
+        reservationId: otherTenantReservation.id,
+        expectedRevision: otherTenantReservation.revision,
+        status: "CONFIRMED",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      await client.reservation.findUniqueOrThrow({
+        where: { id: otherTenantReservation.id },
+        select: { status: true },
+      }),
+    ).toEqual({ status: "PENDING_APPROVAL" });
+  });
+
   it("rejects assigning a reservation to another tenant's table", async () => {
     const membership = await client.restaurantMembership.findUniqueOrThrow({
       where: {

@@ -14,7 +14,7 @@ import {
   UsersRound,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { ReservationTablePicker } from "@/components/manager/ReservationTablePicker";
 import { Modal } from "@/components/ui/Modal";
@@ -24,49 +24,17 @@ import {
   recommendTables,
 } from "@/lib/domain/operations";
 import type { QueueEntry, Reservation } from "@/lib/domain/types";
+import { useLiveNow } from "@/lib/hooks/use-live-now";
+import {
+  formatRestaurantDateTime,
+  restaurantDateKey,
+  restaurantDateTimeInput,
+  restaurantWallTimeToUtc,
+} from "@/lib/time/restaurant-time";
 
 const inputClass =
   "mt-1 min-h-11 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm text-stone-800 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-100";
 const labelClass = "text-sm font-semibold text-stone-700";
-
-function manilaDateKey(value: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function manilaDateTimeInput(value: string | Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value));
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
-}
-
-function useNow(lastUpdatedAt: string) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    setNow(new Date());
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, [lastUpdatedAt]);
-  return now;
-}
 
 function QueueStatus({ status }: { status: QueueEntry["status"] }) {
   const styles: Record<QueueEntry["status"], string> = {
@@ -99,7 +67,11 @@ function ReservationStatus({ status }: { status: Reservation["status"] }) {
     <span
       className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${styles[status]}`}
     >
-      {status}
+      {status === "PENDING_APPROVAL"
+        ? "Pending approval"
+        : status === "NO_SHOW"
+          ? "No-show"
+          : status.charAt(0) + status.slice(1).toLowerCase()}
     </span>
   );
 }
@@ -239,15 +211,17 @@ function ReservationForm({
   onSubmit,
   onCancel,
   tables,
+  timeZone,
 }: {
   reservation?: Reservation;
   onSubmit: (form: FormData) => void;
   onCancel: () => void;
   tables: Array<{ id: string; label: string; capacity: number }>;
+  timeZone: string;
 }) {
   const initialDate = reservation
-    ? manilaDateTimeInput(reservation.scheduledAt)
-    : manilaDateTimeInput(new Date(Date.now() + 60 * 60_000));
+    ? restaurantDateTimeInput(reservation.scheduledAt, timeZone)
+    : restaurantDateTimeInput(new Date(Date.now() + 60 * 60_000), timeZone);
   return (
     <form action={onSubmit} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -338,7 +312,8 @@ function ReservationForm({
 export function QueueManager() {
   const demo = useDemo();
   const { state } = demo;
-  const now = useNow(state.lastUpdatedAt);
+  const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const timeZone = state.restaurant.timezone;
   const [tab, setTab] = useState<"queue" | "reservations">("queue");
   const [rushMode, setRushMode] = useState(false);
   const [reservationDate, setReservationDate] = useState("");
@@ -357,7 +332,7 @@ export function QueueManager() {
   const [resolveTarget, setResolveTarget] = useState<{
     kind: "queue" | "reservation";
     id: string;
-    action: "cancel" | "no-show";
+    action: "cancel" | "reject" | "no-show";
   } | null>(null);
   // Set when a seat/move was refused because the table is booked soon. Holds
   // the retry so the manager can go ahead once they have seen the warning.
@@ -434,7 +409,7 @@ export function QueueManager() {
   const visibleReservations = reservationDate
     ? reservations.filter(
         (reservation) =>
-          manilaDateKey(reservation.scheduledAt) === reservationDate,
+          restaurantDateKey(reservation.scheduledAt, timeZone) === reservationDate,
       )
     : reservations;
   const seatRecord =
@@ -483,15 +458,15 @@ export function QueueManager() {
 
   const submitReservation = async (form: FormData) => {
     const localSchedule = String(form.get("scheduledAt") ?? "");
-    const scheduledAt = Date.parse(`${localSchedule}:00+08:00`);
-    if (Number.isNaN(scheduledAt)) {
+    const scheduledAt = restaurantWallTimeToUtc(localSchedule, timeZone);
+    if (!scheduledAt) {
       notify("error", "Choose a valid reservation date and time.");
       return;
     }
     const input = {
       partyName: String(form.get("partyName") ?? ""),
       partySize: Number(form.get("partySize")),
-      scheduledAt: new Date(scheduledAt).toISOString(),
+      scheduledAt: scheduledAt.toISOString(),
       tableId: String(form.get("tableId") ?? "") || undefined,
       contact: String(form.get("contact") ?? ""),
       notes: String(form.get("notes") ?? ""),
@@ -556,18 +531,22 @@ export function QueueManager() {
     if (!resolveTarget) return;
     const result =
       resolveTarget.kind === "queue"
-        ? resolveTarget.action === "cancel"
+        ? resolveTarget.action === "cancel" || resolveTarget.action === "reject"
           ? demo.cancelQueue(resolveTarget.id)
           : demo.noShowQueue(resolveTarget.id)
         : demo.changeReservationStatus(
             resolveTarget.id,
-            resolveTarget.action === "cancel" ? "CANCELLED" : "NO_SHOW",
+            resolveTarget.action === "cancel" || resolveTarget.action === "reject"
+              ? "CANCELLED"
+              : "NO_SHOW",
           );
     if (
       await handle(
         await result,
-        resolveTarget.action === "cancel"
-          ? "Record cancelled."
+        resolveTarget.action === "reject"
+          ? "Reservation request rejected."
+          : resolveTarget.action === "cancel"
+            ? "Record cancelled."
           : "Record marked no-show.",
       )
     )
@@ -845,7 +824,7 @@ export function QueueManager() {
               return (
                 <article
                   key={reservation.id}
-                  className="flex flex-col justify-between gap-4 p-5 lg:flex-row lg:items-center"
+                  className={`flex flex-col justify-between gap-4 p-5 lg:flex-row lg:items-center ${reservation.status === "PENDING_APPROVAL" ? "bg-amber-50/50" : ""}`}
                 >
                   <div className="flex items-start gap-4">
                     <span className="grid h-11 w-11 place-items-center rounded-xl bg-violet-50 text-violet-700">
@@ -859,11 +838,7 @@ export function QueueManager() {
                         <ReservationStatus status={reservation.status} />
                       </div>
                       <p className="mt-1 text-sm text-stone-500">
-                        {new Intl.DateTimeFormat("en-PH", {
-                          timeZone: "Asia/Manila",
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        }).format(new Date(reservation.scheduledAt))}{" "}
+                        {formatRestaurantDateTime(reservation.scheduledAt, timeZone)}{" "}
                         · {reservation.partySize} guests ·{" "}
                         {table?.label ?? "Unassigned"}
                       </p>
@@ -885,10 +860,10 @@ export function QueueManager() {
                                 reservation.id,
                                 "CONFIRMED",
                               ),
-                              "Reservation approved.",
+                              "Reservation request approved.",
                             )
                           }
-                          className="min-h-10 rounded-lg bg-emerald-800 px-3 text-xs font-semibold text-white"
+                          className="min-h-10 rounded-lg bg-emerald-800 px-4 text-xs font-semibold text-white"
                         >
                           Approve
                         </button>
@@ -898,12 +873,12 @@ export function QueueManager() {
                             setResolveTarget({
                               kind: "reservation",
                               id: reservation.id,
-                              action: "cancel",
+                              action: "reject",
                             })
                           }
-                          className="min-h-10 rounded-lg px-3 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                          className="min-h-10 rounded-lg border border-rose-200 bg-white px-4 text-xs font-semibold text-rose-700"
                         >
-                          Cancel
+                          Reject request
                         </button>
                       </>
                     )}
@@ -1071,6 +1046,7 @@ export function QueueManager() {
             onSubmit={submitReservation}
             onCancel={() => setReservationModal(null)}
             tables={state.tables.filter((table) => table.active)}
+            timeZone={timeZone}
           />
         )}
       </Modal>
@@ -1130,9 +1106,15 @@ export function QueueManager() {
         title={
           resolveTarget?.action === "no-show"
             ? "Mark as no-show?"
-            : "Cancel this record?"
+            : resolveTarget?.action === "reject"
+              ? "Reject this reservation request?"
+              : "Cancel this record?"
         }
-        description="This changes the operational outcome and removes it from the active list."
+        description={
+          resolveTarget?.action === "reject"
+            ? "The customer will see this reservation as cancelled, and it will stop reserving capacity."
+            : "This changes the operational outcome and removes it from the active list."
+        }
         onClose={() => setResolveTarget(null)}
       >
         <div className="flex justify-end gap-3">

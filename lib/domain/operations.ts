@@ -976,7 +976,12 @@ export function updateReservation(
 export function setReservationStatus(
   state: DemoState,
   reservationId: string,
-  status: "CONFIRMED" | "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED",
+  status:
+    | "CONFIRMED"
+    | "ARRIVED"
+    | "CANCELLED"
+    | "NO_SHOW"
+    | "COMPLETED",
   occurredAt: string,
   actor = "Demo manager",
 ): DomainResult {
@@ -1030,6 +1035,9 @@ export function setReservationStatus(
                 arrivedAt: status === "ARRIVED" ? occurredAt : item.arrivedAt,
                 completedAt:
                   status === "COMPLETED" ? occurredAt : item.completedAt,
+                cancelledAt:
+                  status === "CANCELLED" ? occurredAt : item.cancelledAt,
+                noShowAt: status === "NO_SHOW" ? occurredAt : item.noShowAt,
                 updatedAt: occurredAt,
               }
             : item,

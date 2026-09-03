@@ -15,6 +15,7 @@ type PublicRestaurantRow = {
   name: string;
   location: string;
   cuisineType: string | null;
+  timezone: string;
   operatingSettings: unknown;
   walkInAvailability: string;
   lastOperationalUpdateAt: Date | null;
@@ -46,7 +47,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
       id: restaurant.id,
       name: restaurant.name,
       location: restaurant.location,
-      timezone: "Asia/Manila",
+      timezone: restaurant.timezone || "Asia/Manila",
       isOpen: restaurant.walkInAvailability !== "PAUSED",
       cleaningTargetMinutes: finiteNumber(settings?.cleaningTargetMinutes, 12),
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
@@ -104,6 +105,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     restaurantId: restaurant.id,
     slug: restaurant.slug,
     cuisineType: restaurant.cuisineType ?? undefined,
+    timezone: restaurant.timezone || "Asia/Manila",
     ...base,
     lastUpdatedAt,
     publicFloor,
@@ -142,6 +144,7 @@ export async function fetchPublicRestaurantBySlug(
       name: true,
       location: true,
       cuisineType: true,
+      timezone: true,
       operatingSettings: true,
       walkInAvailability: true,
       lastOperationalUpdateAt: true,
@@ -244,6 +247,7 @@ export async function fetchPublicRestaurants(
       name: true,
       location: true,
       cuisineType: true,
+      timezone: true,
       operatingSettings: true,
       walkInAvailability: true,
       lastOperationalUpdateAt: true,

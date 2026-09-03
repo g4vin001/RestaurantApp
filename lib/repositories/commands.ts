@@ -109,7 +109,18 @@ export type DatabaseOperationsCommand =
       type: "SET_RESERVATION_STATUS";
       reservationId: string;
       expectedRevision: number;
-      status: "CONFIRMED" | "ARRIVED" | "CANCELLED" | "NO_SHOW" | "COMPLETED";
+      status:
+        | "CONFIRMED"
+        | "ARRIVED"
+        | "CANCELLED"
+        | "NO_SHOW"
+        | "COMPLETED";
+    })
+  | (CommandBase & {
+      type: "SEAT_RESERVATION";
+      reservationId: string;
+      expectedRevision: number;
+      tableIds: string[];
     })
   | (CommandBase &
       ReservationClashOverride & {

@@ -64,7 +64,7 @@ export function LiveRestaurantDetail({
 
       <PageCard className="mt-5">
         <p className="text-sm text-stone-500">
-          Last updated {formatLastUpdated(restaurant.lastUpdatedAt)}
+          Last updated {formatLastUpdated(restaurant.lastUpdatedAt, restaurant.timezone)}
         </p>
         {restaurant.reservedTables > 0 && (
           <p className="mt-2 text-sm text-stone-600">

@@ -38,7 +38,7 @@ export function RestaurantCard({ restaurant }: { restaurant: PublicRestaurantVie
         </Link>
       </div>
       <p className="mt-3 text-xs text-stone-400">
-        Updated {formatLastUpdated(restaurant.lastUpdatedAt)}
+        Updated {formatLastUpdated(restaurant.lastUpdatedAt, restaurant.timezone)}
       </p>
       {restaurant.stale && (
         <p className="mt-2 text-xs font-medium text-amber-700">

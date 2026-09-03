@@ -18,27 +18,100 @@ import { StatusPill } from "@/components/manager/StatusPill";
 import { minutesBetween } from "@/lib/domain/analytics";
 import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
-import type { DiningTable, TableStatus } from "@/lib/domain/types";
+import { useLiveNow } from "@/lib/hooks/use-live-now";
+import { formatRestaurantTime } from "@/lib/time/restaurant-time";
+import type {
+  DiningTable,
+  FloorElement,
+  TableStatus,
+} from "@/lib/domain/types";
 
-function useLiveNow(lastUpdatedAt: string) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    setNow(new Date());
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, [lastUpdatedAt]);
-  return now;
+function PublishedObject({ element }: { element: FloorElement }) {
+  const styles: Record<string, string> = {
+    ZONE: "border-dashed border-stone-300 bg-stone-100/50 text-stone-400",
+    KITCHEN: "border-stone-300 bg-stone-200/80 text-stone-600",
+    WAITING_AREA: "border-sky-200 bg-sky-50 text-sky-700",
+    HOST_STAND: "border-amber-200 bg-amber-50 text-amber-700",
+    DOOR: "border-stone-700 bg-stone-700 text-white",
+  };
+  return (
+    <div
+      className={`absolute flex items-center justify-center overflow-hidden rounded-lg border text-center text-[10px] font-semibold ${styles[element.type] ?? "border-stone-300 bg-white text-stone-600"}`}
+      style={{
+        left: `${(element.x / 1600) * 100}%`,
+        top: `${(element.y / 1000) * 100}%`,
+        width: `${(element.width / 1600) * 100}%`,
+        height: `${(element.height / 1000) * 100}%`,
+        transform: `rotate(${element.rotation}deg)`,
+        zIndex: element.zIndex,
+      }}
+    >
+      {element.label}
+    </div>
+  );
+}
+
+function PublishedTable({
+  element,
+  table,
+  selected,
+  onSelect,
+}: {
+  element: FloorElement;
+  table: DiningTable;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const colors: Record<TableStatus, string> = {
+    AVAILABLE: "border-emerald-300 bg-emerald-50",
+    HELD: "border-sky-300 bg-sky-50",
+    RESERVED: "border-violet-300 bg-violet-50",
+    OCCUPIED: "border-rose-300 bg-rose-50",
+    CLEANING: "border-amber-300 bg-amber-50",
+    OUT_OF_SERVICE: "border-stone-400 bg-stone-200",
+  };
+  const shape =
+    element.shape === "ROUND"
+      ? "rounded-full"
+      : element.shape === "BOOTH"
+        ? "rounded-2xl"
+        : "rounded-xl";
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`absolute grid place-items-center border-2 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${shape} ${colors[table.status]} ${selected ? "ring-3 ring-emerald-700 ring-offset-2" : ""}`}
+      style={{
+        left: `${(element.x / 1600) * 100}%`,
+        top: `${(element.y / 1000) * 100}%`,
+        width: `${(element.width / 1600) * 100}%`,
+        height: `${(element.height / 1000) * 100}%`,
+        transform: `rotate(${element.rotation}deg)`,
+        zIndex: element.zIndex,
+      }}
+      aria-label={`${table.label}, ${table.capacity} seats, ${tableStatusLabel(table.status)}`}
+    >
+      <span>
+        <strong className="block text-sm text-stone-900">{table.label}</strong>
+        <span className="mt-0.5 block text-[9px] font-medium uppercase tracking-wide text-stone-600">
+          {tableStatusLabel(table.status)}
+        </span>
+      </span>
+    </button>
+  );
 }
 
 function TableDetailPanel({
   table,
   now,
+  timeZone,
   events,
   onChange,
   onCorrect,
 }: {
   table: DiningTable;
   now: Date;
+  timeZone: string;
   events: Array<{
     id: string;
     previousStatus: TableStatus;
@@ -266,11 +339,7 @@ function TableDetailPanel({
                 <strong>{tableStatusLabel(event.newStatus)}</strong>
               </p>
               <p className="mt-0.5 text-stone-400">
-                {new Intl.DateTimeFormat("en-PH", {
-                  timeZone: "Asia/Manila",
-                  hour: "numeric",
-                  minute: "2-digit",
-                }).format(new Date(event.occurredAt))}
+                {formatRestaurantTime(event.occurredAt, timeZone)}
               </p>
             </div>
           ))}
@@ -291,7 +360,7 @@ export function LiveFloor() {
   const [view, setView] = useState<"map" | "list">("map");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const now = useLiveNow(state.lastUpdatedAt);
+  const now = useLiveNow(30_000, state.lastUpdatedAt);
   const version = useMemo(() => getActiveFloorVersion(state), [state]);
   const activeTables = state.tables.filter((table) => table.active);
 
@@ -422,6 +491,7 @@ export function LiveFloor() {
             <TableDetailPanel
               table={selected}
               now={now}
+              timeZone={state.restaurant.timezone}
               events={state.events.filter(
                 (event) => event.tableId === selected.id,
               )}

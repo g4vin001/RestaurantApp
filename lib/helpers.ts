@@ -1,11 +1,15 @@
-import type { TableStatus } from "@/lib/types";
+import type { TableStatus } from "@/lib/domain/types";
+import {
+  formatRestaurantDateTime,
+  formatRestaurantTime,
+} from "@/lib/time/restaurant-time";
 
-export function formatLastUpdated(date: string) {
-  return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(new Date(date));
+export function formatLastUpdated(date: string, timeZone?: string) {
+  return formatRestaurantTime(date, timeZone);
 }
 
-export function formatScheduledAt(date: Date | string) {
-  return new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(date));
+export function formatScheduledAt(date: Date | string, timeZone?: string) {
+  return formatRestaurantDateTime(date, timeZone);
 }
 
 export function statusClass(status: string) {
@@ -31,4 +35,4 @@ export function reservationStatusLabel(status: string) {
   return labels[status] ?? status;
 }
 
-export function isAvailable(status: TableStatus) { return status === "Available"; }
+export function isAvailable(status: TableStatus) { return status === "AVAILABLE"; }

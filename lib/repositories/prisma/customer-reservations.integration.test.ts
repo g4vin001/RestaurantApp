@@ -119,6 +119,30 @@ describeWithDatabase("customer reservation booking", () => {
     expect(later.reservationId).toBeTruthy();
   });
 
+  it("does not count cancelled reservations against booking capacity", async () => {
+    await client.reservation.create({
+      data: {
+        restaurantId,
+        customerProfileId: customerAId,
+        partyName: "Cancelled synthetic party",
+        partySize: TOTAL_CAPACITY,
+        scheduledAt,
+        status: "CANCELLED",
+        cancelledAt: new Date(scheduledAt.getTime() - 60_000),
+      },
+    });
+
+    const created = await createCustomerReservation(client, {
+      restaurantId,
+      customerProfileId: customerBId,
+      partyName: "Active synthetic party",
+      partySize: TOTAL_CAPACITY,
+      scheduledAt,
+    });
+
+    expect(created.reservationId).toBeTruthy();
+  });
+
   it("under real concurrent contention, exactly one of two conflicting bookings succeeds", async () => {
     const results = await Promise.allSettled([
       createCustomerReservation(client, {
