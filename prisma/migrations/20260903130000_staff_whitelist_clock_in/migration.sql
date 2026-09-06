@@ -71,6 +71,14 @@ CREATE TABLE IF NOT EXISTS "StaffPinAttempt" (
     CONSTRAINT "StaffPinAttempt_pkey" PRIMARY KEY ("id")
 );
 
+-- These are server-only operational tables in Supabase's exposed `public`
+-- schema. Keep RLS enabled as defense in depth and deny direct Data API access;
+-- trusted server/database roles continue to use the tables normally.
+ALTER TABLE "StaffWorkSession" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "StaffPinAttempt" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE "StaffWorkSession" FROM anon, authenticated;
+REVOKE ALL PRIVILEGES ON TABLE "StaffPinAttempt" FROM anon, authenticated;
+
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "StaffMember_restaurantId_emailNormalized_key"
 ON "StaffMember"("restaurantId", "emailNormalized");
@@ -98,6 +106,11 @@ ON "StaffWorkSession"("restaurantId", "endedAt", "expiresAt");
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "StaffPinAttempt_restaurantId_profileId_attemptedAt_idx"
 ON "StaffPinAttempt"("restaurantId", "profileId", "attemptedAt");
+
+-- Cover the profile foreign key independently. The composite index above
+-- starts with restaurantId and cannot support profile-only FK maintenance.
+CREATE INDEX IF NOT EXISTS "StaffPinAttempt_profileId_idx"
+ON "StaffPinAttempt"("profileId");
 
 -- AddForeignKey only when absent so a partially prepared development database
 -- can safely apply the migration once.
