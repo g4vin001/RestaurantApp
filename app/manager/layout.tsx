@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { OperationsProvider } from "@/components/demo/DemoProvider";
 import { ManagerShell } from "@/components/manager/ManagerShell";
+import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import type { OperationsState } from "@/lib/domain/types";
 import { prisma } from "@/lib/prisma";
@@ -12,7 +13,6 @@ import {
 } from "@/lib/repositories/operations";
 import { PrismaOperationsRepository } from "@/lib/repositories/prisma/prisma-operations";
 import { reportDataError } from "@/lib/server/data-error";
-import { createClient } from "@/lib/supabase/server";
 
 export default async function ManagerLayout({
   children,
@@ -40,29 +40,19 @@ export default async function ManagerLayout({
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentAuthIdentity();
 
   if (!user) redirect("/login?redirectTo=/manager");
 
-  let profile: { displayName: string } | null;
   let membership: Awaited<ReturnType<typeof getActiveManagerMembership>>;
   try {
-    [profile, membership] = await Promise.all([
-      prisma.profile.findUnique({
-        where: { id: user.id },
-        select: { displayName: true },
-      }),
-      getActiveManagerMembership(user.id),
-    ]);
+    membership = await getActiveManagerMembership(user.id);
   } catch (error) {
     const reference = reportDataError("manager-context", error);
     return <DatabaseUnavailable reference={reference} />;
   }
 
-  if (!profile || !membership) redirect("/onboarding/restaurant");
+  if (!membership) redirect("/onboarding/restaurant");
 
   const repository = new PrismaOperationsRepository(prisma, {
     profileId: user.id,
@@ -89,7 +79,10 @@ export default async function ManagerLayout({
       initialState={initialState}
     >
       <div className="manager-app">
-        <ManagerShell demoMode={false} profileName={profile.displayName}>
+        <ManagerShell
+          demoMode={false}
+          profileName={membership.profile.displayName}
+        >
           {children}
         </ManagerShell>
       </div>

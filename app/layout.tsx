@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Navbar } from "@/components/Navbar";
-import { DemoProvider } from "@/components/demo/DemoProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,10 +14,19 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <DemoProvider>
+        <Suspense
+          fallback={
+            <header className="border-b border-stone-200 bg-white">
+              <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+                <span className="text-xl font-bold text-emerald-800">Halina</span>
+                <span className="text-sm text-stone-400">Loading account…</span>
+              </nav>
+            </header>
+          }
+        >
           <Navbar />
-          {children}
-        </DemoProvider>
+        </Suspense>
+        {children}
       </body>
     </html>
   );

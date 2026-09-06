@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { logout } from "@/app/login/actions";
+import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { hasEligibleWorkplace } from "@/lib/staff/access";
-import { createClient } from "@/lib/supabase/server";
 
 export async function Navbar() {
   if (process.env.NEXT_PUBLIC_HALINA_DEMO_MODE === "true") {
@@ -22,9 +22,7 @@ export async function Navbar() {
     );
   }
 
-  const supabase = await createClient();
-  const response = await supabase.auth.getUser();
-  const user = response.data.user;
+  const user = await getCurrentAuthIdentity();
   let hasWork = false;
   if (user) {
     try {

@@ -190,6 +190,7 @@ model StaffMember {
   @@unique([restaurantId, emailNormalized])
   @@index([restaurantId, active])
   @@index([restaurantId, workAccessEnabled, emailNormalized])
+  @@index([emailNormalized, workAccessEnabled, active, archivedAt])
 }
 
 // Staff never gets a separate Halina account type. A normal authenticated

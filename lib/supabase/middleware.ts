@@ -29,18 +29,19 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Do not run any code between createServerClient and getUser().
+  // Do not run any code between createServerClient and getClaims().
   // A simple mistake could make it very hard to debug issues with users
   // being randomly logged out.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims verifies the access-token signature and refreshes it when
+  // necessary. With Supabase's asymmetric signing keys this avoids the remote
+  // Auth lookup that previously delayed every page, including public routes.
+  const { data } = await supabase.auth.getClaims();
 
   const isProtected = PROTECTED_PREFIXES.some((prefix) =>
     request.nextUrl.pathname.startsWith(prefix)
   );
 
-  if (isProtected && !user) {
+  if (isProtected && !data?.claims?.sub) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";

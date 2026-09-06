@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
+import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import { reportDataError } from "@/lib/server/data-error";
-import { createClient } from "@/lib/supabase/server";
 import { RestaurantSetupForm } from "./RestaurantSetupForm";
 
 export default async function RestaurantOnboardingPage() {
@@ -11,10 +11,7 @@ export default async function RestaurantOnboardingPage() {
     redirect("/manager");
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentAuthIdentity();
 
   if (!user) redirect("/login?redirectTo=/onboarding/restaurant");
 
