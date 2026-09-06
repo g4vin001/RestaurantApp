@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ClockInForm } from "./ClockInForm";
 import { clockOut } from "./actions";
-import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
+import { getCurrentAuthUser } from "@/lib/auth/current-identity";
 import {
   getCurrentWorkContext,
   getEligibleWorkplaces,
@@ -31,7 +31,7 @@ export default async function WorkPage() {
     );
   }
 
-  const user = await getCurrentAuthIdentity();
+  const user = await getCurrentAuthUser();
   if (!user) redirect("/login?redirectTo=/work");
 
   if (!isVerifiedHalinaUser(user)) {

@@ -1,33 +1,20 @@
 import "server-only";
 
 import { cache } from "react";
-import type { JwtPayload } from "@supabase/supabase-js";
+import type { JwtPayload, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 export type HalinaAuthIdentity = {
   id: string;
   email?: string;
-  emailVerified: boolean;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
 
 export function identityFromClaims(
   claims: JwtPayload,
 ): HalinaAuthIdentity {
-  const metadata = isRecord(claims.user_metadata)
-    ? claims.user_metadata
-    : undefined;
-
   return {
     id: claims.sub,
     email: typeof claims.email === "string" ? claims.email : undefined,
-    emailVerified:
-      claims.email_verified === true ||
-      typeof claims.email_confirmed_at === "string" ||
-      metadata?.email_verified === true,
   };
 }
 
@@ -41,5 +28,17 @@ export const getCurrentAuthIdentity = cache(
     const { data, error } = await supabase.auth.getClaims();
     if (error || !data?.claims?.sub) return null;
     return identityFromClaims(data.claims);
+  },
+);
+
+// Sensitive staff authorization needs Supabase's authoritative user record so
+// email confirmation is never inferred from user-editable JWT metadata. This
+// remote check is cached within the request and limited to staff-only routes.
+export const getCurrentAuthUser = cache(
+  async (): Promise<User | null> => {
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) return null;
+    return data.user;
   },
 );

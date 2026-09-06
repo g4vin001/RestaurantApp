@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import type { User } from "@supabase/supabase-js";
 import {
-  getCurrentAuthIdentity,
+  getCurrentAuthUser,
   type HalinaAuthIdentity,
 } from "@/lib/auth/current-identity";
 import type {
@@ -93,15 +93,8 @@ export async function getActiveStaffAccess(profileId: string) {
   });
 }
 
-type StaffAuthIdentity = User | HalinaAuthIdentity;
-
-export function isVerifiedHalinaUser(user: StaffAuthIdentity) {
-  return Boolean(
-    user.email &&
-      ("emailVerified" in user
-        ? user.emailVerified
-        : user.email_confirmed_at),
-  );
+export function isVerifiedHalinaUser(user: User) {
+  return Boolean(user.email && user.email_confirmed_at);
 }
 
 export function createWorkSessionSecret() {
@@ -113,7 +106,7 @@ export function hashWorkSessionSecret(secret: string) {
 }
 
 export async function getEligibleWorkplaces(
-  user: StaffAuthIdentity,
+  user: User,
 ): Promise<EligibleWorkplace[]> {
   if (!isVerifiedHalinaUser(user) || !user.email) return [];
   const emailNormalized = normalizeStaffEmail(user.email);
@@ -164,8 +157,13 @@ export async function getEligibleWorkplaces(
     );
 }
 
-export async function hasEligibleWorkplace(user: StaffAuthIdentity) {
-  if (!isVerifiedHalinaUser(user) || !user.email) return false;
+// This only controls whether the Navbar shows the Work link. Clock-in and every
+// staff authorization boundary independently require an authoritative,
+// email-confirmed Supabase User plus the database-backed work session.
+export async function hasEligibleWorkplace(
+  user: User | HalinaAuthIdentity,
+) {
+  if (!user.email) return false;
   const count = await prisma.staffMember.count({
     where: {
       emailNormalized: normalizeStaffEmail(user.email),
@@ -179,11 +177,11 @@ export async function hasEligibleWorkplace(user: StaffAuthIdentity) {
 }
 
 export async function getCurrentWorkContext(
-  suppliedUser?: StaffAuthIdentity,
+  suppliedUser?: User,
 ): Promise<WorkContext | null> {
   let user = suppliedUser;
   if (!user) {
-    user = (await getCurrentAuthIdentity()) ?? undefined;
+    user = (await getCurrentAuthUser()) ?? undefined;
   }
   if (!user || !isVerifiedHalinaUser(user) || !user.email) return null;
 

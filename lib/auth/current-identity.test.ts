@@ -17,24 +17,27 @@ function claims(overrides: Partial<JwtPayload> = {}): JwtPayload {
 }
 
 describe("identityFromClaims", () => {
-  it("maps a verified Supabase email identity", () => {
+  it("maps only signed top-level identity claims", () => {
     expect(
       identityFromClaims(
         claims({
           email: "staff@example.com",
-          user_metadata: { email_verified: true },
+          user_metadata: {
+            email: "spoofed@example.com",
+            email_verified: true,
+          },
         }),
       ),
     ).toEqual({
       id: "00000000-0000-0000-0000-000000000001",
       email: "staff@example.com",
-      emailVerified: true,
     });
   });
 
-  it("does not treat an email claim alone as verified", () => {
-    expect(
-      identityFromClaims(claims({ email: "unverified@example.com" })),
-    ).toMatchObject({ emailVerified: false });
+  it("does not invent a missing email", () => {
+    expect(identityFromClaims(claims())).toEqual({
+      id: "00000000-0000-0000-0000-000000000001",
+      email: undefined,
+    });
   });
 });
