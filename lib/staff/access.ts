@@ -36,8 +36,11 @@ export type WorkContext = {
   membershipId: string;
   restaurantId: string;
   restaurantName: string;
+  restaurantLocation: string;
   restaurantSlug: string;
+  restaurantTimezone: string;
   restaurantEnvironment: RestaurantEnvironment;
+  walkInAvailability: "AVAILABLE" | "LIMITED" | "PAUSED";
   staffMemberId: string;
   staffName: string;
   jobTitle: string;
@@ -203,8 +206,11 @@ export async function getCurrentWorkContext(
         select: {
           id: true,
           name: true,
+          location: true,
           slug: true,
+          timezone: true,
           environment: true,
+          walkInAvailability: true,
           archivedAt: true,
         },
       },
@@ -277,8 +283,11 @@ export async function getCurrentWorkContext(
     membershipId: membership.id,
     restaurantId: session.restaurant.id,
     restaurantName: session.restaurant.name,
+    restaurantLocation: session.restaurant.location,
     restaurantSlug: session.restaurant.slug,
+    restaurantTimezone: session.restaurant.timezone,
     restaurantEnvironment: session.restaurant.environment,
+    walkInAvailability: session.restaurant.walkInAvailability,
     staffMemberId: session.staffMember.id,
     staffName: session.staffMember.name,
     jobTitle: session.staffMember.jobTitle,

@@ -6,7 +6,13 @@ import { createClient } from "@/lib/supabase/client";
 
 type ConnectionState = "live" | "reconnecting" | "offline" | "stale";
 
-export function StaffOperationsRefresh({ restaurantId }: { restaurantId: string }) {
+export function StaffOperationsRefresh({
+  restaurantId,
+  inverse = false,
+}: {
+  restaurantId: string;
+  inverse?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [connection, setConnection] = useState<ConnectionState>("reconnecting");
@@ -64,10 +70,10 @@ export function StaffOperationsRefresh({ restaurantId }: { restaurantId: string 
           : "Reconnecting…";
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-stone-600" aria-live="polite">
+    <div className={`flex flex-wrap items-center gap-2 text-xs ${inverse ? "text-emerald-100" : "text-stone-600"}`} aria-live="polite">
       <span className={`h-2 w-2 rounded-full ${connection === "live" ? "bg-emerald-500" : connection === "offline" ? "bg-rose-500" : "bg-amber-500"}`} aria-hidden="true" />
       <span>{label}</span>
-      <button type="button" onClick={() => refresh(false)} disabled={pending || connection === "offline"} className="rounded-lg px-2 py-1 font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">Refresh</button>
+      <button type="button" onClick={() => refresh(false)} disabled={pending || connection === "offline"} className={`rounded-lg px-2 py-1 font-semibold disabled:opacity-50 ${inverse ? "text-white hover:bg-white/10" : "text-emerald-800 hover:bg-emerald-50"}`}>Refresh</button>
     </div>
   );
 }

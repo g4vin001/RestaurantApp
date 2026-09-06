@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
+import { executeOperationsCommand } from "./operations-commands";
 import { PrismaOperationsRepository } from "./prisma-operations";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
@@ -10,6 +11,8 @@ const describeWithDatabase = connectionString ? describe : describe.skip;
 
 const ownerId = "33333333-3333-4333-8333-333333333333";
 const otherOwnerId = "44444444-4444-4444-8444-444444444444";
+const hostId = "11111111-2222-4111-8111-111111111111";
+const viewerId = "22222222-3333-4222-8222-222222222222";
 // Deliberately distinct from every other integration fixture so Vitest's
 // parallel files cannot delete or mutate this suite's tenant state.
 const restaurantId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -32,7 +35,7 @@ describeWithDatabase("Prisma operations repository", () => {
       where: { id: { in: [restaurantId, otherRestaurantId] } },
     });
     await client.profile.deleteMany({
-      where: { id: { in: [ownerId, otherOwnerId] } },
+      where: { id: { in: [ownerId, otherOwnerId, hostId, viewerId] } },
     });
     await client.profile.createMany({
       data: [
@@ -45,6 +48,16 @@ describeWithDatabase("Prisma operations repository", () => {
           id: otherOwnerId,
           email: "snapshot-other@example.com",
           displayName: "Other owner",
+        },
+        {
+          id: hostId,
+          email: "snapshot-host@example.com",
+          displayName: "Host",
+        },
+        {
+          id: viewerId,
+          email: "snapshot-viewer@example.com",
+          displayName: "Viewer",
         },
       ],
     });
@@ -59,7 +72,13 @@ describeWithDatabase("Prisma operations repository", () => {
           closesAtHour: 23,
           cleaningTargetMinutes: 14,
         },
-        memberships: { create: { profileId: ownerId, role: "OWNER" } },
+        memberships: {
+          create: [
+            { profileId: ownerId, role: "OWNER" },
+            { profileId: hostId, role: "STAFF" },
+            { profileId: viewerId, role: "STAFF" },
+          ],
+        },
         floorPlans: {
           create: {
             name: "Main floor",
@@ -131,7 +150,7 @@ describeWithDatabase("Prisma operations repository", () => {
       where: { id: { in: [restaurantId, otherRestaurantId] } },
     });
     await client?.profile.deleteMany({
-      where: { id: { in: [ownerId, otherOwnerId] } },
+      where: { id: { in: [ownerId, otherOwnerId, hostId, viewerId] } },
     });
     await client?.$disconnect();
     await pool?.end();
@@ -164,6 +183,69 @@ describeWithDatabase("Prisma operations repository", () => {
     await expect(repository.loadSnapshot()).rejects.toMatchObject({
       code: "FORBIDDEN",
     } satisfies Partial<OperationsRepositoryError>);
+  });
+
+  it("lets guest-management staff operate reservations but denies view-only staff", async () => {
+    const [hostMembership, viewerMembership] = await Promise.all([
+      client.restaurantMembership.findUniqueOrThrow({
+        where: {
+          restaurantId_profileId: { restaurantId, profileId: hostId },
+        },
+      }),
+      client.restaurantMembership.findUniqueOrThrow({
+        where: {
+          restaurantId_profileId: { restaurantId, profileId: viewerId },
+        },
+      }),
+    ]);
+
+    await executeOperationsCommand(
+      client,
+      {
+        profileId: hostId,
+        restaurantId,
+        membershipId: hostMembership.id,
+        membershipRole: "STAFF",
+        permissions: ["VIEW_QUEUE", "MANAGE_QUEUE"],
+      },
+      {
+        type: "ADD_RESERVATION",
+        commandId: "10101010-1010-4010-8010-101010101010",
+        input: {
+          partyName: "Staff-created booking",
+          partySize: 3,
+          scheduledAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        },
+      },
+    );
+
+    expect(
+      await client.reservation.count({
+        where: { restaurantId, partyName: "Staff-created booking" },
+      }),
+    ).toBe(1);
+
+    await expect(
+      executeOperationsCommand(
+        client,
+        {
+          profileId: viewerId,
+          restaurantId,
+          membershipId: viewerMembership.id,
+          membershipRole: "STAFF",
+          permissions: ["VIEW_QUEUE"],
+        },
+        {
+          type: "ADD_RESERVATION",
+          commandId: "20202020-2020-4020-8020-202020202020",
+          input: {
+            partyName: "Unauthorized booking",
+            partySize: 2,
+            scheduledAt: new Date(Date.now() + 90 * 60_000).toISOString(),
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("seats a queue party across two tables atomically and replays idempotently", async () => {

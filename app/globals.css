@@ -34,8 +34,13 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
-body:has(.manager-app) > header {
+body:has(.manager-app) > header,
+body:has(.staff-app) > header {
   display: none;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 .halina-interaction-feedback {

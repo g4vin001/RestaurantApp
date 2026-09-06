@@ -902,14 +902,14 @@ async function executeInTransaction(
       break;
     }
     case "ADD_RESERVATION": {
-      requireManager(scope);
+      requirePermission(scope, "MANAGE_QUEUE");
       const input = validateReservationInput(command.input);
       await assertReservationTable(tx, scope, input);
       await tx.reservation.create({ data: { restaurantId: scope.restaurantId, createdById: scope.profileId, ...input } });
       break;
     }
     case "UPDATE_RESERVATION": {
-      requireManager(scope);
+      requirePermission(scope, "MANAGE_QUEUE");
       const input = validateReservationInput(command.input);
       await assertReservationTable(tx, scope, input, command.reservationId);
       const changed = await tx.reservation.updateMany({
@@ -920,7 +920,7 @@ async function executeInTransaction(
       break;
     }
     case "SET_RESERVATION_STATUS": {
-      requireManager(scope);
+      requirePermission(scope, "MANAGE_QUEUE");
       const allowed: ReservationStatus[] =
         command.status === "CONFIRMED"
           ? ["PENDING_APPROVAL"]

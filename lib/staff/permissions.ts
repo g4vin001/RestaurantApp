@@ -44,7 +44,7 @@ export function staffPermissionDependencyError(
     ) &&
     !permissions.includes("VIEW_QUEUE")
   ) {
-    return "Queue actions and contact details require View Queue.";
+    return "Guest-list actions and contact details require View Queue & reservations.";
   }
   return null;
 }
@@ -52,9 +52,9 @@ export function staffPermissionDependencyError(
 export const STAFF_PERMISSION_LABELS: Record<StaffPermission, string> = {
   VIEW_LIVE_FLOOR: "View Live Floor",
   CHANGE_TABLE_STATUS: "Change table status",
-  VIEW_QUEUE: "View Queue",
+  VIEW_QUEUE: "View queue & reservations",
   VIEW_CONTACT_DETAILS: "View contact details",
-  MANAGE_QUEUE: "Add, edit, call, and resolve Queue entries",
+  MANAGE_QUEUE: "Manage queue & reservations",
   SEAT_PARTIES: "Seat parties",
   CORRECT_RECENT_ACTION: "Correct a recent action",
 };

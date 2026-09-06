@@ -10,7 +10,8 @@ import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-c
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
 import { reportDataError } from "@/lib/server/data-error";
-import { getCurrentWorkContext } from "@/lib/staff/access";
+import { getCurrentWorkContext, type WorkContext } from "@/lib/staff/access";
+import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
 
 async function requireStaff() {
   const context = await getCurrentWorkContext();
@@ -18,9 +19,20 @@ async function requireStaff() {
   return context;
 }
 
-async function runStaffCommand(command: DatabaseOperationsCommand, success: string) {
+type StaffCommandBuilder = (
+  context: WorkContext,
+) => DatabaseOperationsCommand | Promise<DatabaseOperationsCommand>;
+
+async function runStaffCommand(
+  commandOrBuilder: DatabaseOperationsCommand | StaffCommandBuilder,
+  success: string,
+) {
   try {
     const context = await requireStaff();
+    const command =
+      typeof commandOrBuilder === "function"
+        ? await commandOrBuilder(context)
+        : commandOrBuilder;
     await executeOperationsCommand(prisma, {
       profileId: context.profileId,
       restaurantId: context.restaurantId,
@@ -35,7 +47,11 @@ async function runStaffCommand(command: DatabaseOperationsCommand, success: stri
       restaurantId: context.restaurantId,
       restaurantSlug: context.restaurantSlug,
       environment: context.restaurantEnvironment,
-      entity: command.type.includes("QUEUE") ? "queue" : "table",
+      entity: command.type.includes("QUEUE")
+        ? "queue"
+        : command.type.includes("RESERVATION")
+          ? "reservation"
+          : "table",
       revision: command.commandId,
     }).catch((error) => console.error("[halina:ops-broadcast]", error));
     await setFlash("message", success);
@@ -82,35 +98,50 @@ export async function correctStaffTable(formData: FormData) {
 
 export async function addStaffQueueEntry(formData: FormData) {
   await runStaffCommand(
-    {
+    (context) => ({
       type: "ADD_QUEUE",
       commandId: randomUUID(),
       input: {
         partyName: String(formData.get("partyName") ?? ""),
         partySize: Number(formData.get("partySize") ?? 0),
         promisedWaitMinutes: Number(formData.get("promisedWaitMinutes") ?? 0),
-        contact: String(formData.get("contact") ?? "") || undefined,
+        contact: context.permissions.includes("VIEW_CONTACT_DETAILS")
+          ? String(formData.get("contact") ?? "") || undefined
+          : undefined,
         notes: String(formData.get("notes") ?? "") || undefined,
+        preferredZone: String(formData.get("preferredZone") ?? "") || undefined,
       },
-    },
+    }),
     "Party added to the queue.",
   );
 }
 
 export async function editStaffQueueEntry(formData: FormData) {
   await runStaffCommand(
-    {
-      type: "UPDATE_QUEUE",
-      commandId: randomUUID(),
-      entryId: String(formData.get("queueId") ?? ""),
-      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
-      input: {
-        partyName: String(formData.get("partyName") ?? ""),
-        partySize: Number(formData.get("partySize") ?? 0),
-        promisedWaitMinutes: Number(formData.get("promisedWaitMinutes") ?? 0),
-        contact: String(formData.get("contact") ?? "") || undefined,
-        notes: String(formData.get("notes") ?? "") || undefined,
-      },
+    async (context) => {
+      const entryId = String(formData.get("queueId") ?? "");
+      const existingContact = context.permissions.includes("VIEW_CONTACT_DETAILS")
+        ? undefined
+        : await prisma.queueEntry.findFirst({
+            where: { id: entryId, restaurantId: context.restaurantId },
+            select: { contact: true },
+          });
+      return {
+        type: "UPDATE_QUEUE",
+        commandId: randomUUID(),
+        entryId,
+        expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+        input: {
+          partyName: String(formData.get("partyName") ?? ""),
+          partySize: Number(formData.get("partySize") ?? 0),
+          promisedWaitMinutes: Number(formData.get("promisedWaitMinutes") ?? 0),
+          contact: context.permissions.includes("VIEW_CONTACT_DETAILS")
+            ? String(formData.get("contact") ?? "") || undefined
+            : existingContact?.contact ?? undefined,
+          notes: String(formData.get("notes") ?? "") || undefined,
+          preferredZone: String(formData.get("preferredZone") ?? "") || undefined,
+        },
+      };
     },
     "Queue entry updated.",
   );
@@ -153,4 +184,108 @@ export async function seatStaffQueueEntry(formData: FormData) {
     expectedRevision,
     tableIds: [tableId],
   }, "Party seated and the table status was updated.");
+}
+
+async function reservationInput(
+  formData: FormData,
+  context: WorkContext,
+  reservationId?: string,
+) {
+  const scheduledAt = restaurantWallTimeToUtc(
+    String(formData.get("scheduledAt") ?? ""),
+    context.restaurantTimezone,
+  );
+  const existingContact =
+    reservationId && !context.permissions.includes("VIEW_CONTACT_DETAILS")
+      ? await prisma.reservation.findFirst({
+          where: { id: reservationId, restaurantId: context.restaurantId },
+          select: { contact: true },
+        })
+      : null;
+  return {
+    partyName: String(formData.get("partyName") ?? ""),
+    partySize: Number(formData.get("partySize") ?? 0),
+    scheduledAt: scheduledAt?.toISOString() ?? "",
+    tableId: String(formData.get("tableId") ?? "") || undefined,
+    contact: context.permissions.includes("VIEW_CONTACT_DETAILS")
+      ? String(formData.get("contact") ?? "") || undefined
+      : existingContact?.contact ?? undefined,
+    notes: String(formData.get("notes") ?? "") || undefined,
+  };
+}
+
+export async function addStaffReservation(formData: FormData) {
+  await runStaffCommand(
+    async (context) => ({
+      type: "ADD_RESERVATION",
+      commandId: randomUUID(),
+      input: await reservationInput(formData, context),
+    }),
+    "Reservation created.",
+  );
+}
+
+export async function editStaffReservation(formData: FormData) {
+  await runStaffCommand(
+    async (context) => {
+      const reservationId = String(formData.get("reservationId") ?? "");
+      return {
+        type: "UPDATE_RESERVATION",
+        commandId: randomUUID(),
+        reservationId,
+        expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+        input: await reservationInput(formData, context, reservationId),
+      };
+    },
+    "Reservation updated.",
+  );
+}
+
+export async function updateStaffReservationStatus(formData: FormData) {
+  const status = String(formData.get("status") ?? "") as
+    | "CONFIRMED"
+    | "ARRIVED"
+    | "CANCELLED"
+    | "NO_SHOW"
+    | "COMPLETED";
+  await runStaffCommand(
+    {
+      type: "SET_RESERVATION_STATUS",
+      commandId: randomUUID(),
+      reservationId: String(formData.get("reservationId") ?? ""),
+      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+      status,
+    },
+    status === "ARRIVED"
+      ? "Reservation marked arrived."
+      : status === "CONFIRMED"
+        ? "Reservation confirmed."
+        : `Reservation marked ${status.toLowerCase().replace("_", "-")}.`,
+  );
+}
+
+export async function seatStaffReservation(formData: FormData) {
+  await runStaffCommand(
+    {
+      type: "SEAT_RESERVATION",
+      commandId: randomUUID(),
+      reservationId: String(formData.get("reservationId") ?? ""),
+      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+      tableIds: [String(formData.get("tableId") ?? "")],
+    },
+    "Reservation seated and the table status was updated.",
+  );
+}
+
+export async function moveStaffReservationTable(formData: FormData) {
+  await runStaffCommand(
+    {
+      type: "MOVE_RESERVATION_TABLE",
+      commandId: randomUUID(),
+      reservationId: String(formData.get("reservationId") ?? ""),
+      expectedRevision: Number(formData.get("expectedRevision") ?? -1),
+      tableIds: [String(formData.get("tableId") ?? "")],
+    },
+    "Reservation moved to the selected table.",
+  );
 }
