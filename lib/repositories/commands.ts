@@ -116,12 +116,6 @@ export type DatabaseOperationsCommand =
         | "NO_SHOW"
         | "COMPLETED";
     })
-  | (CommandBase & {
-      type: "SEAT_RESERVATION";
-      reservationId: string;
-      expectedRevision: number;
-      tableIds: string[];
-    })
   | (CommandBase &
       ReservationClashOverride & {
         type: "SEAT_RESERVATION";

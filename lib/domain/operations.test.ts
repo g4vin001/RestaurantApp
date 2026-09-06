@@ -435,6 +435,8 @@ describe("manager operation commands", () => {
     expect(seated.tables.find((table) => table.id === "table-06")?.status).toBe(
       "OCCUPIED",
     );
+  });
+
   it("approves or rejects a pending reservation through the shared domain rule", () => {
     const state = createDemoState(now);
     const pending = {
