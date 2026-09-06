@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
 import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
+import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
 import {
   assignManagerByAdmin,
   createRestaurantByAdmin,
@@ -19,10 +19,7 @@ const inputClass =
 const labelClass = "text-sm font-medium text-stone-700";
 
 export default async function AdminPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentAuthIdentity();
 
   // Indistinguishable from a real 404 for anyone but the allowlisted admin
   // account — no redirect-to-login that would reveal this route exists.

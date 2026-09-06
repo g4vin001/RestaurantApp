@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ClockInForm } from "./ClockInForm";
 import { clockOut } from "./actions";
+import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import {
   getCurrentWorkContext,
   getEligibleWorkplaces,
@@ -9,7 +10,6 @@ import {
   type EligibleWorkplace,
   type WorkContext,
 } from "@/lib/staff/access";
-import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,10 +31,7 @@ export default async function WorkPage() {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentAuthIdentity();
   if (!user) redirect("/login?redirectTo=/work");
 
   if (!isVerifiedHalinaUser(user)) {

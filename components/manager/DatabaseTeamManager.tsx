@@ -7,10 +7,10 @@ import {
   setRestaurantStaffPin,
   setStaffActive,
 } from "@/app/manager/team/actions";
+import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
 
 const inputClass =
   "mt-1 min-h-11 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm text-stone-900 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-100";
@@ -129,10 +129,7 @@ function StaffFields({
 }
 
 export async function DatabaseTeamManager({ roles }: { roles: StaffRoleOption[] }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentAuthIdentity();
   if (!user) redirect("/login?redirectTo=/manager/team");
 
   const membership = await getActiveManagerMembership(user.id);

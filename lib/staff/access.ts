@@ -3,6 +3,10 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import type { User } from "@supabase/supabase-js";
+import {
+  getCurrentAuthIdentity,
+  type HalinaAuthIdentity,
+} from "@/lib/auth/current-identity";
 import type {
   RestaurantEnvironment,
   StaffPermission,
@@ -10,7 +14,6 @@ import type {
 } from "@/lib/domain/types";
 import { prisma } from "@/lib/prisma";
 import { normalizeStaffEmail, permissionsForPreset } from "@/lib/staff/policy";
-import { createClient } from "@/lib/supabase/server";
 
 export const WORK_SESSION_COOKIE = "halina_work_session";
 export const WORK_SESSION_HOURS = 16;
@@ -90,8 +93,15 @@ export async function getActiveStaffAccess(profileId: string) {
   });
 }
 
-export function isVerifiedHalinaUser(user: User) {
-  return Boolean(user.email && user.email_confirmed_at);
+type StaffAuthIdentity = User | HalinaAuthIdentity;
+
+export function isVerifiedHalinaUser(user: StaffAuthIdentity) {
+  return Boolean(
+    user.email &&
+      ("emailVerified" in user
+        ? user.emailVerified
+        : user.email_confirmed_at),
+  );
 }
 
 export function createWorkSessionSecret() {
@@ -103,7 +113,7 @@ export function hashWorkSessionSecret(secret: string) {
 }
 
 export async function getEligibleWorkplaces(
-  user: User,
+  user: StaffAuthIdentity,
 ): Promise<EligibleWorkplace[]> {
   if (!isVerifiedHalinaUser(user) || !user.email) return [];
   const emailNormalized = normalizeStaffEmail(user.email);
@@ -154,7 +164,7 @@ export async function getEligibleWorkplaces(
     );
 }
 
-export async function hasEligibleWorkplace(user: User) {
+export async function hasEligibleWorkplace(user: StaffAuthIdentity) {
   if (!isVerifiedHalinaUser(user) || !user.email) return false;
   const count = await prisma.staffMember.count({
     where: {
@@ -169,13 +179,11 @@ export async function hasEligibleWorkplace(user: User) {
 }
 
 export async function getCurrentWorkContext(
-  suppliedUser?: User,
+  suppliedUser?: StaffAuthIdentity,
 ): Promise<WorkContext | null> {
   let user = suppliedUser;
   if (!user) {
-    const supabase = await createClient();
-    const response = await supabase.auth.getUser();
-    user = response.data.user ?? undefined;
+    user = (await getCurrentAuthIdentity()) ?? undefined;
   }
   if (!user || !isVerifiedHalinaUser(user) || !user.email) return null;
 

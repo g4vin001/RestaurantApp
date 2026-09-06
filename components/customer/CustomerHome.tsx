@@ -1,9 +1,8 @@
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { PublicHomeRefresh } from "@/components/customer/PublicHomeRefresh";
 import { RestaurantCard } from "@/components/RestaurantCard";
-import { prisma } from "@/lib/prisma";
+import { getCachedPublicRestaurants } from "@/lib/repositories/prisma/public-restaurant-cache";
 import {
-  fetchPublicRestaurants,
   type PublicRestaurantView,
 } from "@/lib/repositories/prisma/public-restaurant-view";
 import { reportDataError } from "@/lib/server/data-error";
@@ -11,7 +10,7 @@ import { reportDataError } from "@/lib/server/data-error";
 export async function CustomerHome() {
   let restaurants: PublicRestaurantView[];
   try {
-    restaurants = await fetchPublicRestaurants(prisma);
+    restaurants = await getCachedPublicRestaurants();
   } catch (error) {
     const reference = reportDataError("customer-home", error);
     return <DatabaseUnavailable reference={reference} />;

@@ -249,6 +249,7 @@ model StaffMember {
   @@index([restaurantId, email])
   @@index([restaurantId, workAccessEnabled, emailNormalized])
   @@index([staffRoleId])
+  @@index([emailNormalized, workAccessEnabled, active, archivedAt])
 }
 
 model StaffRole {

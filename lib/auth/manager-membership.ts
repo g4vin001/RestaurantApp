@@ -1,14 +1,15 @@
 import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import {
   resolveRestaurantAccess,
   type ManagerMembershipClaim,
 } from "./restaurant-access";
 
-export async function getActiveManagerMembership(
+const findActiveManagerMembership = async (
   profileId: string,
   requestedRestaurantId?: string,
-) {
+) => {
   const memberships = await prisma.restaurantMembership.findMany({
     where: {
       profileId,
@@ -22,6 +23,11 @@ export async function getActiveManagerMembership(
       restaurantId: true,
       role: true,
       active: true,
+      profile: {
+        select: {
+          displayName: true,
+        },
+      },
       restaurant: {
         select: {
           id: true,
@@ -59,4 +65,6 @@ export async function getActiveManagerMembership(
         membership.role === access.role,
     ) ?? null
   );
-}
+};
+
+export const getActiveManagerMembership = cache(findActiveManagerMembership);
