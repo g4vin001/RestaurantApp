@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Navbar } from "@/components/Navbar";
+import { InteractionFeedback } from "@/components/ui/InteractionFeedback";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,6 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <Suspense fallback={null}>
+          <InteractionFeedback />
+        </Suspense>
         <Suspense
           fallback={
             <header className="border-b border-stone-200 bg-white">

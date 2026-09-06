@@ -38,6 +38,92 @@ body:has(.manager-app) > header {
   display: none;
 }
 
+.halina-interaction-feedback {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.halina-interaction-feedback[data-visible="true"] {
+  visibility: visible;
+}
+
+.halina-loading-bar {
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  left: 0;
+  width: 42%;
+  height: 3px;
+  border-radius: 0 999px 999px 0;
+  background: #047857;
+  box-shadow: 0 0 12px rgb(4 120 87 / 45%);
+  animation: halina-loading-bar 1.2s ease-in-out infinite;
+}
+
+.halina-loading-label {
+  position: fixed;
+  z-index: 100;
+  top: 1rem;
+  left: 50%;
+  display: flex;
+  min-height: 2.25rem;
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid #d6d3d1;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 96%);
+  padding: 0.45rem 0.85rem;
+  color: #44403c;
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgb(28 25 23 / 14%);
+}
+
+.halina-spinner,
+form[data-halina-pending="true"] button[type="submit"]::after,
+form[data-halina-pending="true"] button:not([type])::after {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  content: "";
+  animation: halina-spin 0.65s linear infinite;
+}
+
+form[data-halina-pending="true"] button[type="submit"],
+form[data-halina-pending="true"] button:not([type]) {
+  pointer-events: none;
+  opacity: 0.65;
+}
+
+form[data-halina-pending="true"] button[type="submit"]::after,
+form[data-halina-pending="true"] button:not([type])::after {
+  display: inline-block;
+  margin-left: 0.5rem;
+  vertical-align: -0.125rem;
+}
+
+@keyframes halina-loading-bar {
+  0% {
+    transform: translateX(-105%);
+  }
+  55% {
+    transform: translateX(115%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+@keyframes halina-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 ::selection {
   background: #bbf7d0;
   color: #14532d;
