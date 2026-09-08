@@ -1,4 +1,5 @@
 import { canTransitionTable } from "@/lib/domain/transitions";
+import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
 import type {
   DemoState,
   QueueEntry,
@@ -877,6 +878,7 @@ export function createReservation(
   state: DemoState,
   input: ReservationInput,
   occurredAt: string,
+  replacingReservationId?: string,
 ): DomainResult {
   if (!input.partyName.trim())
     return { ok: false, error: "Party name is required." };
@@ -888,6 +890,10 @@ export function createReservation(
     return { ok: false, error: "Party size must be between 1 and 30." };
   if (Number.isNaN(Date.parse(input.scheduledAt)))
     return { ok: false, error: "Choose a valid reservation date and time." };
+  const existing = state.reservations.find((item) => item.id === replacingReservationId);
+  if ((!existing || Date.parse(existing.scheduledAt) !== Date.parse(input.scheduledAt)) && !isWithinServiceHours(state.restaurant, new Date(input.scheduledAt))) {
+    return { ok: false, error: "This reservation falls outside opening hours. Choose a service time or update the restaurant's special-date hours first." };
+  }
   const table = input.tableId
     ? state.tables.find((item) => item.id === input.tableId && item.active)
     : null;
@@ -898,7 +904,7 @@ export function createReservation(
     };
   if (table && input.partySize > table.capacity)
     return { ok: false, error: `${table.label} is too small for this party.` };
-  if (reservationConflict(state, input))
+  if (reservationConflict(state, input, replacingReservationId))
     return {
       ok: false,
       error: "That table has another reservation within 90 minutes.",
@@ -933,7 +939,7 @@ export function updateReservation(
     (item) => item.id === reservationId,
   );
   if (!reservation) return { ok: false, error: "Reservation was not found." };
-  const validated = createReservation(state, input, occurredAt);
+  const validated = createReservation(state, input, occurredAt, reservationId);
   if (!validated.ok) {
     if (
       validated.error.includes("another reservation") &&

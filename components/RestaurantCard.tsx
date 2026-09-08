@@ -14,11 +14,11 @@ export function RestaurantCard({ restaurant }: { restaurant: PublicRestaurantVie
             {restaurant.cuisineType ? `${restaurant.cuisineType} · ${restaurant.location}` : restaurant.location}
           </p>
         </div>
-        <StatusBadge status={restaurant.crowdLevel} />
+        <StatusBadge status={restaurant.service.openNow ? restaurant.crowdLevel : "Closed"} />
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <p>
-          <b>{restaurant.estimatedWaitMinutes} min</b>
+          <b>{restaurant.walkInStatus === "Closed" || restaurant.walkInStatus === "Paused" ? "Unavailable" : `${restaurant.estimatedWaitMinutes} min`}</b>
           <br />
           <span className="text-stone-500">estimated wait</span>
         </p>
@@ -37,6 +37,7 @@ export function RestaurantCard({ restaurant }: { restaurant: PublicRestaurantVie
           View details →
         </Link>
       </div>
+      <p className="mt-3 text-sm text-stone-600">{restaurant.service.statusLabel}</p>
       <p className="mt-3 text-xs text-stone-400">
         Updated {formatLastUpdated(restaurant.lastUpdatedAt, restaurant.timezone)}
       </p>

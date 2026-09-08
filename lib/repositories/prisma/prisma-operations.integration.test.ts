@@ -5,6 +5,7 @@ import { PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { executeOperationsCommand } from "./operations-commands";
 import { PrismaOperationsRepository } from "./prisma-operations";
+import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -71,6 +72,8 @@ describeWithDatabase("Prisma operations repository", () => {
           opensAtHour: 9,
           closesAtHour: 23,
           cleaningTargetMinutes: 14,
+          // Permission/concurrency fixtures remain valid at any wall-clock time.
+          schedule: legacyOperatingSchedule(0, 24),
         },
         memberships: {
           create: [
@@ -172,6 +175,55 @@ describeWithDatabase("Prisma operations repository", () => {
     expect(snapshot.tables.map((table) => table.label)).toEqual(["T1", "T2"]);
     expect(snapshot.queue.map((entry) => entry.partyName)).toEqual(["Reyes"]);
     expect(snapshot.floorPlans).toHaveLength(1);
+  });
+
+  it("persists schedules for another device, preserves unrelated settings, and rejects stale edits", async () => {
+    const repository = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const before = await repository.loadSnapshot();
+    const schedule = legacyOperatingSchedule(11, 22);
+    schedule.weekly.monday = [{ opensAt: "11:00", closesAt: "14:00" }, { opensAt: "18:00", closesAt: "01:00" }];
+    schedule.exceptions = [{ date: "2026-12-25", label: "Christmas", periods: [] }];
+    const command = {
+      type: "UPDATE_RESTAURANT" as const,
+      commandId: "90909090-9090-4090-8090-909090909090",
+      expectedRevision: before.restaurant.revision ?? 0,
+      input: { ...before.restaurant, schedule },
+    };
+    await repository.execute(command);
+    await repository.execute(command);
+    const anotherDevice = await new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId }).loadSnapshot();
+    expect(anotherDevice.restaurant.schedule).toEqual(schedule);
+    expect(anotherDevice.restaurant.cleaningTargetMinutes).toBe(14);
+    expect(anotherDevice.restaurant.revision).toBe(command.expectedRevision + 1);
+    await expect(repository.execute({ ...command, commandId: "91919191-9191-4191-8191-919191919191" })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await client.restaurant.findUniqueOrThrow({ where: { id: otherRestaurantId } })).toMatchObject({ name: "Other Kitchen" });
+  });
+
+  it("rejects invalid schedules atomically without changing the restaurant name", async () => {
+    const repository = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const before = await repository.loadSnapshot();
+    const schedule = legacyOperatingSchedule(10, 22);
+    schedule.weekly.monday.push({ opensAt: "12:00", closesAt: "14:00" });
+    await expect(repository.execute({
+      type: "UPDATE_RESTAURANT", commandId: "92929292-9292-4292-8292-929292929292", expectedRevision: before.restaurant.revision ?? 0,
+      input: { ...before.restaurant, name: "Must not be saved", schedule },
+    })).rejects.toMatchObject({ code: "VALIDATION" });
+    expect((await repository.loadSnapshot()).restaurant).toEqual(before.restaurant);
+  });
+
+  it("denies schedule changes from staff and from another restaurant's owner", async () => {
+    const owner = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const before = await owner.loadSnapshot();
+    const command = {
+      type: "UPDATE_RESTAURANT" as const, commandId: "93939393-9393-4393-8393-939393939393", expectedRevision: before.restaurant.revision ?? 0,
+      input: { ...before.restaurant, schedule: legacyOperatingSchedule(11, 22) },
+    };
+    const hostMembership = await client.restaurantMembership.findUniqueOrThrow({ where: { restaurantId_profileId: { restaurantId, profileId: hostId } } });
+    await expect(executeOperationsCommand(client, {
+      profileId: hostId, restaurantId, membershipId: hostMembership.id, membershipRole: "STAFF", permissions: ["MANAGE_QUEUE"],
+    }, command)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(new PrismaOperationsRepository(client, { profileId: otherOwnerId, restaurantId }).execute(command)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await owner.loadSnapshot()).restaurant).toEqual(before.restaurant);
   });
 
   it("denies a restaurant outside the manager's membership", async () => {

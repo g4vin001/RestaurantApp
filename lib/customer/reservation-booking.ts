@@ -1,3 +1,5 @@
+import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
+
 export type ReservationBookingInput = {
   partyName: string;
   partySize: number;
@@ -12,25 +14,15 @@ type ValidationResult =
 
 const MIN_LEAD_MS = 30 * 60_000;
 const MAX_LEAD_MS = 90 * 24 * 60 * 60_000;
-// Nothing in this codebase does real per-restaurant timezone math yet
-// (lib/domain/analytics.ts hardcodes the same assumption) — treat every
-// datetime-local value as Asia/Manila local time (UTC+8).
-const MANILA_OFFSET_MS = 8 * 60 * 60_000;
 
 function formText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 }
 
-function parseManilaDateTimeLocal(value: string): Date | null {
-  if (!value) return null;
-  const asUtc = Date.parse(`${value}Z`);
-  if (Number.isNaN(asUtc)) return null;
-  return new Date(asUtc - MANILA_OFFSET_MS);
-}
-
 export function validateReservationBooking(
   formData: FormData,
   now = new Date(),
+  timeZone = "Asia/Manila",
 ): ValidationResult {
   const partyName = formText(formData.get("partyName"));
   const partySizeRaw = formText(formData.get("partySize"));
@@ -47,7 +39,7 @@ export function validateReservationBooking(
     return { ok: false, error: "Party size must be between 1 and 30." };
   }
 
-  const scheduledAt = parseManilaDateTimeLocal(scheduledAtRaw);
+  const scheduledAt = restaurantWallTimeToUtc(scheduledAtRaw, timeZone);
   if (!scheduledAt) {
     return { ok: false, error: "Choose a valid reservation date and time." };
   }

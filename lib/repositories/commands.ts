@@ -159,6 +159,7 @@ export type DatabaseOperationsCommand =
         | "cleaningTargetMinutes"
         | "opensAtHour"
         | "closesAtHour"
+        | "schedule"
       >;
     });
 

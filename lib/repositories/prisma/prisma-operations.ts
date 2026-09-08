@@ -18,6 +18,7 @@ import {
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-commands";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
+import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 const FLOOR_ELEMENT_TYPES = new Set<FloorElementType>([
   "TABLE",
@@ -467,6 +468,7 @@ export function mapRestaurantSnapshot(
       ),
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
+      schedule: readOperatingSchedule(settings ?? {}),
       environment: restaurant.environment,
       revision: restaurant.revision,
     },

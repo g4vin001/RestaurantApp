@@ -9,6 +9,7 @@ import {
   selectPublicRestaurantState,
 } from "@/lib/domain/analytics";
 import { createDemoState } from "@/lib/demo/seed";
+import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 describe("overview analytics", () => {
   it("derives occupancy and queue counts from canonical state", () => {
@@ -79,10 +80,38 @@ describe("overview analytics", () => {
         "lastUpdatedAt",
         "location",
         "name",
+        "service",
         "stale",
         "walkInStatus",
       ].sort(),
     );
     expect(JSON.stringify(publicState)).not.toContain("Garcia family");
+    expect(Object.keys(publicState.service).sort()).toEqual(["openNow", "statusLabel", "nextChangeAt", "todayHours", "exceptionLabel", "weeklyHours"].sort());
+  });
+
+  it("distinguishes a scheduled closure from manually paused walk-ins", () => {
+    const now = new Date("2026-09-07T12:00:00+08:00");
+    const state = createDemoState(now);
+    state.restaurant.isOpen = false;
+    expect(selectPublicRestaurantState(state, now).walkInStatus).toBe("Paused");
+    state.restaurant.schedule = legacyOperatingSchedule(10, 22);
+    state.restaurant.schedule.exceptions = [{ date: "2026-09-07", label: "Holiday", periods: [] }];
+    expect(selectPublicRestaurantState(state, now).walkInStatus).toBe("Closed");
+  });
+
+  it("excludes breaks from both occupied minutes and the occupancy denominator", () => {
+    const start = new Date("2026-09-07T10:00:00+08:00");
+    const end = new Date("2026-09-07T18:00:00+08:00");
+    const state = createDemoState(end);
+    state.tables = state.tables.slice(0, 1);
+    state.restaurant.schedule = legacyOperatingSchedule(10, 22);
+    state.restaurant.schedule.weekly.monday = [{ opensAt: "10:00", closesAt: "12:00" }, { opensAt: "16:00", closesAt: "18:00" }];
+    state.sessions = [{ id: "session", tableId: state.tables[0].id, partySize: 2, seatedAt: start.toISOString(), clearedAt: end.toISOString() }];
+    const analytics = deriveAnalytics(state, { start, end, label: "Monday" }, {}, end);
+    expect(analytics.occupiedMinutes).toBe(240);
+    expect(analytics.occupancyRate).toBe(100);
+    expect(analytics.tableAnalytics[0].occupancyRate).toBe(100);
+    state.restaurant.schedule.exceptions = [{ date: "2026-09-07", label: "Closed", periods: [] }];
+    expect(deriveAnalytics(state, { start, end, label: "Holiday" }, {}, end).occupancyRate).toBeNull();
   });
 });

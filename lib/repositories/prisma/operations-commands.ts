@@ -10,6 +10,8 @@ import type {
   TableStatus,
 } from "@/lib/generated/prisma/client";
 import { canTransitionTable } from "@/lib/domain/transitions";
+import { isWithinServiceHours, validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 
@@ -100,6 +102,16 @@ function validateReservationInput(
     contact: text(input.contact, "Contact", 160),
     notes: text(input.notes, "Notes", 2_000),
   };
+}
+
+async function assertReservationHours(tx: Prisma.TransactionClient, scope: OperationsCommandScope, scheduledAt: Date) {
+  const restaurant = await tx.restaurant.findFirst({
+    where: { id: scope.restaurantId, archivedAt: null },
+    select: { timezone: true, operatingSettings: true },
+  });
+  if (!restaurant || !isWithinServiceHours({ ...asRecord(restaurant.operatingSettings), timezone: restaurant.timezone }, scheduledAt)) {
+    fail("VALIDATION", "This reservation falls outside opening hours. Choose a service time or update the restaurant's special-date hours first.");
+  }
 }
 
 async function assertReservationTable(
@@ -904,6 +916,7 @@ async function executeInTransaction(
     case "ADD_RESERVATION": {
       requirePermission(scope, "MANAGE_QUEUE");
       const input = validateReservationInput(command.input);
+      await assertReservationHours(tx, scope, input.scheduledAt);
       await assertReservationTable(tx, scope, input);
       await tx.reservation.create({ data: { restaurantId: scope.restaurantId, createdById: scope.profileId, ...input } });
       break;
@@ -911,6 +924,14 @@ async function executeInTransaction(
     case "UPDATE_RESERVATION": {
       requirePermission(scope, "MANAGE_QUEUE");
       const input = validateReservationInput(command.input);
+      const existing = await tx.reservation.findFirst({
+        where: { id: command.reservationId, restaurantId: scope.restaurantId, revision: command.expectedRevision },
+        select: { scheduledAt: true },
+      });
+      if (!existing) fail("CONFLICT", "This reservation changed on another device.");
+      // Existing bookings remain manageable after hours change; moving one to
+      // another time must honor the current schedule.
+      if (existing.scheduledAt.getTime() !== input.scheduledAt.getTime()) await assertReservationHours(tx, scope, input.scheduledAt);
       await assertReservationTable(tx, scope, input, command.reservationId);
       const changed = await tx.reservation.updateMany({
         where: { id: command.reservationId, restaurantId: scope.restaurantId, revision: command.expectedRevision, status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] } },
@@ -1089,6 +1110,9 @@ async function executeInTransaction(
       const cleaningTargetMinutes = integer(input.cleaningTargetMinutes, "Cleaning target", 1, 120);
       const opensAtHour = integer(input.opensAtHour, "Opening hour", 0, 23);
       const closesAtHour = integer(input.closesAtHour, "Closing hour", 1, 24);
+      if (typeof input.isOpen !== "boolean") fail("VALIDATION", "Choose whether walk-ins are enabled.");
+      const schedule = input.schedule === undefined ? undefined : validateOperatingSchedule(input.schedule);
+      if (schedule && !schedule.ok) fail("VALIDATION", schedule.error);
       const current = settings.operatingSettings && typeof settings.operatingSettings === "object" && !Array.isArray(settings.operatingSettings)
         ? settings.operatingSettings as Prisma.JsonObject
         : {};
@@ -1098,7 +1122,10 @@ async function executeInTransaction(
           name,
           location,
           walkInAvailability: input.isOpen ? "AVAILABLE" : "PAUSED",
-          operatingSettings: { ...current, cleaningTargetMinutes, opensAtHour, closesAtHour },
+          operatingSettings: {
+            ...current, cleaningTargetMinutes, opensAtHour, closesAtHour,
+            ...(schedule?.ok ? { schedule: schedule.schedule as unknown as Prisma.InputJsonValue } : {}),
+          },
           revision: { increment: 1 },
         },
       });

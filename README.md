@@ -117,6 +117,48 @@ test accounts.
 
 There is intentionally no `/employee` route. Staff use normal Supabase-authenticated Halina accounts and redeem an email-bound invite for restricted `/ops` access.
 
+## Restaurant schedules
+
+Manager > Restaurant settings supports weekday hours, closed days, up to four
+service periods per day, overnight service, and dated holidays or exceptions.
+Times use the restaurant's timezone (Asia/Manila by default). A closing time at
+or before its opening time belongs to the next day; equal times mean 24-hour
+service. Overnight service belongs to the day it starts. A dated exception
+replaces the entire calendar date from midnight, including any service carried
+over from the previous night. An exception with no periods means closed all day.
+
+Schedules are stored in the existing `Restaurant.operatingSettings.schedule`
+JSON field through the tenant-scoped, transactional settings command, with
+revision checks and idempotency. No schema migration is required. Restaurants
+without a saved schedule retain their existing daily `opensAtHour` and
+`closesAtHour` values as the weekly default. Older settings clients cannot erase
+an existing schedule by omitting it. Demo mode stores the same structure only
+in its existing browser repository.
+
+The public directory, detail page, and manager status use the schedule to show
+when the restaurant is closed. The manual walk-in switch can still pause
+walk-ins during opening hours. Customer waitlist submissions reject closed
+hours. New or rescheduled reservations must start during service; customer
+bookings recheck the current schedule inside the existing capacity transaction.
+Existing reservations remain actionable after hours change, so managers should
+review affected bookings. Customer requests are explicitly shown as pending
+approval, never confirmed before the restaurant approves them.
+
+Occupancy counts service minutes only, including split shifts, overnight
+carryover, and dated exceptions; it excludes closed periods from both the
+numerator and denominator. Historical occupancy uses the **current saved
+schedule**, not a versioned history of weekly schedule changes. Retain past
+dated exceptions when they are still relevant to reporting. Dining duration and
+other event-derived metrics continue to use actual recorded events.
+
+Schedule validation, timezone boundaries, public projection privacy, and demo
+reservation rules run in `npm test`. Schedule persistence, transaction rollback,
+idempotent retries, stale edits, staff/tenant denial, and customer booking checks
+are also covered by the Prisma integration suites. Those suites require an
+isolated database configured with `HALINA_TEST_DATABASE_URL`; they are skipped
+when it is absent. Authenticated multi-device/browser verification remains a
+separate release check.
+
 ## Known limitations
 
 - Vercel builds do not run database migrations. Every release must run `migrate status`, review pending SQL, and run `migrate deploy` through `DIRECT_URL` on port 5432 before deploying code that depends on it.

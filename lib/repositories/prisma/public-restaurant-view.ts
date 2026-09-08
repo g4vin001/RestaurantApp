@@ -8,6 +8,7 @@ import {
   type PublicReservationSource,
 } from "@/lib/customer/public-floor";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
+import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 type PublicRestaurantRow = {
   id: string;
@@ -52,6 +53,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
       cleaningTargetMinutes: finiteNumber(settings?.cleaningTargetMinutes, 12),
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
+      schedule: readOperatingSchedule(settings ?? {}),
     },
     tables: restaurant.diningTables.map((table, index) => ({
       id: `t-${index}`,

@@ -15,6 +15,15 @@ function bookingForm(overrides: Record<string, string> = {}) {
 }
 
 describe("validateReservationBooking", () => {
+  it("uses the authoritative restaurant timezone", () => {
+    const result = validateReservationBooking(bookingForm(), now, "UTC");
+    expect(result.ok && result.input.scheduledAt.toISOString()).toBe("2026-08-15T19:30:00.000Z");
+  });
+
+  it("rejects impossible dates rather than booking a normalized date", () => {
+    const result = validateReservationBooking(bookingForm({ scheduledAt: "2026-09-31T12:00" }), now);
+    expect(result).toMatchObject({ ok: false, error: "Choose a valid reservation date and time." });
+  });
   it("normalizes valid input and converts Manila local time to UTC", () => {
     const result = validateReservationBooking(bookingForm(), now);
     expect(result.ok).toBe(true);

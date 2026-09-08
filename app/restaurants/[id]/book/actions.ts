@@ -19,9 +19,6 @@ export async function bookReservation(
   _previousState: ReservationBookingState,
   formData: FormData,
 ): Promise<ReservationBookingState> {
-  const validation = validateReservationBooking(formData);
-  if (!validation.ok) return { error: validation.error };
-
   const supabase = await createClient();
   const {
     data: { user },
@@ -32,6 +29,13 @@ export async function bookReservation(
   if (!user) redirect("/login");
 
   try {
+    const restaurant = await prisma.restaurant.findFirst({
+      where: { id: restaurantId, environment: "LIVE", archivedAt: null },
+      select: { timezone: true },
+    });
+    if (!restaurant) return { error: "This restaurant is no longer available." };
+    const validation = validateReservationBooking(formData, new Date(), restaurant.timezone);
+    if (!validation.ok) return { error: validation.error };
     const profile = await ensureProfile(user);
     await createCustomerReservation(prisma, {
       restaurantId,
@@ -39,7 +43,7 @@ export async function bookReservation(
       ...validation.input,
     });
   } catch (error) {
-    if (error instanceof OperationsRepositoryError && error.code === "CONFLICT") {
+    if (error instanceof OperationsRepositoryError && (error.code === "CONFLICT" || error.code === "VALIDATION")) {
       return { error: error.message };
     }
     const reference = reportDataError("customer-reservation", error);

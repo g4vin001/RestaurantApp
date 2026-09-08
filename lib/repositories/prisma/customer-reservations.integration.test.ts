@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { createCustomerReservation } from "./customer-reservations";
+import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -44,6 +45,7 @@ describeWithDatabase("customer reservation booking", () => {
         id: restaurantId,
         slug: "reservation-test-restaurant",
         name: "Reservation Test Restaurant",
+        operatingSettings: { opensAtHour: 0, closesAtHour: 24 },
         diningTables: {
           create: [
             { label: "T1", capacity: 4, maxPartySize: 4, shape: "SQUARE" },
@@ -61,6 +63,28 @@ describeWithDatabase("customer reservation booking", () => {
   });
 
   const scheduledAt = new Date("2026-09-01T19:00:00.000Z");
+
+  it("rejects a closed-date booking without creating any reservation", async () => {
+    const schedule = legacyOperatingSchedule(0, 24);
+    schedule.exceptions = [{ date: "2026-09-02", label: "Holiday", periods: [] }];
+    await client.restaurant.update({ where: { id: restaurantId }, data: { operatingSettings: { schedule } } });
+    await expect(createCustomerReservation(client, {
+      restaurantId, customerProfileId: customerAId, partyName: "Holiday request", partySize: 2, scheduledAt,
+    })).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(await client.reservation.count({ where: { restaurantId } })).toBe(0);
+  });
+
+  it("accepts overnight reservations before, but not at, the closing boundary", async () => {
+    const schedule = legacyOperatingSchedule(18, 2);
+    await client.restaurant.update({ where: { id: restaurantId }, data: { operatingSettings: { schedule } } });
+    await createCustomerReservation(client, {
+      restaurantId, customerProfileId: customerAId, partyName: "Late dinner", partySize: 2, scheduledAt: new Date("2026-09-01T17:59:00Z"),
+    });
+    await expect(createCustomerReservation(client, {
+      restaurantId, customerProfileId: customerBId, partyName: "After closing", partySize: 2, scheduledAt: new Date("2026-09-01T18:00:00Z"),
+    })).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(await client.reservation.count({ where: { restaurantId } })).toBe(1);
+  });
 
   it("books a reservation under capacity and links it to the customer", async () => {
     const result = await createCustomerReservation(client, {
