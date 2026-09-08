@@ -19,6 +19,7 @@ import { minutesBetween } from "@/lib/domain/analytics";
 import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
+import { useTableCorrection } from "@/lib/hooks/use-table-correction";
 import { formatRestaurantTime } from "@/lib/time/restaurant-time";
 import type {
   DiningTable,
@@ -117,6 +118,7 @@ function TableDetailPanel({
     previousStatus: TableStatus;
     newStatus: TableStatus;
     occurredAt: string;
+    note?: string;
   }>;
   onChange: (
     status: TableStatus,
@@ -131,6 +133,8 @@ function TableDetailPanel({
   const [clash, setClash] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionPending, setCorrectionPending] = useState(false);
+  const correction = useTableCorrection(table.status, events[0], now.getTime());
 
   useEffect(() => {
     setSeating(false);
@@ -171,14 +175,20 @@ function TableDetailPanel({
   };
 
   const confirmCorrection = async () => {
-    const result = await onCorrect(correctionReason);
-    if (!result.ok) {
-      setError(result.error ?? "That action could not be corrected.");
-      return;
+    if (!correction.eligible || correctionPending || correctionReason.trim().length < 4) return;
+    setCorrectionPending(true);
+    try {
+      const result = await onCorrect(correctionReason);
+      if (!result.ok) {
+        setError(result.error ?? "That action could not be corrected.");
+        return;
+      }
+      setCorrecting(false);
+      setCorrectionReason("");
+      setError(null);
+    } finally {
+      setCorrectionPending(false);
     }
-    setCorrecting(false);
-    setCorrectionReason("");
-    setError(null);
   };
 
   return (
@@ -289,22 +299,25 @@ function TableDetailPanel({
         <button
           type="button"
           onClick={() => setCorrecting((value) => !value)}
-          disabled={!events.length}
+          disabled={!correction.eligible || correctionPending}
           className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-stone-200 px-3 text-sm font-semibold text-stone-600 hover:border-amber-300 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Undo2 size={16} />
           Correct last action
         </button>
         <p className="mt-2 text-xs leading-5 text-stone-500">
-          Available for 15 minutes. A reason is kept in the table audit history.
+          {correction.eligible ? "Available for 15 minutes. A reason is kept in the table audit history." : correction.reason}
         </p>
-        {correcting && (
+        {correcting && correction.eligible && (
           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
             <label className="text-xs font-semibold text-amber-950">
               Correction reason
               <input
                 autoFocus
                 value={correctionReason}
+                minLength={4}
+                maxLength={500}
+                disabled={correctionPending}
                 onChange={(event) => setCorrectionReason(event.target.value)}
                 placeholder="For example: tapped by mistake"
                 className="mt-1 min-h-10 w-full rounded-lg border border-amber-300 bg-white px-3 text-sm text-stone-800"
@@ -314,6 +327,7 @@ function TableDetailPanel({
               <button
                 type="button"
                 onClick={() => setCorrecting(false)}
+                disabled={correctionPending}
                 className="min-h-9 flex-1 rounded-lg border border-amber-300 px-3 text-xs font-semibold text-amber-900"
               >
                 Keep current
@@ -321,9 +335,10 @@ function TableDetailPanel({
               <button
                 type="button"
                 onClick={confirmCorrection}
+                disabled={correctionPending || correctionReason.trim().length < 4}
                 className="min-h-9 flex-1 rounded-lg bg-amber-800 px-3 text-xs font-semibold text-white"
               >
-                Apply correction
+                {correctionPending ? "Correcting…" : "Apply correction"}
               </button>
             </div>
           </div>

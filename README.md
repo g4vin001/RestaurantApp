@@ -159,6 +159,38 @@ isolated database configured with `HALINA_TEST_DATABASE_URL`; they are skipped
 when it is absent. Authenticated multi-device/browser verification remains a
 separate release check.
 
+## Staff seating and live shift reliability
+
+Authorized staff can seat waitlist parties and reservations at one table or a
+same-zone pair, and move seated reservations to another fitting table or pair.
+The picker uses the manager's recommendation rules, shows labels, zone, total
+capacity and spare seats, and requires a deliberate confirmation. It loads
+recommendations when opened and initially shows the best 12 options; the rest
+remain available through **Show all suitable options**. This avoids rendering
+every possible table pair for every guest on a busy shift. Staff must confirm
+that tables can physically be joined because the floor model has no adjacency
+data. Upcoming booking conflicts stay excluded; managers retain deliberate
+clash overrides. Every save still checks permissions, availability, capacity,
+booking conflicts and revisions in the shared transaction.
+
+The staff workspace shares one realtime subscription between its desktop and
+mobile indicators. **Live across devices** requires a subscribed channel and
+a newly received server snapshot. A manual refresh alone cannot turn a failed
+subscription green. Reconnects and returning to a backgrounded tab refresh
+state, concurrent notifications are coalesced, and a refresh that takes more
+than 20 seconds is shown as unconfirmed with a retry action. Seating and
+correction forms show pending feedback and disable submission while offline.
+An ended work session explains how to clock in again.
+
+Manager and staff correction controls use the same eligibility rule: the
+latest matching transition within 15 minutes, excluding corrections and table
+moves. Controls expire while the page is open. The server requires a 4–500
+character reason and verifies the latest command on every linked table before
+changing the group atomically. The Prisma regression suite covers staff pair
+seating, manager visibility, public availability, retries, conflicts and
+correction; it requires `HALINA_TEST_DATABASE_URL`. Browser verification with
+authenticated manager and staff accounts remains a separate release gate.
+
 ## Known limitations
 
 - Vercel builds do not run database migrations. Every release must run `migrate status`, review pending SQL, and run `migrate deploy` through `DIRECT_URL` on port 5432 before deploying code that depends on it.

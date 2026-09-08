@@ -1,5 +1,6 @@
 import { canTransitionTable } from "@/lib/domain/transitions";
 import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
+import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
 import type {
   DemoState,
   QueueEntry,
@@ -218,28 +219,14 @@ export function correctLastTableTransition(
     return { ok: false, error: "Table was not found on the published floor." };
 
   const event = state.events.find((item) => item.tableId === tableId);
-  if (!event)
-    return { ok: false, error: "There is no recent table action to correct." };
-  if (event.note?.startsWith("Correction:"))
-    return { ok: false, error: "The latest table action is already a correction." };
-  if (event.note?.startsWith("Reservation moved"))
-    return {
-      ok: false,
-      error: "A table move can't be undone with Correct — move the reservation back instead.",
-    };
-  if (table.status !== event.newStatus)
-    return { ok: false, error: "The table changed again; refresh before correcting it." };
+  const eligibility = tableCorrectionEligibility(table.status, event, Date.parse(occurredAt));
+  if (!event || !eligibility.eligible) {
+    return { ok: false, error: eligibility.reason ?? "There is no recent table action to correct." };
+  }
 
   const correctionReason = reason.trim();
-  if (correctionReason.length < 4)
-    return { ok: false, error: "Add a short reason for the correction." };
-  const ageMinutes =
-    (Date.parse(occurredAt) - Date.parse(event.occurredAt)) / 60_000;
-  if (ageMinutes > 15)
-    return {
-      ok: false,
-      error: "Only the most recent 15 minutes can be corrected. Use a new status change instead.",
-    };
+  if (correctionReason.length < 4 || correctionReason.length > 500)
+    return { ok: false, error: "Add a correction reason between 4 and 500 characters." };
 
   const seatedQueue = state.queue.find(
     (entry) =>
@@ -273,15 +260,15 @@ export function correctLastTableTransition(
         : [tableId]);
   const affectedIds = [...new Set(linkedIds)];
 
-  const originals = affectedIds.map((id) =>
-    state.events.find(
-      (item) =>
-        item.tableId === id &&
-        item.occurredAt === event.occurredAt &&
-        item.newStatus === event.newStatus &&
-        !item.note?.startsWith("Correction:"),
-    ),
-  );
+  const originals = affectedIds.map((id) => {
+    const latest = state.events.find((item) => item.tableId === id);
+    const linkedTable = state.tables.find((item) => item.id === id && item.active);
+    return latest && linkedTable &&
+      latest.occurredAt === event.occurredAt &&
+      latest.newStatus === event.newStatus &&
+      tableCorrectionEligibility(linkedTable.status, latest, Date.parse(occurredAt)).eligible
+      ? latest : undefined;
+  });
   if (originals.some((item) => !item))
     return {
       ok: false,
@@ -529,8 +516,13 @@ export interface TableRecommendation {
   reason: string;
 }
 
+export type SeatingRecommendationState = {
+  tables: Array<Pick<DemoState["tables"][number], "id" | "label" | "capacity" | "zone" | "active" | "status" | "statusChangedAt">>;
+  reservations: Array<Pick<DemoState["reservations"][number], "id" | "tableId" | "tableIds" | "status" | "scheduledAt">>;
+};
+
 function reservationConflictsWithTable(
-  state: DemoState,
+  state: SeatingRecommendationState,
   tableId: string,
   now: Date,
 ) {
@@ -538,14 +530,14 @@ function reservationConflictsWithTable(
     (reservation) =>
       (reservation.tableId === tableId ||
         reservation.tableIds?.includes(tableId)) &&
-      ["CONFIRMED", "ARRIVED"].includes(reservation.status) &&
+      ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status) &&
       Math.abs(Date.parse(reservation.scheduledAt) - now.getTime()) <
         90 * 60_000,
   );
 }
 
 export function recommendTables(
-  state: DemoState,
+  state: SeatingRecommendationState,
   entry: Pick<QueueEntry, "partySize" | "preferredZone">,
   now = new Date(),
 ) {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
@@ -14,7 +15,6 @@ import {
   LogOut,
   MapPin,
   Plus,
-  RotateCcw,
   Rows3,
   ShieldCheck,
   Sparkles,
@@ -26,6 +26,10 @@ import {
 } from "lucide-react";
 import { clockOut } from "@/app/work/actions";
 import { StaffOperationsRefresh } from "@/components/staff/StaffOperationsRefresh";
+import { StaffOperationsProvider } from "@/components/staff/StaffOperationsProvider";
+import { StaffSeatingPicker } from "@/components/staff/StaffSeatingPicker";
+import { StaffTableCorrection } from "@/components/staff/StaffTableCorrection";
+import type { SeatingRecommendationState } from "@/lib/domain/operations";
 import type { TableStatus } from "@/lib/domain/types";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { readFlash } from "@/lib/flash";
@@ -41,7 +45,6 @@ import {
 import {
   addStaffQueueEntry,
   addStaffReservation,
-  correctStaffTable,
   editStaffQueueEntry,
   editStaffReservation,
   moveStaffReservationTable,
@@ -70,11 +73,13 @@ type FloorTable = {
   currentStatus: TableStatus;
   statusRevision: number;
   updatedAt: Date;
+  statusEvents?: Array<{ toStatus: TableStatus; occurredAt: Date; reason: string | null }>;
   sessions: Array<{
     partySize: number;
     seatedAt: Date;
     queueEntry: { partyName: string } | null;
     reservation: { partyName: string } | null;
+    seatingAssignment: { tables: Array<{ diningTable: { id: string; label: string } }> } | null;
   }>;
 };
 
@@ -102,6 +107,7 @@ type ShiftReservation = {
   contact: string | null;
   notes: string | null;
   assignedTable: { label: string } | null;
+  seatingAssignments: Array<{ tables: Array<{ diningTable: { label: string } }> }>;
 };
 
 const inputClass =
@@ -250,6 +256,8 @@ function TableCard({
 }) {
   const session = table.sessions[0];
   const guestName = session?.queueEntry?.partyName ?? session?.reservation?.partyName;
+  const linkedLabels = session?.seatingAssignment?.tables.filter((item) => item.diningTable.id !== table.id).map((item) => item.diningTable.label) ?? [];
+  const latestEvent = table.statusEvents?.[0];
   return (
     <article className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <div className={`h-1.5 ${table.currentStatus === "AVAILABLE" ? "bg-emerald-500" : table.currentStatus === "OCCUPIED" ? "bg-sky-500" : table.currentStatus === "CLEANING" ? "bg-orange-400" : table.currentStatus === "OUT_OF_SERVICE" ? "bg-rose-500" : "bg-violet-400"}`} />
@@ -270,7 +278,8 @@ function TableCard({
           {session ? (
             <>
               <span className="font-bold text-stone-800">{guestName ?? `${session.partySize}-guest party`}</span>
-              <span> · {session.partySize} guests · seated {minutesSince(session.seatedAt, now)} min</span>
+              <span> · {session.partySize} guests{linkedLabels.length ? " across linked tables" : ""} · seated {minutesSince(session.seatedAt, now)} min</span>
+              {linkedLabels.length > 0 && <p className="mt-1 font-semibold text-sky-800">Linked with {linkedLabels.join(" + ")}. Clearing or correcting updates the whole group.</p>}
             </>
           ) : (
             <span>Status updated {formatRestaurantTime(table.updatedAt, timeZone)} · ready for the next action</span>
@@ -303,21 +312,7 @@ function TableCard({
           </div>
         )}
 
-        {canCorrect && (
-          <details className="group mt-3 rounded-xl border border-amber-200 bg-amber-50/50">
-            <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-3 text-xs font-bold text-amber-900">
-              <span className="inline-flex items-center gap-1.5"><RotateCcw size={13} /> Correct latest action</span>
-              <ChevronDown size={14} className="transition group-open:rotate-180" />
-            </summary>
-            <form action={correctStaffTable} className="space-y-2 border-t border-amber-200 p-3">
-              <input type="hidden" name="tableId" value={table.id} />
-              <input type="hidden" name="expectedRevision" value={table.statusRevision} />
-              <input name="reason" required minLength={4} maxLength={500} placeholder="What needs correcting?" className={compactInputClass} />
-              <button className="min-h-10 w-full rounded-lg bg-amber-800 px-3 text-xs font-bold text-white">Undo linked action</button>
-              <p className="text-[11px] leading-4 text-amber-800">Available for the latest linked action within 15 minutes.</p>
-            </form>
-          </details>
-        )}
+        {canCorrect && <StaffTableCorrection tableId={table.id} status={table.currentStatus} revision={table.statusRevision} now={now.getTime()} event={latestEvent ? { newStatus: latestEvent.toStatus, occurredAt: latestEvent.occurredAt.toISOString(), note: latestEvent.reason } : null} />}
       </div>
     </article>
   );
@@ -331,7 +326,6 @@ function QueueCard({
   canManage,
   canSeat,
   canViewContacts,
-  availableTables,
 }: {
   entry: QueueParty;
   index: number;
@@ -340,11 +334,9 @@ function QueueCard({
   canManage: boolean;
   canSeat: boolean;
   canViewContacts: boolean;
-  availableTables: FloorTable[];
 }) {
   const elapsed = minutesSince(entry.joinedAt, now);
   const isLate = elapsed > entry.promisedWaitMinutes;
-  const suitableTables = availableTables.filter((table) => table.capacity >= entry.partySize);
   return (
     <article className={`rounded-2xl border bg-white p-4 shadow-sm ${entry.status === "CALLED" ? "border-sky-200 ring-2 ring-sky-50" : isLate ? "border-amber-200" : "border-stone-200"}`}>
       <div className="flex items-start gap-3">
@@ -380,17 +372,13 @@ function QueueCard({
             <button className={secondaryButtonClass}><UserCheck size={14} /> Call party</button>
           </form>
         )}
-        {canSeat && suitableTables.length > 0 && (
-          <form action={seatStaffQueueEntry} className="flex flex-1 gap-2 sm:flex-none">
+        {canSeat && (
+          <form action={seatStaffQueueEntry} className="w-full min-w-0">
             <input type="hidden" name="queueId" value={entry.id} />
             <input type="hidden" name="expectedRevision" value={entry.revision} />
-            <select name="tableId" aria-label={`Table for ${entry.partyName}`} className={compactInputClass + " min-w-28 flex-1"}>
-              {suitableTables.map((table) => <option key={table.id} value={table.id}>{table.label} · {table.capacity}</option>)}
-            </select>
-            <button className={primaryButtonClass}><Utensils size={14} /> Seat</button>
+            <StaffSeatingPicker partyName={entry.partyName} partySize={entry.partySize} preferredZone={entry.preferredZone} />
           </form>
         )}
-        {canSeat && suitableTables.length === 0 && <p className="py-2 text-xs font-semibold text-amber-700">No available table fits this party yet.</p>}
         {canManage && (
           <>
             <form action={reorderStaffQueueEntry}>
@@ -447,7 +435,6 @@ function ReservationCard({
   now,
   timeZone,
   tables,
-  availableTables,
   canManage,
   canSeat,
   canViewContacts,
@@ -456,12 +443,11 @@ function ReservationCard({
   now: Date;
   timeZone: string;
   tables: FloorTable[];
-  availableTables: FloorTable[];
   canManage: boolean;
   canSeat: boolean;
   canViewContacts: boolean;
 }) {
-  const suitableTables = availableTables.filter((table) => table.capacity >= reservation.partySize);
+  const seatedLabels = reservation.seatingAssignments[0]?.tables.map((item) => item.diningTable.label).join(" + ");
   const timeLabel = reservationTimeLabel(reservation.scheduledAt, now);
   const needsAttention = reservation.status === "PENDING_APPROVAL" || reservation.status === "ARRIVED";
   return (
@@ -476,7 +462,7 @@ function ReservationCard({
           <p className="mt-1 text-xs font-semibold text-stone-600">
             {formatRestaurantDateTime(reservation.scheduledAt, timeZone)} · {timeLabel}
           </p>
-          <p className="mt-1 text-xs text-stone-500">{reservation.partySize} guests · {reservation.assignedTable?.label ?? "Table not assigned"}</p>
+          <p className="mt-1 text-xs text-stone-500">{reservation.partySize} guests · {seatedLabels || reservation.assignedTable?.label || "Table not assigned"}</p>
           {(canViewContacts && reservation.contact) || reservation.notes ? (
             <div className="mt-2 space-y-1 text-xs text-stone-600">
               {canViewContacts && reservation.contact && <p className="flex items-center gap-1.5"><Contact size={13} /> {reservation.contact}</p>}
@@ -503,17 +489,13 @@ function ReservationCard({
             <button className={secondaryButtonClass}><UserCheck size={14} /> Mark arrived</button>
           </form>
         )}
-        {canSeat && ["CONFIRMED", "ARRIVED"].includes(reservation.status) && suitableTables.length > 0 && (
-          <form action={seatStaffReservation} className="flex flex-1 gap-2">
+        {canSeat && ["CONFIRMED", "ARRIVED"].includes(reservation.status) && (
+          <form action={seatStaffReservation} className="w-full min-w-0">
             <input type="hidden" name="reservationId" value={reservation.id} />
             <input type="hidden" name="expectedRevision" value={reservation.revision} />
-            <select name="tableId" defaultValue={reservation.assignedTableId && suitableTables.some((table) => table.id === reservation.assignedTableId) ? reservation.assignedTableId : suitableTables[0]?.id} aria-label={`Table for ${reservation.partyName}`} className={compactInputClass + " min-w-28 flex-1"}>
-              {suitableTables.map((table) => <option key={table.id} value={table.id}>{table.label} · {table.capacity}</option>)}
-            </select>
-            <button className={primaryButtonClass}><Utensils size={14} /> Seat</button>
+            <StaffSeatingPicker partyName={reservation.partyName} partySize={reservation.partySize} reservationId={reservation.id} />
           </form>
         )}
-        {canSeat && ["CONFIRMED", "ARRIVED"].includes(reservation.status) && suitableTables.length === 0 && <p className="py-2 text-xs font-semibold text-amber-700">No available table fits this party yet.</p>}
         {canManage && reservation.status === "SEATED" && (
           <form action={updateStaffReservationStatus}>
             <input type="hidden" name="reservationId" value={reservation.id} />
@@ -522,14 +504,11 @@ function ReservationCard({
             <button className={primaryButtonClass}><Sparkles size={14} /> Complete</button>
           </form>
         )}
-        {canSeat && reservation.status === "SEATED" && suitableTables.length > 0 && (
-          <form action={moveStaffReservationTable} className="flex flex-1 gap-2">
+        {canSeat && reservation.status === "SEATED" && (
+          <form action={moveStaffReservationTable} className="w-full min-w-0">
             <input type="hidden" name="reservationId" value={reservation.id} />
             <input type="hidden" name="expectedRevision" value={reservation.revision} />
-            <select name="tableId" aria-label={`New table for ${reservation.partyName}`} className={compactInputClass + " min-w-28 flex-1"}>
-              {suitableTables.map((table) => <option key={table.id} value={table.id}>{table.label} · {table.capacity}</option>)}
-            </select>
-            <button className={secondaryButtonClass}>Move table</button>
+            <StaffSeatingPicker partyName={reservation.partyName} partySize={reservation.partySize} reservationId={reservation.id} move />
           </form>
         )}
       </div>
@@ -587,7 +566,7 @@ export default async function StaffOperationsPage() {
   const reservationWindowEnd = new Date(reservationWindowStart.getTime() + 48 * 60 * 60_000);
 
   const needsTableData = canViewFloor || canManageGuests || canSeat;
-  const [error, message, tableResult, queueResult, reservationResult] = await Promise.all([
+  const [error, message, tableResult, queueResult, reservationResult, seatingBookings] = await Promise.all([
     readFlash("error"),
     readFlash("message"),
     needsTableData
@@ -602,6 +581,11 @@ export default async function StaffOperationsPage() {
             currentStatus: true,
             statusRevision: true,
             updatedAt: true,
+            statusEvents: canCorrect ? {
+              orderBy: { occurredAt: "desc" },
+              take: 1,
+              select: { toStatus: true, occurredAt: true, reason: true },
+            } : false,
             sessions: {
               where: { status: "ACTIVE" },
               orderBy: { seatedAt: "desc" },
@@ -611,6 +595,7 @@ export default async function StaffOperationsPage() {
                 seatedAt: true,
                 queueEntry: { select: { partyName: true } },
                 reservation: { select: { partyName: true } },
+                seatingAssignment: { select: { tables: { select: { diningTable: { select: { id: true, label: true } } } } } },
               },
             },
           },
@@ -660,9 +645,24 @@ export default async function StaffOperationsPage() {
             contact: canViewContacts,
             notes: true,
             assignedTable: { select: { label: true } },
+            seatingAssignments: {
+              where: { status: { in: ["ACTIVE", "CLEARING"] } },
+              orderBy: { seatedAt: "desc" },
+              take: 1,
+              select: { tables: { select: { diningTable: { select: { label: true } } } } },
+            },
           },
         })
       : Promise.resolve([]),
+    canSeat ? prisma.reservation.findMany({
+      where: {
+        restaurantId: context.restaurantId,
+        status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
+        assignedTableId: { not: null },
+        scheduledAt: { gte: new Date(now.getTime() - 90 * 60_000), lte: new Date(now.getTime() + 90 * 60_000) },
+      },
+      select: { id: true, assignedTableId: true, scheduledAt: true, status: true },
+    }) : Promise.resolve([]),
   ]);
 
   const tables = tableResult as FloorTable[];
@@ -672,6 +672,16 @@ export default async function StaffOperationsPage() {
     (left, right) => reservationPriority[left.status] - reservationPriority[right.status] || left.scheduledAt.getTime() - right.scheduledAt.getTime(),
   );
   const availableTables = tables.filter((table) => table.currentStatus === "AVAILABLE");
+  const seatingState: SeatingRecommendationState = {
+    tables: tables.map((table) => ({
+      id: table.id, label: table.label, capacity: table.capacity, zone: table.zone,
+      active: true, status: table.currentStatus, statusChangedAt: table.updatedAt.toISOString(),
+    })),
+    reservations: seatingBookings.map((reservation) => ({
+      id: reservation.id, tableId: reservation.assignedTableId ?? undefined,
+      status: reservation.status, scheduledAt: reservation.scheduledAt.toISOString(),
+    })),
+  };
   const groupedTables = Map.groupBy(tables, (table) => table.zone || "Main");
   const occupiedTables = tables.filter((table) => table.currentStatus === "OCCUPIED").length;
   const availableSeats = availableTables.reduce((sum, table) => sum + table.capacity, 0);
@@ -688,6 +698,7 @@ export default async function StaffOperationsPage() {
   ];
 
   return (
+    <StaffOperationsProvider key={context.restaurantId} restaurantId={context.restaurantId} snapshotId={randomUUID()} seating={{ state: canSeat ? seatingState : { tables: [], reservations: [] }, now: now.getTime() }}>
     <div className="staff-app min-h-screen bg-[#f4f4f0] text-stone-900">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-emerald-950 text-white lg:flex">
         <div className="flex h-18 items-center gap-3 border-b border-white/10 px-5">
@@ -731,7 +742,7 @@ export default async function StaffOperationsPage() {
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-900 text-sm font-black text-white">H</span>
               <div className="min-w-0"><p className="truncate text-sm font-bold text-stone-950">{context.restaurantName}</p><p className="truncate text-xs text-stone-500">{context.staffName} · {context.staffRoleName ?? context.jobTitle}</p></div>
             </div>
-            <div className="hidden lg:block"><StaffOperationsRefresh restaurantId={context.restaurantId} /></div>
+            <div className="hidden lg:block"><StaffOperationsRefresh /></div>
             <div className="flex items-center gap-2">
               {context.restaurantEnvironment === "TEST" && <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-800">Test restaurant</span>}
               <span className={`hidden rounded-full border px-3 py-1.5 text-xs font-bold sm:inline-flex ${context.walkInAvailability === "AVAILABLE" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : context.walkInAvailability === "LIMITED" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>{context.walkInAvailability === "AVAILABLE" ? "Accepting walk-ins" : context.walkInAvailability === "LIMITED" ? "Walk-ins limited" : "Walk-ins paused"}</span>
@@ -758,7 +769,7 @@ export default async function StaffOperationsPage() {
                   <div className="rounded-2xl border border-white/10 bg-white/8 px-4 py-3"><p className="text-emerald-200">Session ends</p><p className="mt-1 font-bold text-white">{formatRestaurantTime(context.expiresAt, context.restaurantTimezone)}</p></div>
                 </div>
               </div>
-              <div className="mt-4 lg:hidden"><StaffOperationsRefresh restaurantId={context.restaurantId} inverse /></div>
+              <div className="mt-4 lg:hidden"><StaffOperationsRefresh inverse /></div>
             </div>
           </section>
 
@@ -805,7 +816,7 @@ export default async function StaffOperationsPage() {
                     </form>
                   </details>
                 )}
-                <div className="mt-4 space-y-3">{queue.map((entry, index) => <QueueCard key={entry.id} entry={entry} index={index} total={queue.length} now={now} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} availableTables={availableTables} />)}{queue.length === 0 && <EmptyState icon={Rows3} title="No one is waiting" detail="New walk-ins will appear here in queue order." />}</div>
+                <div className="mt-4 space-y-3">{queue.map((entry, index) => <QueueCard key={entry.id} entry={entry} index={index} total={queue.length} now={now} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} />)}{queue.length === 0 && <EmptyState icon={Rows3} title="No one is waiting" detail="New walk-ins will appear here in queue order." />}</div>
               </section>
 
               <section id="reservations" className="scroll-mt-32">
@@ -824,7 +835,7 @@ export default async function StaffOperationsPage() {
                     </form>
                   </details>
                 )}
-                <div className="mt-4 space-y-3">{reservations.map((reservation) => <ReservationCard key={reservation.id} reservation={reservation} now={now} timeZone={context.restaurantTimezone} tables={tables} availableTables={availableTables} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} />)}{reservations.length === 0 && <EmptyState icon={CalendarDays} title="No active bookings in this window" detail="Confirmed reservations and new customer requests will appear here." />}</div>
+                <div className="mt-4 space-y-3">{reservations.map((reservation) => <ReservationCard key={reservation.id} reservation={reservation} now={now} timeZone={context.restaurantTimezone} tables={tables} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} />)}{reservations.length === 0 && <EmptyState icon={CalendarDays} title="No active bookings in this window" detail="Confirmed reservations and new customer requests will appear here." />}</div>
               </section>
             </div>
           )}
@@ -836,5 +847,6 @@ export default async function StaffOperationsPage() {
         </main>
       </div>
     </div>
+    </StaffOperationsProvider>
   );
 }

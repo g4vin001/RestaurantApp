@@ -6,6 +6,9 @@ import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { executeOperationsCommand } from "./operations-commands";
 import { PrismaOperationsRepository } from "./prisma-operations";
 import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { randomUUID } from "node:crypto";
+import { fetchPublicRestaurantBySlug } from "./public-restaurant-view";
+import { staffSeatingOptions } from "@/lib/staff/seating";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -175,6 +178,39 @@ describeWithDatabase("Prisma operations repository", () => {
     expect(snapshot.tables.map((table) => table.label)).toEqual(["T1", "T2"]);
     expect(snapshot.queue.map((entry) => entry.partyName)).toEqual(["Reyes"]);
     expect(snapshot.floorPlans).toHaveLength(1);
+  });
+
+  it("shares staff pair seating and correction with managers and the public projection", async () => {
+    const manager = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const before = await manager.loadSnapshot();
+    const entry = before.queue[0];
+    const pair = staffSeatingOptions(before, entry, new Date()).find((option) => option.tableIds.length === 2)!;
+    expect(pair.tableIds).toHaveLength(2);
+    const member = await client.restaurantMembership.findUniqueOrThrow({ where: { restaurantId_profileId: { restaurantId, profileId: hostId } } });
+    const scope = { profileId: hostId, restaurantId, membershipId: member.id, membershipRole: "STAFF" as const, permissions: ["SEAT_PARTIES", "CORRECT_RECENT_ACTION"] as ("SEAT_PARTIES" | "CORRECT_RECENT_ACTION")[] };
+    const command = { type: "SEAT_QUEUE" as const, commandId: randomUUID(), entryId: entry.id, expectedRevision: entry.revision!, tableIds: pair.tableIds };
+    await expect(executeOperationsCommand(client, { ...scope, permissions: [] }, command)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await executeOperationsCommand(client, scope, command);
+    await executeOperationsCommand(client, scope, command); // Retrying must not seat twice.
+    const seated = await manager.loadSnapshot();
+    expect(seated.tables.filter((table) => pair.tableIds.includes(table.id)).map((table) => table.status)).toEqual(["OCCUPIED", "OCCUPIED"]);
+    expect(seated.queue.find((party) => party.id === entry.id)?.assignedTableIds).toHaveLength(2);
+    expect(await client.seatingAssignment.count({ where: { restaurantId, status: "ACTIVE" } })).toBe(1);
+    const customer = await fetchPublicRestaurantBySlug(client, "repository-test");
+    expect(customer).not.toBeNull();
+    expect(customer?.availableSeatCapacity).toBe(0);
+    expect(JSON.stringify(customer)).not.toContain(entry.partyName);
+    await expect(executeOperationsCommand(client, scope, { ...command, commandId: randomUUID() })).rejects.toMatchObject({ code: "CONFLICT" });
+    const table = await client.diningTable.findUniqueOrThrow({ where: { id: pair.tableIds[0] } });
+    const correction = { type: "CORRECT_TABLE" as const, commandId: randomUUID(), tableId: table.id, expectedRevision: table.statusRevision, reason: "Wrong party was seated" };
+    await executeOperationsCommand(client, scope, correction);
+    const restored = await manager.loadSnapshot();
+    expect(restored.tables.filter((item) => pair.tableIds.includes(item.id)).map((item) => item.status)).toEqual(["AVAILABLE", "AVAILABLE"]);
+    expect(restored.queue.find((party) => party.id === entry.id)?.status).toBe("WAITING");
+    expect(await client.diningSession.count({ where: { restaurantId } })).toBe(0);
+    expect((await fetchPublicRestaurantBySlug(client, "repository-test"))?.availableSeatCapacity).toBe(6);
+    const revised = await client.diningTable.findUniqueOrThrow({ where: { id: table.id } });
+    await expect(executeOperationsCommand(client, scope, { ...correction, commandId: randomUUID(), expectedRevision: revised.statusRevision })).rejects.toMatchObject({ code: "VALIDATION" });
   });
 
   it("persists schedules for another device, preserves unrelated settings, and rejects stale edits", async () => {

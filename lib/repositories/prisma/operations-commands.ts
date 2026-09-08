@@ -10,12 +10,12 @@ import type {
   TableStatus,
 } from "@/lib/generated/prisma/client";
 import { canTransitionTable } from "@/lib/domain/transitions";
+import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
 import { isWithinServiceHours, validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 
-const CORRECTION_WINDOW_MS = 15 * 60 * 1_000;
 const RESERVATION_CONFLICT_WINDOW_MS = 90 * 60 * 1_000;
 const MANAGER_ROLES: MembershipRole[] = ["OWNER", "MANAGER"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -481,6 +481,7 @@ async function correctTable(
 ) {
   requirePermission(scope, "CORRECT_RECENT_ACTION");
   const reason = text(command.reason, "Correction reason", 500, true) as string;
+  if (reason.length < 4) fail("VALIDATION", "Add a correction reason between 4 and 500 characters.");
   const table = await tx.diningTable.findFirst({
     where: { id: command.tableId, restaurantId: scope.restaurantId, archivedAt: null },
   });
@@ -490,22 +491,10 @@ async function correctTable(
     where: { restaurantId: scope.restaurantId, diningTableId: table.id },
     orderBy: { occurredAt: "desc" },
   });
-  if (!latest || Date.now() - latest.occurredAt.getTime() > CORRECTION_WINDOW_MS) {
-    fail("VALIDATION", "Only the latest table action can be corrected within 15 minutes.");
-  }
-  if (latest.reason?.startsWith("Correction:")) {
-    fail(
-      "VALIDATION",
-      "A correction cannot be corrected again. Use a deliberate new table status change.",
-    );
-  }
-  if (latest.reason?.startsWith("Reservation moved")) {
-    fail(
-      "VALIDATION",
-      "A table move can't be undone with Correct — move the reservation back instead.",
-    );
-  }
-  if (latest.toStatus !== table.currentStatus) fail("CONFLICT", "The latest table action no longer matches the table.");
+  const eligibility = tableCorrectionEligibility(table.currentStatus, latest ? {
+    newStatus: latest.toStatus, occurredAt: latest.occurredAt.toISOString(), note: latest.reason,
+  } : null, Date.now());
+  if (!latest || !eligibility.eligible) fail("VALIDATION", eligibility.reason ?? "There is no recent table action to correct.");
   let assignment = await activeAssignmentForTable(
     tx,
     scope.restaurantId,
@@ -527,6 +516,16 @@ async function correctTable(
     });
   }
   const tableIds = assignment?.tables.map((item) => item.diningTableId) ?? [table.id];
+  const linkedTables = await tx.diningTable.findMany({
+    where: { id: { in: tableIds }, restaurantId: scope.restaurantId, active: true, archivedAt: null },
+    select: { currentStatus: true, statusEvents: { orderBy: { occurredAt: "desc" }, take: 1 } },
+  });
+  if (linkedTables.length !== tableIds.length || linkedTables.some((linked) => {
+    const event = linked.statusEvents[0];
+    return !event || event.sourceCommandId !== latest.sourceCommandId ||
+      event.fromStatus !== latest.fromStatus || event.toStatus !== latest.toStatus ||
+      linked.currentStatus !== latest.toStatus;
+  })) fail("CONFLICT", "The linked tables changed again. Refresh before correcting the group.");
   const now = await changeTables(
     tx,
     scope,
