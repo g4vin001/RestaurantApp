@@ -61,7 +61,8 @@ test("queue writes persist and synchronize across two demo tabs", async ({
   const party = page.locator("article").filter({ hasText: "Playwright walk-in" });
   await party.getByRole("button", { name: "Seat", exact: true }).click();
   const seatDialog = page.getByRole("dialog", { name: "Seat Playwright walk-in" });
-  await seatDialog.locator("button").filter({ hasText: "Best match" }).click();
+  await seatDialog.getByRole("button", { name: /^T2, .* seats, Available$/ }).click();
+  await seatDialog.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(
     page.getByText("Party seated and table session started."),
   ).toBeVisible();

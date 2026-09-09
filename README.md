@@ -250,15 +250,19 @@ state without inventing an arrival.
 `main`. It performs a clean install, applies every committed migration to a
 fresh PostgreSQL 17 service, runs lint, typecheck, unit and database integration
 tests, and builds the app. A separate job installs Chromium and runs the manager
-demo browser workflows, including mobile and cross-tab checks. Failed browser
+demo browser workflows, including mobile, tablet schedules and cross-tab checks.
+A third job starts an isolated local Supabase stack and uses separate manager,
+staff and other-restaurant browser sessions to check email/PIN clock-in, paired
+seating, corrections, clearing, reconnect, Data API denial and clock-out. These
+fixtures use generated accounts on loopback services only. Failed browser
 runs retain diagnostic artifacts for seven days.
 
 The database job uses only disposable CI credentials. `test/postgres/bootstrap.sql`
 creates the Supabase schema dependencies required by the real migrations; it
-does not emulate Supabase's Auth, Data API or Realtime services. Authenticated
-manager/staff browser and live subscription checks still use an isolated
-Supabase environment with dedicated accounts. This CI job does not apply
-migrations to Debug or production.
+does not emulate Supabase's Auth, Data API or Realtime services. The authenticated
+browser job uses actual local Supabase services for those boundaries. Neither
+job applies migrations to Debug or production. Deployment-specific configuration
+still needs a smoke check on the intended environment.
 
 Workflow setup follows the official [GitHub PostgreSQL service guide](https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers)
 and [Playwright CI guide](https://playwright.dev/docs/ci).

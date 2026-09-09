@@ -32,6 +32,16 @@ describeWithDatabase("Prisma operations repository", () => {
     client = new PrismaClient({ adapter: new PrismaPg(pool) });
   });
 
+  async function writableManagerRepository() {
+    const membership = await client.restaurantMembership.findUniqueOrThrow({
+      where: { restaurantId_profileId: { restaurantId, profileId: ownerId } },
+    });
+    return new PrismaOperationsRepository(client, {
+      profileId: ownerId, restaurantId,
+      membershipId: membership.id, membershipRole: membership.role,
+    });
+  }
+
   beforeEach(async () => {
     await client.seatingAssignment.deleteMany({
       where: { restaurantId: { in: [restaurantId, otherRestaurantId] } },
@@ -223,7 +233,7 @@ describeWithDatabase("Prisma operations repository", () => {
   });
 
   it.each(["CONFIRMED", "ARRIVED"] as const)("restores a %s reservation's arrival state when correcting seating", async (status) => {
-    const repository = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const repository = await writableManagerRepository();
     const tables = await client.diningTable.findMany({ where: { restaurantId } });
     const arrivedAt = status === "ARRIVED" ? new Date() : null;
     const reservation = await client.reservation.create({ data: {
@@ -240,7 +250,7 @@ describeWithDatabase("Prisma operations repository", () => {
   });
 
   it("persists schedules for another device, preserves unrelated settings, and rejects stale edits", async () => {
-    const repository = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const repository = await writableManagerRepository();
     const before = await repository.loadSnapshot();
     const schedule = legacyOperatingSchedule(11, 22);
     schedule.weekly.monday = [{ opensAt: "11:00", closesAt: "14:00" }, { opensAt: "18:00", closesAt: "01:00" }];
@@ -262,7 +272,7 @@ describeWithDatabase("Prisma operations repository", () => {
   });
 
   it("rejects invalid schedules atomically without changing the restaurant name", async () => {
-    const repository = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const repository = await writableManagerRepository();
     const before = await repository.loadSnapshot();
     const schedule = legacyOperatingSchedule(10, 22);
     schedule.weekly.monday.push({ opensAt: "12:00", closesAt: "14:00" });

@@ -79,3 +79,36 @@ jobs:
           name: browser-failures
           path: test-results/
           retention-days: 7
+
+  authenticated:
+    name: Authenticated manager and staff
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      HALINA_AUTH_E2E: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.117.0
+      - run: supabase init --workdir test
+      - name: Start isolated Supabase services
+        run: supabase start --workdir test > /dev/null
+      - name: Configure local service connections
+        run: node test/configure-auth-ci.mjs
+      - name: Apply migrations to local Supabase
+        run: npx prisma migrate deploy
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- --workers=1
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: authenticated-browser-failures
+          path: test-results/
+          retention-days: 7
