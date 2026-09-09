@@ -546,9 +546,13 @@ async function correctTable(
       });
     }
     if (assignment.reservationId) {
+      const reservation = await tx.reservation.findUniqueOrThrow({
+        where: { id: assignment.reservationId, restaurantId: scope.restaurantId },
+        select: { arrivedAt: true },
+      });
       await tx.reservation.update({
         where: { id: assignment.reservationId },
-        data: { status: "ARRIVED", seatedAt: null, assignedTableId: null, revision: { increment: 1 } },
+        data: { status: reservation.arrivedAt ? "ARRIVED" : "CONFIRMED", seatedAt: null, assignedTableId: null, revision: { increment: 1 } },
       });
     }
   } else if (

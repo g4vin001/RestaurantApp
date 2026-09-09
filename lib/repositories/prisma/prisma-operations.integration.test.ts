@@ -9,6 +9,7 @@ import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 import { randomUUID } from "node:crypto";
 import { fetchPublicRestaurantBySlug } from "./public-restaurant-view";
 import { staffSeatingOptions } from "@/lib/staff/seating";
+import { deriveAnalytics } from "@/lib/domain/analytics";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -195,6 +196,14 @@ describeWithDatabase("Prisma operations repository", () => {
     const seated = await manager.loadSnapshot();
     expect(seated.tables.filter((table) => pair.tableIds.includes(table.id)).map((table) => table.status)).toEqual(["OCCUPIED", "OCCUPIED"]);
     expect(seated.queue.find((party) => party.id === entry.id)?.assignedTableIds).toHaveLength(2);
+    expect(seated.sessions.reduce((sum, session) => sum + session.partySize, 0)).toBe(entry.partySize);
+    expect(seated.sessions.every((session) => session.partySize <= seated.tables.find((table) => table.id === session.tableId)!.capacity)).toBe(true);
+    const analyticsEnd = new Date(Date.now() + 60_000);
+    const analytics = deriveAnalytics({ ...seated, sessions: seated.sessions.map((session) => ({ ...session, clearedAt: analyticsEnd.toISOString() })) }, {
+      start: new Date(Date.now() - 60_000), end: analyticsEnd, label: "Pair seating",
+    }, {}, analyticsEnd);
+    expect(analytics.seatUtilization).toBeLessThanOrEqual(100);
+    expect(analytics.tableAnalytics.every((table) => table.seatUtilization !== null && table.seatUtilization <= 100)).toBe(true);
     expect(await client.seatingAssignment.count({ where: { restaurantId, status: "ACTIVE" } })).toBe(1);
     const customer = await fetchPublicRestaurantBySlug(client, "repository-test");
     expect(customer).not.toBeNull();
@@ -211,6 +220,23 @@ describeWithDatabase("Prisma operations repository", () => {
     expect((await fetchPublicRestaurantBySlug(client, "repository-test"))?.availableSeatCapacity).toBe(6);
     const revised = await client.diningTable.findUniqueOrThrow({ where: { id: table.id } });
     await expect(executeOperationsCommand(client, scope, { ...correction, commandId: randomUUID(), expectedRevision: revised.statusRevision })).rejects.toMatchObject({ code: "VALIDATION" });
+  });
+
+  it.each(["CONFIRMED", "ARRIVED"] as const)("restores a %s reservation's arrival state when correcting seating", async (status) => {
+    const repository = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const tables = await client.diningTable.findMany({ where: { restaurantId } });
+    const arrivedAt = status === "ARRIVED" ? new Date() : null;
+    const reservation = await client.reservation.create({ data: {
+      restaurantId, partyName: "Correction fixture", partySize: 5,
+      scheduledAt: new Date(), status, arrivedAt, createdById: ownerId,
+    } });
+    await repository.execute({ type: "SEAT_RESERVATION", commandId: randomUUID(), reservationId: reservation.id, expectedRevision: reservation.revision, tableIds: tables.map((table) => table.id) });
+    const seatedTable = await client.diningTable.findUniqueOrThrow({ where: { id: tables[0].id } });
+    await repository.execute({ type: "CORRECT_TABLE", commandId: randomUUID(), tableId: seatedTable.id, expectedRevision: seatedTable.statusRevision, reason: "Selected the wrong reservation" });
+    const restored = await client.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
+    expect(restored).toMatchObject({ status, arrivedAt, seatedAt: null, assignedTableId: null });
+    expect(await client.diningTable.count({ where: { restaurantId, currentStatus: "AVAILABLE" } })).toBe(2);
+    expect(await client.diningSession.count({ where: { reservationId: reservation.id } })).toBe(0);
   });
 
   it("persists schedules for another device, preserves unrelated settings, and rejects stale edits", async () => {

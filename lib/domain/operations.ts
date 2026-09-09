@@ -705,11 +705,11 @@ function normalizeTableIds(tableIdOrIds: string | string[]) {
   return [...new Set(Array.isArray(tableIdOrIds) ? tableIdOrIds : [tableIdOrIds])];
 }
 
-function allocatePartyAcrossTables(
-  tables: DemoState["tables"],
+export function allocatePartyAcrossTables(
+  tables: Array<Pick<DemoState["tables"][number], "capacity">>,
   partySize: number,
 ) {
-  if (partySize < tables.length) return null;
+  if (!tables.length || partySize < tables.length || tables.reduce((sum, table) => sum + table.capacity, 0) < partySize) return null;
   let remaining = partySize;
   return tables.map((table, index) => {
     const tablesAfter = tables.length - index - 1;
