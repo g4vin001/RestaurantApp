@@ -98,6 +98,7 @@ export interface RestaurantIdentity {
   cleaningTargetMinutes: number;
   opensAtHour: number;
   closesAtHour: number;
+  schedule?: import("@/lib/domain/restaurant-schedule").OperatingSchedule;
   environment?: RestaurantEnvironment;
   revision?: number;
 }

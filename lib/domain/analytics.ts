@@ -1,9 +1,9 @@
 import type { DemoState, TableSession } from "@/lib/domain/types";
 import {
   restaurantDateParts,
-  restaurantWallTimeToUtc,
   startOfRestaurantDay,
 } from "@/lib/time/restaurant-time";
+import { readOperatingSchedule, restaurantServiceStatus, serviceIntervalsBetween } from "@/lib/domain/restaurant-schedule";
 
 export type AnalyticsPreset = "TODAY" | "LAST_7_DAYS" | "LAST_30_DAYS";
 
@@ -40,14 +40,6 @@ export function median(values: number[]) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function restaurantBoundary(date: Date, hour: number, timeZone?: string) {
-  const parts = restaurantDateParts(date, timeZone);
-  return restaurantWallTimeToUtc(
-    `${parts.year}-${parts.month}-${parts.day}T${String(hour).padStart(2, "0")}:00`,
-    timeZone,
-  ) as Date;
-}
-
 export function getAnalyticsRange(
   preset: AnalyticsPreset,
   now = new Date(),
@@ -62,24 +54,6 @@ export function getAnalyticsRange(
     end,
     label: preset === "LAST_7_DAYS" ? "Last 7 days" : "Last 30 days",
   };
-}
-
-function operatingMinutes(state: DemoState, range: AnalyticsRange) {
-  let minutes = 0;
-  const timeZone = state.restaurant.timezone;
-  const firstDay = startOfRestaurantDay(range.start, timeZone);
-  const lastDay = startOfRestaurantDay(range.end, timeZone);
-  for (
-    let day = firstDay.getTime();
-    day <= lastDay.getTime();
-    day += 24 * 60 * 60_000
-  ) {
-    const marker = new Date(day);
-    const open = restaurantBoundary(marker, state.restaurant.opensAtHour, timeZone);
-    const close = restaurantBoundary(marker, state.restaurant.closesAtHour, timeZone);
-    minutes += overlapMinutes(open, close, range.start, range.end);
-  }
-  return minutes;
 }
 
 function sessionEnd(session: TableSession, now: Date) {
@@ -215,18 +189,14 @@ export function deriveAnalytics(
     .map((session) =>
       minutesBetween(session.clearedAt as string, session.readyAt as string),
     );
-  const occupied = sessions.reduce(
-    (sum, session) =>
-      sum +
-      overlapMinutes(
-        new Date(session.seatedAt),
-        sessionEnd(session, now),
-        range.start,
-        range.end,
-      ),
-    0,
+  const serviceIntervals = serviceIntervalsBetween(
+    readOperatingSchedule(state.restaurant), range.start, range.end, state.restaurant.timezone,
   );
-  const openMinutes = operatingMinutes(state, range);
+  const scheduledOccupiedMinutes = (session: TableSession) => serviceIntervals.reduce(
+    (sum, interval) => sum + overlapMinutes(new Date(session.seatedAt), sessionEnd(session, now), interval.start, interval.end), 0,
+  );
+  const occupied = sessions.reduce((sum, session) => sum + scheduledOccupiedMinutes(session), 0);
+  const openMinutes = serviceIntervals.reduce((sum, interval) => sum + (interval.end.getTime() - interval.start.getTime()) / 60_000, 0);
   const capacityByTable = new Map(
     tables.map((table) => [table.id, table.capacity]),
   );
@@ -292,17 +262,7 @@ export function deriveAnalytics(
       );
       if (value <= 360) idle.push(value);
     }
-    const tableOccupied = tableSessions.reduce(
-      (sum, session) =>
-        sum +
-        overlapMinutes(
-          new Date(session.seatedAt),
-          sessionEnd(session, now),
-          range.start,
-          range.end,
-        ),
-      0,
-    );
+    const tableOccupied = tableSessions.reduce((sum, session) => sum + scheduledOccupiedMinutes(session), 0);
     return {
       tableId: table.id,
       turns: tableCompleted.length,
@@ -457,6 +417,7 @@ export function selectPublicRestaurantState(
   now = new Date(),
 ) {
   const overview = deriveOverview(state, now);
+  const service = restaurantServiceStatus(state.restaurant, now);
   const freshnessMinutes = minutesBetween(
     state.lastUpdatedAt,
     now.toISOString(),
@@ -476,7 +437,10 @@ export function selectPublicRestaurantState(
     availableTables: overview.available,
     activeTables: overview.totalTables,
     crowdLevel,
-    walkInStatus: !state.restaurant.isOpen
+    service,
+    walkInStatus: !service.openNow
+      ? "Closed"
+      : !state.restaurant.isOpen
       ? "Paused"
       : overview.available > 0
         ? "Available"

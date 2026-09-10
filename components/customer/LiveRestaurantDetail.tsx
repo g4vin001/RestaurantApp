@@ -3,6 +3,7 @@ import { PageCard } from "@/components/PageCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PublicFloorMap } from "@/components/customer/PublicFloorMap";
 import { PublicLiveRefresh } from "@/components/customer/PublicLiveRefresh";
+import { OpeningHours } from "@/components/customer/OpeningHours";
 import { formatLastUpdated } from "@/lib/helpers";
 import type { PublicRestaurantView } from "@/lib/repositories/prisma/public-restaurant-view";
 
@@ -28,10 +29,11 @@ export function LiveRestaurantDetail({
       <div className="mt-4">
         <PublicLiveRefresh slug={slug} />
       </div>
+      <div className="mt-5"><OpeningHours service={restaurant.service} timeZone={restaurant.timezone} /></div>
 
       <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <PageCard>
-          <b>{restaurant.estimatedWaitMinutes} min</b>
+          <b>{restaurant.walkInStatus === "Closed" || restaurant.walkInStatus === "Paused" ? "Not accepting walk-ins" : `${restaurant.estimatedWaitMinutes} min`}</b>
           <p className="text-sm text-stone-500">estimated wait</p>
         </PageCard>
         <PageCard>
@@ -42,7 +44,7 @@ export function LiveRestaurantDetail({
           <b>
             {restaurant.availableTables} of {restaurant.activeTables}
           </b>
-          <p className="text-sm text-stone-500">tables available now</p>
+          <p className="text-sm text-stone-500">{restaurant.service.openNow ? "tables available now" : "tables ready for next service"}</p>
         </PageCard>
         <PageCard>
           <b>{restaurant.availableSeatCapacity}</b>
@@ -93,12 +95,12 @@ export function LiveRestaurantDetail({
       )}
 
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link
+        {restaurant.service.openNow && restaurant.walkInStatus !== "Paused" ? <Link
           href={`/restaurants/${slug}/waitlist`}
           className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900"
         >
           Join waitlist
-        </Link>
+        </Link> : <p className="self-center text-sm text-stone-600">{restaurant.service.openNow ? "Walk-ins are paused." : "The waitlist opens during service hours."}</p>}
         <Link
           href={`/restaurants/${slug}/book`}
           className="inline-flex min-h-11 items-center justify-center rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-800 hover:bg-stone-50"

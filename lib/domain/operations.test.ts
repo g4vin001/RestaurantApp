@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 import { createDemoState } from "@/lib/demo/seed";
 import {
   addQueueEntry,
@@ -15,6 +16,7 @@ import {
   setStaffActive,
   transitionTable,
   updateQueueEntry,
+  updateReservation,
   updateStaffMember,
   type DomainResult,
 } from "@/lib/domain/operations";
@@ -28,6 +30,15 @@ function successful(result: DomainResult) {
 }
 
 describe("manager operation commands", () => {
+  it("rejects new reservations on a closed date but preserves edits to existing bookings", () => {
+    const state = createDemoState(now);
+    state.restaurant.schedule = legacyOperatingSchedule(11, 22);
+    state.restaurant.schedule.exceptions = [{ date: "2026-08-01", label: "Holiday", periods: [] }];
+    expect(createReservation(state, { partyName: "New party", partySize: 2, scheduledAt: "2026-08-01T13:00:00+08:00" }, occurredAt)).toMatchObject({ ok: false, error: expect.stringContaining("outside opening hours") });
+    const reservation = state.reservations[0];
+    expect(updateReservation(state, reservation.id, { ...reservation, notes: "Guest called" }, occurredAt).ok).toBe(true);
+    expect(updateReservation(state, reservation.id, { ...reservation, scheduledAt: "2026-08-01T15:00:00+08:00" }, occurredAt).ok).toBe(false);
+  });
   it("requires a real party size when occupying a table", () => {
     const state = createDemoState(now);
     const missing = transitionTable(

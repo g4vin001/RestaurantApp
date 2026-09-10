@@ -1,15 +1,10 @@
 "use client";
 
 import { Clock3, Save, Store } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
-
-function hourLabel(hour: number) {
-  const normalized = hour % 24;
-  const suffix = normalized >= 12 ? "PM" : "AM";
-  const display = normalized % 12 || 12;
-  return `${display}:00 ${suffix}`;
-}
+import { OperatingScheduleEditor } from "@/components/manager/OperatingScheduleEditor";
+import { readOperatingSchedule, validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 export function RestaurantSettings() {
   const { state, updateRestaurant } = useDemo();
@@ -19,32 +14,56 @@ export function RestaurantSettings() {
   const [cleaningTargetMinutes, setCleaningTargetMinutes] = useState(
     state.restaurant.cleaningTargetMinutes,
   );
-  const [opensAtHour, setOpensAtHour] = useState(state.restaurant.opensAtHour);
-  const [closesAtHour, setClosesAtHour] = useState(
-    state.restaurant.closesAtHour,
-  );
+  const [schedule, setSchedule] = useState(() => readOperatingSchedule(state.restaurant));
+  const [dirty, setDirty] = useState(false);
+  const [sourceRevision, setSourceRevision] = useState(state.restaurant.revision);
+  const [saving, setSaving] = useState(false);
+  const submitting = useRef(false);
+  const [failed, setFailed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (dirty) return;
     setName(state.restaurant.name);
     setLocation(state.restaurant.location);
     setIsOpen(state.restaurant.isOpen);
     setCleaningTargetMinutes(state.restaurant.cleaningTargetMinutes);
-    setOpensAtHour(state.restaurant.opensAtHour);
-    setClosesAtHour(state.restaurant.closesAtHour);
-  }, [state.restaurant]);
+    setSchedule(readOperatingSchedule(state.restaurant));
+    setSourceRevision(state.restaurant.revision);
+  }, [state.restaurant, dirty]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = await updateRestaurant({
-      name,
-      location,
-      isOpen,
-      cleaningTargetMinutes,
-      opensAtHour,
-      closesAtHour,
-    });
-    setMessage(result.ok ? "Restaurant settings saved." : result.error);
+    if (submitting.current) return;
+    const validation = validateOperatingSchedule(schedule);
+    if (!validation.ok) {
+      setFailed(true);
+      setMessage(validation.error);
+      return;
+    }
+    submitting.current = true;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await updateRestaurant({
+        name,
+        location,
+        isOpen,
+        cleaningTargetMinutes,
+        opensAtHour: state.restaurant.opensAtHour,
+        closesAtHour: state.restaurant.closesAtHour,
+        schedule: validation.schedule,
+      }, sourceRevision);
+      setFailed(!result.ok);
+      if (result.ok) setDirty(false);
+      setMessage(result.ok ? "Restaurant settings saved." : result.error);
+    } catch {
+      setFailed(true);
+      setMessage("Settings could not be saved. Your edits are still here; please try again.");
+    } finally {
+      submitting.current = false;
+      setSaving(false);
+    }
   }
 
   return (
@@ -60,7 +79,12 @@ export function RestaurantSettings() {
         and the public customer view.
       </p>
 
-      <form onSubmit={submit} className="mt-7 space-y-5">
+      <form onSubmit={submit} onChange={() => setDirty(true)} className="mt-7" aria-busy={saving}>
+        <fieldset disabled={saving} className="min-w-0 space-y-5">
+          {dirty && sourceRevision !== state.restaurant.revision && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Settings changed on another device. Your edits are still here. Load the latest settings before making further changes.
+            <button type="button" onClick={() => { setDirty(false); setMessage(null); }} className="mt-2 block min-h-11 font-semibold underline underline-offset-4">Discard my edits and load latest</button>
+          </div>}
         <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
@@ -101,7 +125,7 @@ export function RestaurantSettings() {
                 Accepting walk-ins
               </span>
               <span className="mt-1 block text-xs leading-5 text-stone-500">
-                Turn this off to show customers that walk-ins are paused.
+                Allow walk-ins during opening hours. Turn this off to pause them while staying open for reservations.
               </span>
             </span>
             <input
@@ -113,6 +137,8 @@ export function RestaurantSettings() {
           </label>
         </section>
 
+        <OperatingScheduleEditor schedule={schedule} timeZone={state.restaurant.timezone} onChange={(value) => { setSchedule(value); setDirty(true); }} />
+
         <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-700">
@@ -123,44 +149,12 @@ export function RestaurantSettings() {
                 Operating targets
               </h2>
               <p className="mt-1 text-sm text-stone-500">
-                Analytics uses these hours when calculating occupancy.
+                Target time to prepare a cleared table for the next party. Occupancy reports use your current saved opening hours and dated exceptions.
               </p>
             </div>
           </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-3">
-            <label className="text-sm font-medium text-stone-700">
-              Opens
-              <select
-                value={opensAtHour}
-                onChange={(event) => setOpensAtHour(Number(event.target.value))}
-                className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 bg-white px-3"
-              >
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <option key={hour} value={hour}>
-                    {hourLabel(hour)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm font-medium text-stone-700">
-              Closes
-              <select
-                value={closesAtHour}
-                onChange={(event) =>
-                  setClosesAtHour(Number(event.target.value))
-                }
-                className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 bg-white px-3"
-              >
-                {Array.from({ length: 24 }, (_, index) => index + 1).map(
-                  (hour) => (
-                    <option key={hour} value={hour}>
-                      {hour === 24 ? "12:00 AM" : hourLabel(hour)}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
+          <div className="mt-5 max-w-sm">
             <label className="text-sm font-medium text-stone-700">
               Cleaning target (minutes)
               <input
@@ -181,7 +175,7 @@ export function RestaurantSettings() {
           {message && (
             <p
               className="mr-auto text-sm font-medium text-stone-600"
-              role="status"
+              role={failed ? "alert" : "status"}
             >
               {message}
             </p>
@@ -191,9 +185,10 @@ export function RestaurantSettings() {
             className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-5 text-sm font-semibold text-white hover:bg-emerald-800"
           >
             <Save size={17} />
-            Save settings
+            {saving ? "Saving settings…" : "Save settings"}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   );

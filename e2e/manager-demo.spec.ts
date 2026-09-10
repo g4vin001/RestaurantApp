@@ -61,7 +61,8 @@ test("queue writes persist and synchronize across two demo tabs", async ({
   const party = page.locator("article").filter({ hasText: "Playwright walk-in" });
   await party.getByRole("button", { name: "Seat", exact: true }).click();
   const seatDialog = page.getByRole("dialog", { name: "Seat Playwright walk-in" });
-  await seatDialog.locator("button").filter({ hasText: "Best match" }).click();
+  await seatDialog.getByRole("button", { name: /^T2, .* seats, Available$/ }).click();
+  await seatDialog.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(
     page.getByText("Party seated and table session started."),
   ).toBeVisible();
@@ -94,4 +95,29 @@ test("mobile manager keeps primary queue actions usable and explains the floor e
   await expect(
     page.getByRole("link", { name: "Live floor", exact: true }),
   ).toBeVisible();
+});
+
+test("weekly split service and a holiday closure survive saving and reload on a tablet", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await resetDemo(page);
+  await page.goto("/manager/settings");
+  await page.getByLabel("Monday, period 1, opens", { exact: true }).fill("11:00");
+  await page.getByLabel("Monday, period 1, closes", { exact: true }).fill("14:00");
+  await page.getByRole("button", { name: "Add split shift", exact: true }).first().click();
+  await page.getByLabel("Monday, period 2, opens", { exact: true }).fill("18:00");
+  await page.getByLabel("Monday, period 2, closes", { exact: true }).fill("23:00");
+  await page.getByRole("button", { name: "Add special date", exact: true }).click();
+  await page.getByLabel("Date", { exact: true }).fill("2026-12-25");
+  await page.getByLabel("Public label (optional)", { exact: true }).fill("Christmas closure");
+  await expect(page.getByText("Closed all day", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Save settings", exact: true }).click();
+  await expect(page.getByText("Restaurant settings saved.", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Monday, period 1, opens", { exact: true })).toHaveValue("11:00");
+  await expect(page.getByLabel("Monday, period 1, closes", { exact: true })).toHaveValue("14:00");
+  await expect(page.getByLabel("Monday, period 2, opens", { exact: true })).toHaveValue("18:00");
+  await expect(page.getByLabel("Monday, period 2, closes", { exact: true })).toHaveValue("23:00");
+  await expect(page.getByLabel("Date", { exact: true })).toHaveValue("2026-12-25");
+  await expect(page.getByText("Closed all day", { exact: true })).toBeVisible();
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).resolves.toBe(true);
 });

@@ -43,6 +43,7 @@ import type {
   TableStatus,
 } from "@/lib/domain/types";
 import { createDemoState } from "@/lib/demo/seed";
+import { validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 import {
   type OperationsRepositoryMode,
 } from "@/lib/repositories/operations";
@@ -213,7 +214,9 @@ interface DemoContextValue {
       | "cleaningTargetMinutes"
       | "opensAtHour"
       | "closesAtHour"
+      | "schedule"
     >,
+    expectedRevision?: number,
   ) => Promise<CommandFeedback>;
   reset: () => void;
 }
@@ -775,10 +778,12 @@ export function OperationsProvider({
         | "cleaningTargetMinutes"
         | "opensAtHour"
         | "closesAtHour"
+        | "schedule"
       >,
+      expectedRevision?: number,
     ): Promise<CommandFeedback> => {
       if (repositoryMode === "database") {
-        return runDatabaseCommand({ type: "UPDATE_RESTAURANT", commandId: newCommandId(), expectedRevision: state.restaurant.revision ?? 0, input });
+        return runDatabaseCommand({ type: "UPDATE_RESTAURANT", commandId: newCommandId(), expectedRevision: expectedRevision ?? state.restaurant.revision ?? 0, input });
       }
       const name = input.name.trim();
       const location = input.location.trim();
@@ -795,8 +800,10 @@ export function OperationsProvider({
       ) {
         return Promise.resolve({ ok: false, error: "Opening and closing hours must be valid." });
       }
-      if (input.closesAtHour <= input.opensAtHour) {
-        return Promise.resolve({ ok: false, error: "Closing time must be after opening time." });
+      if (input.schedule !== undefined) {
+        const validation = validateOperatingSchedule(input.schedule);
+        if (!validation.ok) return Promise.resolve(validation);
+        input = { ...input, schedule: validation.schedule };
       }
       if (
         input.cleaningTargetMinutes < 1 ||

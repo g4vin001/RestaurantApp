@@ -6,6 +6,8 @@ import { ensureProfile } from "@/lib/auth/profile";
 import { prisma } from "@/lib/prisma";
 import { fetchPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-restaurant-view";
 import { createClient } from "@/lib/supabase/server";
+import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
+import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
 export type WaitlistJoinState = { error?: string };
 
@@ -31,9 +33,11 @@ export async function joinCustomerWaitlist(
 
   const restaurant = await prisma.restaurant.findFirst({
     where: { slug, environment: "LIVE", archivedAt: null },
-    select: { id: true, walkInAvailability: true },
+    select: { id: true, walkInAvailability: true, timezone: true, operatingSettings: true },
   });
   if (!restaurant) return { error: "Restaurant not found." };
+  if (!isWithinServiceHours({ ...asRecord(restaurant.operatingSettings), timezone: restaurant.timezone }, new Date()))
+    return { error: "This restaurant is closed. Join the waitlist during opening hours." };
   if (restaurant.walkInAvailability === "PAUSED")
     return { error: "This restaurant is not accepting new walk-ins right now." };
 

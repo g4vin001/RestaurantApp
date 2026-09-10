@@ -5,6 +5,11 @@ import { PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { executeOperationsCommand } from "./operations-commands";
 import { PrismaOperationsRepository } from "./prisma-operations";
+import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { randomUUID } from "node:crypto";
+import { fetchPublicRestaurantBySlug } from "./public-restaurant-view";
+import { staffSeatingOptions } from "@/lib/staff/seating";
+import { deriveAnalytics } from "@/lib/domain/analytics";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -26,6 +31,16 @@ describeWithDatabase("Prisma operations repository", () => {
     pool = new Pool({ connectionString });
     client = new PrismaClient({ adapter: new PrismaPg(pool) });
   });
+
+  async function writableManagerRepository() {
+    const membership = await client.restaurantMembership.findUniqueOrThrow({
+      where: { restaurantId_profileId: { restaurantId, profileId: ownerId } },
+    });
+    return new PrismaOperationsRepository(client, {
+      profileId: ownerId, restaurantId,
+      membershipId: membership.id, membershipRole: membership.role,
+    });
+  }
 
   beforeEach(async () => {
     await client.seatingAssignment.deleteMany({
@@ -71,6 +86,8 @@ describeWithDatabase("Prisma operations repository", () => {
           opensAtHour: 9,
           closesAtHour: 23,
           cleaningTargetMinutes: 14,
+          // Permission/concurrency fixtures remain valid at any wall-clock time.
+          schedule: legacyOperatingSchedule(0, 24),
         },
         memberships: {
           create: [
@@ -172,6 +189,113 @@ describeWithDatabase("Prisma operations repository", () => {
     expect(snapshot.tables.map((table) => table.label)).toEqual(["T1", "T2"]);
     expect(snapshot.queue.map((entry) => entry.partyName)).toEqual(["Reyes"]);
     expect(snapshot.floorPlans).toHaveLength(1);
+  });
+
+  it("shares staff pair seating and correction with managers and the public projection", async () => {
+    const manager = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const before = await manager.loadSnapshot();
+    const entry = before.queue[0];
+    const pair = staffSeatingOptions(before, entry, new Date()).find((option) => option.tableIds.length === 2)!;
+    expect(pair.tableIds).toHaveLength(2);
+    const member = await client.restaurantMembership.findUniqueOrThrow({ where: { restaurantId_profileId: { restaurantId, profileId: hostId } } });
+    const scope = { profileId: hostId, restaurantId, membershipId: member.id, membershipRole: "STAFF" as const, permissions: ["SEAT_PARTIES", "CORRECT_RECENT_ACTION"] as ("SEAT_PARTIES" | "CORRECT_RECENT_ACTION")[] };
+    const command = { type: "SEAT_QUEUE" as const, commandId: randomUUID(), entryId: entry.id, expectedRevision: entry.revision!, tableIds: pair.tableIds };
+    await expect(executeOperationsCommand(client, { ...scope, permissions: [] }, command)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await executeOperationsCommand(client, scope, command);
+    await executeOperationsCommand(client, scope, command); // Retrying must not seat twice.
+    const seated = await manager.loadSnapshot();
+    expect(seated.tables.filter((table) => pair.tableIds.includes(table.id)).map((table) => table.status)).toEqual(["OCCUPIED", "OCCUPIED"]);
+    expect(seated.queue.find((party) => party.id === entry.id)?.assignedTableIds).toHaveLength(2);
+    expect(seated.sessions.reduce((sum, session) => sum + session.partySize, 0)).toBe(entry.partySize);
+    expect(seated.sessions.every((session) => session.partySize <= seated.tables.find((table) => table.id === session.tableId)!.capacity)).toBe(true);
+    const analyticsEnd = new Date(Date.now() + 60_000);
+    const analytics = deriveAnalytics({ ...seated, sessions: seated.sessions.map((session) => ({ ...session, clearedAt: analyticsEnd.toISOString() })) }, {
+      start: new Date(Date.now() - 60_000), end: analyticsEnd, label: "Pair seating",
+    }, {}, analyticsEnd);
+    expect(analytics.seatUtilization).toBeLessThanOrEqual(100);
+    expect(analytics.tableAnalytics.every((table) => table.seatUtilization !== null && table.seatUtilization <= 100)).toBe(true);
+    expect(await client.seatingAssignment.count({ where: { restaurantId, status: "ACTIVE" } })).toBe(1);
+    const customer = await fetchPublicRestaurantBySlug(client, "repository-test");
+    expect(customer).not.toBeNull();
+    expect(customer?.availableSeatCapacity).toBe(0);
+    expect(JSON.stringify(customer)).not.toContain(entry.partyName);
+    await expect(executeOperationsCommand(client, scope, { ...command, commandId: randomUUID() })).rejects.toMatchObject({ code: "CONFLICT" });
+    const table = await client.diningTable.findUniqueOrThrow({ where: { id: pair.tableIds[0] } });
+    const correction = { type: "CORRECT_TABLE" as const, commandId: randomUUID(), tableId: table.id, expectedRevision: table.statusRevision, reason: "Wrong party was seated" };
+    await executeOperationsCommand(client, scope, correction);
+    const restored = await manager.loadSnapshot();
+    expect(restored.tables.filter((item) => pair.tableIds.includes(item.id)).map((item) => item.status)).toEqual(["AVAILABLE", "AVAILABLE"]);
+    expect(restored.queue.find((party) => party.id === entry.id)?.status).toBe("WAITING");
+    expect(await client.diningSession.count({ where: { restaurantId } })).toBe(0);
+    expect((await fetchPublicRestaurantBySlug(client, "repository-test"))?.availableSeatCapacity).toBe(6);
+    const revised = await client.diningTable.findUniqueOrThrow({ where: { id: table.id } });
+    await expect(executeOperationsCommand(client, scope, { ...correction, commandId: randomUUID(), expectedRevision: revised.statusRevision })).rejects.toMatchObject({ code: "VALIDATION" });
+  });
+
+  it.each(["CONFIRMED", "ARRIVED"] as const)("restores a %s reservation's arrival state when correcting seating", async (status) => {
+    const repository = await writableManagerRepository();
+    const tables = await client.diningTable.findMany({ where: { restaurantId } });
+    const arrivedAt = status === "ARRIVED" ? new Date() : null;
+    const reservation = await client.reservation.create({ data: {
+      restaurantId, partyName: "Correction fixture", partySize: 5,
+      scheduledAt: new Date(), status, arrivedAt, createdById: ownerId,
+    } });
+    await repository.execute({ type: "SEAT_RESERVATION", commandId: randomUUID(), reservationId: reservation.id, expectedRevision: reservation.revision, tableIds: tables.map((table) => table.id) });
+    const seatedTable = await client.diningTable.findUniqueOrThrow({ where: { id: tables[0].id } });
+    await repository.execute({ type: "CORRECT_TABLE", commandId: randomUUID(), tableId: seatedTable.id, expectedRevision: seatedTable.statusRevision, reason: "Selected the wrong reservation" });
+    const restored = await client.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
+    expect(restored).toMatchObject({ status, arrivedAt, seatedAt: null, assignedTableId: null });
+    expect(await client.diningTable.count({ where: { restaurantId, currentStatus: "AVAILABLE" } })).toBe(2);
+    expect(await client.diningSession.count({ where: { reservationId: reservation.id } })).toBe(0);
+  });
+
+  it("persists schedules for another device, preserves unrelated settings, and rejects stale edits", async () => {
+    const repository = await writableManagerRepository();
+    const before = await repository.loadSnapshot();
+    const schedule = legacyOperatingSchedule(11, 22);
+    schedule.weekly.monday = [{ opensAt: "11:00", closesAt: "14:00" }, { opensAt: "18:00", closesAt: "01:00" }];
+    schedule.exceptions = [{ date: "2026-12-25", label: "Christmas", periods: [] }];
+    const command = {
+      type: "UPDATE_RESTAURANT" as const,
+      commandId: "90909090-9090-4090-8090-909090909090",
+      expectedRevision: before.restaurant.revision ?? 0,
+      input: { ...before.restaurant, schedule },
+    };
+    await repository.execute(command);
+    await repository.execute(command);
+    const anotherDevice = await new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId }).loadSnapshot();
+    expect(anotherDevice.restaurant.schedule).toEqual(schedule);
+    expect(anotherDevice.restaurant.cleaningTargetMinutes).toBe(14);
+    expect(anotherDevice.restaurant.revision).toBe(command.expectedRevision + 1);
+    await expect(repository.execute({ ...command, commandId: "91919191-9191-4191-8191-919191919191" })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await client.restaurant.findUniqueOrThrow({ where: { id: otherRestaurantId } })).toMatchObject({ name: "Other Kitchen" });
+  });
+
+  it("rejects invalid schedules atomically without changing the restaurant name", async () => {
+    const repository = await writableManagerRepository();
+    const before = await repository.loadSnapshot();
+    const schedule = legacyOperatingSchedule(10, 22);
+    schedule.weekly.monday.push({ opensAt: "12:00", closesAt: "14:00" });
+    await expect(repository.execute({
+      type: "UPDATE_RESTAURANT", commandId: "92929292-9292-4292-8292-929292929292", expectedRevision: before.restaurant.revision ?? 0,
+      input: { ...before.restaurant, name: "Must not be saved", schedule },
+    })).rejects.toMatchObject({ code: "VALIDATION" });
+    expect((await repository.loadSnapshot()).restaurant).toEqual(before.restaurant);
+  });
+
+  it("denies schedule changes from staff and from another restaurant's owner", async () => {
+    const owner = new PrismaOperationsRepository(client, { profileId: ownerId, restaurantId });
+    const before = await owner.loadSnapshot();
+    const command = {
+      type: "UPDATE_RESTAURANT" as const, commandId: "93939393-9393-4393-8393-939393939393", expectedRevision: before.restaurant.revision ?? 0,
+      input: { ...before.restaurant, schedule: legacyOperatingSchedule(11, 22) },
+    };
+    const hostMembership = await client.restaurantMembership.findUniqueOrThrow({ where: { restaurantId_profileId: { restaurantId, profileId: hostId } } });
+    await expect(executeOperationsCommand(client, {
+      profileId: hostId, restaurantId, membershipId: hostMembership.id, membershipRole: "STAFF", permissions: ["MANAGE_QUEUE"],
+    }, command)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(new PrismaOperationsRepository(client, { profileId: otherOwnerId, restaurantId }).execute(command)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await owner.loadSnapshot()).restaurant).toEqual(before.restaurant);
   });
 
   it("denies a restaurant outside the manager's membership", async () => {

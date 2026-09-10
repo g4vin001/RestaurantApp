@@ -98,7 +98,11 @@ export function restaurantWallTimeToUtc(
   let result = new Date(wallClockUtc);
   result = new Date(wallClockUtc - offsetAt(result, zone));
   result = new Date(wallClockUtc - offsetAt(result, zone));
-  return Number.isNaN(result.getTime()) ? null : result;
+  // Reject impossible dates/times (including DST gaps), rather than normalizing
+  // February 30 or 25:00 into a different reservation.
+  return Number.isNaN(result.getTime()) || restaurantDateTimeInput(result, zone) !== localValue
+    ? null
+    : result;
 }
 
 export function startOfRestaurantDay(

@@ -10,10 +10,12 @@ import type {
   TableStatus,
 } from "@/lib/generated/prisma/client";
 import { canTransitionTable } from "@/lib/domain/transitions";
+import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
+import { isWithinServiceHours, validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 
-const CORRECTION_WINDOW_MS = 15 * 60 * 1_000;
 const RESERVATION_CONFLICT_WINDOW_MS = 90 * 60 * 1_000;
 const MANAGER_ROLES: MembershipRole[] = ["OWNER", "MANAGER"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -100,6 +102,16 @@ function validateReservationInput(
     contact: text(input.contact, "Contact", 160),
     notes: text(input.notes, "Notes", 2_000),
   };
+}
+
+async function assertReservationHours(tx: Prisma.TransactionClient, scope: OperationsCommandScope, scheduledAt: Date) {
+  const restaurant = await tx.restaurant.findFirst({
+    where: { id: scope.restaurantId, archivedAt: null },
+    select: { timezone: true, operatingSettings: true },
+  });
+  if (!restaurant || !isWithinServiceHours({ ...asRecord(restaurant.operatingSettings), timezone: restaurant.timezone }, scheduledAt)) {
+    fail("VALIDATION", "This reservation falls outside opening hours. Choose a service time or update the restaurant's special-date hours first.");
+  }
 }
 
 async function assertReservationTable(
@@ -469,6 +481,7 @@ async function correctTable(
 ) {
   requirePermission(scope, "CORRECT_RECENT_ACTION");
   const reason = text(command.reason, "Correction reason", 500, true) as string;
+  if (reason.length < 4) fail("VALIDATION", "Add a correction reason between 4 and 500 characters.");
   const table = await tx.diningTable.findFirst({
     where: { id: command.tableId, restaurantId: scope.restaurantId, archivedAt: null },
   });
@@ -478,22 +491,10 @@ async function correctTable(
     where: { restaurantId: scope.restaurantId, diningTableId: table.id },
     orderBy: { occurredAt: "desc" },
   });
-  if (!latest || Date.now() - latest.occurredAt.getTime() > CORRECTION_WINDOW_MS) {
-    fail("VALIDATION", "Only the latest table action can be corrected within 15 minutes.");
-  }
-  if (latest.reason?.startsWith("Correction:")) {
-    fail(
-      "VALIDATION",
-      "A correction cannot be corrected again. Use a deliberate new table status change.",
-    );
-  }
-  if (latest.reason?.startsWith("Reservation moved")) {
-    fail(
-      "VALIDATION",
-      "A table move can't be undone with Correct — move the reservation back instead.",
-    );
-  }
-  if (latest.toStatus !== table.currentStatus) fail("CONFLICT", "The latest table action no longer matches the table.");
+  const eligibility = tableCorrectionEligibility(table.currentStatus, latest ? {
+    newStatus: latest.toStatus, occurredAt: latest.occurredAt.toISOString(), note: latest.reason,
+  } : null, Date.now());
+  if (!latest || !eligibility.eligible) fail("VALIDATION", eligibility.reason ?? "There is no recent table action to correct.");
   let assignment = await activeAssignmentForTable(
     tx,
     scope.restaurantId,
@@ -515,6 +516,16 @@ async function correctTable(
     });
   }
   const tableIds = assignment?.tables.map((item) => item.diningTableId) ?? [table.id];
+  const linkedTables = await tx.diningTable.findMany({
+    where: { id: { in: tableIds }, restaurantId: scope.restaurantId, active: true, archivedAt: null },
+    select: { currentStatus: true, statusEvents: { orderBy: { occurredAt: "desc" }, take: 1 } },
+  });
+  if (linkedTables.length !== tableIds.length || linkedTables.some((linked) => {
+    const event = linked.statusEvents[0];
+    return !event || event.sourceCommandId !== latest.sourceCommandId ||
+      event.fromStatus !== latest.fromStatus || event.toStatus !== latest.toStatus ||
+      linked.currentStatus !== latest.toStatus;
+  })) fail("CONFLICT", "The linked tables changed again. Refresh before correcting the group.");
   const now = await changeTables(
     tx,
     scope,
@@ -535,9 +546,13 @@ async function correctTable(
       });
     }
     if (assignment.reservationId) {
+      const reservation = await tx.reservation.findUniqueOrThrow({
+        where: { id: assignment.reservationId, restaurantId: scope.restaurantId },
+        select: { arrivedAt: true },
+      });
       await tx.reservation.update({
         where: { id: assignment.reservationId },
-        data: { status: "ARRIVED", seatedAt: null, assignedTableId: null, revision: { increment: 1 } },
+        data: { status: reservation.arrivedAt ? "ARRIVED" : "CONFIRMED", seatedAt: null, assignedTableId: null, revision: { increment: 1 } },
       });
     }
   } else if (
@@ -904,6 +919,7 @@ async function executeInTransaction(
     case "ADD_RESERVATION": {
       requirePermission(scope, "MANAGE_QUEUE");
       const input = validateReservationInput(command.input);
+      await assertReservationHours(tx, scope, input.scheduledAt);
       await assertReservationTable(tx, scope, input);
       await tx.reservation.create({ data: { restaurantId: scope.restaurantId, createdById: scope.profileId, ...input } });
       break;
@@ -911,6 +927,14 @@ async function executeInTransaction(
     case "UPDATE_RESERVATION": {
       requirePermission(scope, "MANAGE_QUEUE");
       const input = validateReservationInput(command.input);
+      const existing = await tx.reservation.findFirst({
+        where: { id: command.reservationId, restaurantId: scope.restaurantId, revision: command.expectedRevision },
+        select: { scheduledAt: true },
+      });
+      if (!existing) fail("CONFLICT", "This reservation changed on another device.");
+      // Existing bookings remain manageable after hours change; moving one to
+      // another time must honor the current schedule.
+      if (existing.scheduledAt.getTime() !== input.scheduledAt.getTime()) await assertReservationHours(tx, scope, input.scheduledAt);
       await assertReservationTable(tx, scope, input, command.reservationId);
       const changed = await tx.reservation.updateMany({
         where: { id: command.reservationId, restaurantId: scope.restaurantId, revision: command.expectedRevision, status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] } },
@@ -1089,6 +1113,9 @@ async function executeInTransaction(
       const cleaningTargetMinutes = integer(input.cleaningTargetMinutes, "Cleaning target", 1, 120);
       const opensAtHour = integer(input.opensAtHour, "Opening hour", 0, 23);
       const closesAtHour = integer(input.closesAtHour, "Closing hour", 1, 24);
+      if (typeof input.isOpen !== "boolean") fail("VALIDATION", "Choose whether walk-ins are enabled.");
+      const schedule = input.schedule === undefined ? undefined : validateOperatingSchedule(input.schedule);
+      if (schedule && !schedule.ok) fail("VALIDATION", schedule.error);
       const current = settings.operatingSettings && typeof settings.operatingSettings === "object" && !Array.isArray(settings.operatingSettings)
         ? settings.operatingSettings as Prisma.JsonObject
         : {};
@@ -1098,7 +1125,10 @@ async function executeInTransaction(
           name,
           location,
           walkInAvailability: input.isOpen ? "AVAILABLE" : "PAUSED",
-          operatingSettings: { ...current, cleaningTargetMinutes, opensAtHour, closesAtHour },
+          operatingSettings: {
+            ...current, cleaningTargetMinutes, opensAtHour, closesAtHour,
+            ...(schedule?.ok ? { schedule: schedule.schedule as unknown as Prisma.InputJsonValue } : {}),
+          },
           revision: { increment: 1 },
         },
       });

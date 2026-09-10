@@ -1,9 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const port = 3100;
+const authenticated = process.env.HALINA_AUTH_E2E === "true";
 
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: authenticated ? "staff-auth.spec.ts" : "manager-demo.spec.ts",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
@@ -19,7 +21,7 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}/manager`,
     env: {
       ...process.env,
-      NEXT_PUBLIC_HALINA_DEMO_MODE: "true",
+      NEXT_PUBLIC_HALINA_DEMO_MODE: authenticated ? "false" : "true",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

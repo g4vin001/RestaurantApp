@@ -6,6 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 import { ReservationBookingForm } from "./ReservationBookingForm";
+import { OpeningHours } from "@/components/customer/OpeningHours";
+import { readOperatingSchedule, restaurantServiceStatus } from "@/lib/domain/restaurant-schedule";
+import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
 export default async function BookReservationPage({
   params,
@@ -24,12 +27,12 @@ export default async function BookReservationPage({
   }
 
   let profile: { displayName: string };
-  let restaurant: { id: string; name: string } | null;
+  let restaurant: { id: string; name: string; timezone: string; operatingSettings: unknown } | null;
   try {
     profile = await ensureProfile(user);
     restaurant = await prisma.restaurant.findFirst({
       where: { slug, environment: "LIVE", archivedAt: null },
-      select: { id: true, name: true },
+      select: { id: true, name: true, timezone: true, operatingSettings: true },
     });
   } catch (error) {
     const reference = reportDataError("customer-booking-page", error);
@@ -37,6 +40,7 @@ export default async function BookReservationPage({
   }
 
   if (!restaurant) notFound();
+  const schedule = readOperatingSchedule(asRecord(restaurant.operatingSettings) ?? {});
 
   return (
     <main className="mx-auto max-w-lg px-5 py-14">
@@ -47,13 +51,15 @@ export default async function BookReservationPage({
         {restaurant.name}
       </h1>
       <p className="mt-2 text-sm leading-6 text-stone-600">
-        A table isn&apos;t assigned yet — the restaurant will seat you when you
-        arrive.
+        Request a time during opening hours. The restaurant must approve your request before it is confirmed.
       </p>
+      <div className="mt-6"><OpeningHours service={restaurantServiceStatus({ schedule, timezone: restaurant.timezone })} timeZone={restaurant.timezone} /></div>
       <PageCard className="mt-6">
         <ReservationBookingForm
           restaurantId={restaurant.id}
           defaultPartyName={profile.displayName}
+          schedule={schedule}
+          timeZone={restaurant.timezone}
         />
       </PageCard>
     </main>

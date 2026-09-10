@@ -18,6 +18,8 @@ import {
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-commands";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
+import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { allocatePartyAcrossTables } from "@/lib/domain/operations";
 
 const FLOOR_ELEMENT_TYPES = new Set<FloorElementType>([
   "TABLE",
@@ -275,6 +277,15 @@ async function fetchRestaurantSnapshot(
           id: true,
           diningTableId: true,
           partySize: true,
+          seatingAssignment: {
+            select: {
+              partySize: true,
+              tables: {
+                orderBy: { diningTableId: "asc" },
+                select: { diningTable: { select: { id: true, capacity: true } } },
+              },
+            },
+          },
           seatedAt: true,
           clearedAt: true,
           availableAt: true,
@@ -467,6 +478,7 @@ export function mapRestaurantSnapshot(
       ),
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
+      schedule: readOperatingSchedule(settings ?? {}),
       environment: restaurant.environment,
       revision: restaurant.revision,
     },
@@ -517,14 +529,23 @@ export function mapRestaurantSnapshot(
       revision: entry.revision,
       position: entry.position,
     })),
-    sessions: restaurant.diningSessions.map((session) => ({
-      id: session.id,
-      tableId: session.diningTableId,
-      partySize: session.partySize,
-      seatedAt: session.seatedAt.toISOString(),
-      clearedAt: session.clearedAt?.toISOString(),
-      readyAt: (session.availableAt ?? session.completedAt)?.toISOString(),
-    })),
+    sessions: restaurant.diningSessions.map((session) => {
+      // Database sessions carry the whole group's party size. The domain's
+      // table sessions need a per-table share, just like demo seating, or a
+      // five-person party at a four-seat + two-seat pair reports over 100%.
+      // Read the full assignment even if the history limit cuts off a sibling.
+      const groupTables = session.seatingAssignment?.tables.map((item) => item.diningTable) ?? [];
+      const allocations = allocatePartyAcrossTables(groupTables, session.seatingAssignment?.partySize ?? session.partySize);
+      const tableIndex = groupTables.findIndex((table) => table.id === session.diningTableId);
+      return {
+        id: session.id,
+        tableId: session.diningTableId,
+        partySize: allocations?.[tableIndex] ?? session.partySize,
+        seatedAt: session.seatedAt.toISOString(),
+        clearedAt: session.clearedAt?.toISOString(),
+        readyAt: (session.availableAt ?? session.completedAt)?.toISOString(),
+      };
+    }),
     events: restaurant.tableStatusEvents
       .map((event) => ({
         id: event.id,

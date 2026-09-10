@@ -24,6 +24,7 @@ import { useDemo } from "@/components/demo/DemoProvider";
 import { formatLastUpdated } from "@/lib/helpers";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import { isTimestampStale } from "@/lib/time/restaurant-time";
+import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
 
 const navigation = [
   { href: "/manager", label: "Overview", icon: LayoutDashboard },
@@ -51,6 +52,7 @@ function ShellContent({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const inService = isWithinServiceHours(state.restaurant, now);
   const snapshotIsOld = isTimestampStale(
     state.lastUpdatedAt,
     now,
@@ -111,9 +113,9 @@ function ShellContent({
               </span>
               <span className="mt-0.5 flex items-center gap-1.5 text-xs text-emerald-200">
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${state.restaurant.isOpen ? "bg-emerald-400" : "bg-stone-400"}`}
+                  className={`h-1.5 w-1.5 rounded-full ${state.restaurant.isOpen && inService ? "bg-emerald-400" : "bg-stone-400"}`}
                 />
-                {state.restaurant.isOpen
+                {!inService ? "Closed · outside service hours" : state.restaurant.isOpen
                   ? "Accepting walk-ins"
                   : "Walk-ins paused"}
               </span>

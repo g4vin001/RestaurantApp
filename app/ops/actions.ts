@@ -11,11 +11,12 @@ import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
 import { reportDataError } from "@/lib/server/data-error";
 import { getCurrentWorkContext, type WorkContext } from "@/lib/staff/access";
+import { staffSeatingTableIds } from "@/lib/staff/seating";
 import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
 
 async function requireStaff() {
   const context = await getCurrentWorkContext();
-  if (!context) throw new Error("Your staff work session is no longer active.");
+  if (!context) throw new OperationsRepositoryError("UNAUTHORIZED", "Your work session has ended. Open Shift access to clock in again.");
   return context;
 }
 
@@ -175,15 +176,14 @@ export async function updateStaffQueueStatus(formData: FormData) {
 
 export async function seatStaffQueueEntry(formData: FormData) {
   const entryId = String(formData.get("queueId") ?? "");
-  const tableId = String(formData.get("tableId") ?? "");
   const expectedRevision = Number(formData.get("expectedRevision") ?? -1);
   await runStaffCommand({
     type: "SEAT_QUEUE",
     commandId: randomUUID(),
     entryId,
     expectedRevision,
-    tableIds: [tableId],
-  }, "Party seated and the table status was updated.");
+    tableIds: staffSeatingTableIds(formData),
+  }, "Party seated and all selected tables were updated.");
 }
 
 async function reservationInput(
@@ -271,9 +271,9 @@ export async function seatStaffReservation(formData: FormData) {
       commandId: randomUUID(),
       reservationId: String(formData.get("reservationId") ?? ""),
       expectedRevision: Number(formData.get("expectedRevision") ?? -1),
-      tableIds: [String(formData.get("tableId") ?? "")],
+      tableIds: staffSeatingTableIds(formData),
     },
-    "Reservation seated and the table status was updated.",
+    "Reservation seated and all selected tables were updated.",
   );
 }
 
@@ -284,8 +284,8 @@ export async function moveStaffReservationTable(formData: FormData) {
       commandId: randomUUID(),
       reservationId: String(formData.get("reservationId") ?? ""),
       expectedRevision: Number(formData.get("expectedRevision") ?? -1),
-      tableIds: [String(formData.get("tableId") ?? "")],
+      tableIds: staffSeatingTableIds(formData),
     },
-    "Reservation moved to the selected table.",
+    "Reservation moved and all linked tables were updated.",
   );
 }

@@ -1,6 +1,8 @@
 import "server-only";
 import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
+import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
+import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
 export type CreateCustomerReservationInput = {
   restaurantId: string;
@@ -73,8 +75,8 @@ async function attemptCreate(
       // cannot both observe the same remaining seats and overbook them.
       // READ COMMITTED gives the waiter a fresh snapshot after the first
       // transaction releases this row lock.
-      const restaurant = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT "id"
+      const restaurant = await tx.$queryRaw<Array<{ id: string; timezone: string; operatingSettings: unknown }>>(Prisma.sql`
+        SELECT "id", "timezone", "operatingSettings"
         FROM "Restaurant"
         WHERE "id" = ${input.restaurantId}::uuid
           AND "environment" = 'LIVE'::"RestaurantEnvironment"
@@ -86,6 +88,9 @@ async function attemptCreate(
           "VALIDATION",
           "This restaurant is no longer available.",
         );
+      }
+      if (!isWithinServiceHours({ ...asRecord(restaurant[0].operatingSettings), timezone: restaurant[0].timezone }, input.scheduledAt)) {
+        throw new OperationsRepositoryError("VALIDATION", "This restaurant is closed at that time. Choose a time within its opening hours.");
       }
 
       const capacity = await tx.diningTable.aggregate({
