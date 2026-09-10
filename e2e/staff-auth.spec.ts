@@ -15,8 +15,8 @@ function localSetting(name: string) {
   return value;
 }
 
-test("staff clock-in, paired seating, corrections, reconnect and tenant boundaries work with a separate manager device", async ({ browser, page: manager }) => {
-  test.setTimeout(180_000);
+test("manager, staff and customer devices share live seating, waitlist outcomes and reconnect safely", async ({ browser, page: manager }) => {
+  test.setTimeout(240_000);
   const apiUrl = localSetting("NEXT_PUBLIC_SUPABASE_URL");
   const pool = new Pool({ connectionString: localSetting("DATABASE_URL") });
   const admin = createClient(apiUrl, process.env.HALINA_E2E_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -29,6 +29,10 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
   const staff = await staffContext.newPage();
   const otherContext = await browser.newContext();
   const other = await otherContext.newPage();
+  const customerContext = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  const customer = await customerContext.newPage();
+  const publicContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const publicPage = await publicContext.newPage();
 
   async function account(kind: string) {
     const email = `${kind}-${suffix}@example.com`;
@@ -55,13 +59,15 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
     const owner = await account("manager");
     const worker = await account("staff");
     const otherOwner = await account("other-manager");
+    const diner = await account("customer");
     // Fixture SQL only. Every tested workflow below goes through the real UI,
     // Supabase authentication and the app's Prisma transaction commands.
     for (const [id, slug, name, profileId] of [
       [restaurantId, `auth-ci-${suffix}`, "CI Test Kitchen", owner.id],
       [otherRestaurantId, `auth-other-${suffix}`, "Other Tenant Kitchen", otherOwner.id],
     ]) {
-      await pool.query('INSERT INTO "Restaurant" (id, slug, name, environment, "operatingSettings", "staffPinHash", "updatedAt") VALUES ($1,$2,$3,\'TEST\',$4::jsonb,$5,now())', [id, slug, name, JSON.stringify({ opensAtHour: 0, closesAtHour: 24 }), hashStaffPin("4817")]);
+      // LIVE is needed for public routes, only inside this guarded loopback stack.
+      await pool.query('INSERT INTO "Restaurant" (id, slug, name, environment, "operatingSettings", "staffPinHash", "updatedAt") VALUES ($1,$2,$3,$6::"RestaurantEnvironment",$4::jsonb,$5,now())', [id, slug, name, JSON.stringify({ opensAtHour: 0, closesAtHour: 24 }), hashStaffPin("4817"), id === restaurantId ? "LIVE" : "TEST"]);
       await pool.query('INSERT INTO "RestaurantMembership" (id, "restaurantId", "profileId", role, "updatedAt") VALUES ($1,$2,$3,\'OWNER\',now())', [randomUUID(), id, profileId]);
       await pool.query('INSERT INTO "FloorPlan" (id, "restaurantId", name, "draftSnapshot", "updatedAt") VALUES ($1,$2,\'Main\',\'{"elements":[]}\'::jsonb,now())', [randomUUID(), id]);
     }
@@ -129,6 +135,76 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
     await expect(staffTable("CI T2").getByText("Available", { exact: true })).toBeVisible();
     expect(await sessionCount("COMPLETED")).toBe(2);
 
+    await login(customer, diner.email, `/restaurants/auth-ci-${suffix}/waitlist`);
+    await customer.getByLabel("Party name", { exact: true }).fill("Customer private party");
+    await customer.getByLabel("Party size", { exact: true }).fill("5");
+    await customer.getByLabel("Contact", { exact: false }).fill("09171234567");
+    await customer.getByRole("button", { name: "Join waitlist", exact: true }).click();
+    await expect(customer).toHaveURL(/\/my\/waitlist$/);
+    await expect(customer.getByRole("heading", { name: "You're on the waitlist", exact: true })).toBeVisible();
+    await expect(customer.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(customer.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+    const customerParty = staff.locator("#queue article").filter({ hasText: "Customer private party" });
+    await expect(customerParty).toBeVisible({ timeout: 20_000 });
+    // This public tab is anonymous; no private customer information can appear.
+    await publicPage.goto(`/restaurants/auth-ci-${suffix}`);
+    await expect(publicPage.getByRole("heading", { name: "Plan your visit", exact: true })).toBeVisible();
+    await expect(publicPage.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(publicPage.getByText("Customer private party", { exact: false })).toHaveCount(0);
+    await expect(publicPage.getByText("09171234567", { exact: false })).toHaveCount(0);
+    await expect(publicPage.getByRole("link", { name: "Request a reservation", exact: true })).toBeVisible();
+    await expect(publicPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+    const ownWaitlist = await otherContext.newPage();
+    await ownWaitlist.goto("/my/waitlist");
+    await expect(ownWaitlist.getByText("You do not have an active customer waitlist entry.", { exact: true })).toBeVisible();
+    await expect(ownWaitlist.getByText("Customer private party", { exact: false })).toHaveCount(0);
+    await customerParty.getByRole("button", { name: "Call party", exact: true }).click();
+    await expect(customer.getByRole("heading", { name: "Please approach the host", exact: true })).toBeVisible({ timeout: 20_000 });
+
+    await customerContext.setOffline(true);
+    await expect(customer.getByText("Offline — showing the last checked status", { exact: true })).toBeVisible();
+    await expect(customer.getByRole("button", { name: "Leave waitlist", exact: true })).toBeDisabled();
+    await customerParty.getByText("Seat party", { exact: true }).click();
+    await customerParty.getByLabel("Tables for Customer private party", { exact: true }).selectOption({ index: 1 });
+    await customerParty.getByRole("button", { name: "Confirm seating", exact: true }).click();
+    await expect(staffTable("CI T1").getByText("Occupied", { exact: true })).toBeVisible();
+    await customerContext.setOffline(false);
+    await expect(customer.getByRole("heading", { name: "You're seated", exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(customer.getByRole("button", { name: "Leave waitlist", exact: true })).toHaveCount(0);
+    const availableCount = publicPage.locator("dl > div").filter({ has: publicPage.getByText("Tables available now", { exact: true }) }).locator("dd");
+    await expect(availableCount).toHaveText("0 of 2", { timeout: 20_000 });
+    await staffTable("CI T1").getByRole("button", { name: "Clear table", exact: true }).click();
+    await expect(staffTable("CI T2").getByText("Cleaning", { exact: true })).toBeVisible();
+    await staffTable("CI T1").getByRole("button", { name: "Mark ready", exact: true }).click();
+    await expect(availableCount).toHaveText("2 of 2", { timeout: 20_000 });
+
+    await customer.goto(`/restaurants/auth-ci-${suffix}/waitlist`);
+    await customer.getByLabel("Party name", { exact: true }).fill("Customer cancellation");
+    await customer.getByRole("button", { name: "Join waitlist", exact: true }).click();
+    await expect(customer.getByRole("heading", { name: "You're on the waitlist", exact: true })).toBeVisible();
+    await expect(manager.getByRole("heading", { name: "Customer cancellation", exact: true })).toBeVisible({ timeout: 20_000 });
+    await customer.getByRole("button", { name: "Leave waitlist", exact: true }).click();
+    await expect(customer.getByRole("heading", { name: "Your waitlist entry was cancelled", exact: true })).toBeVisible();
+    await expect(manager.getByRole("heading", { name: "Customer cancellation", exact: true })).toHaveCount(0, { timeout: 20_000 });
+    expect((await pool.query('SELECT status FROM "QueueEntry" WHERE "restaurantId"=$1 AND "partyName"=$2', [restaurantId, "Customer cancellation"])).rows[0].status).toBe("CANCELLED");
+
+    await publicContext.setOffline(true);
+    await expect(publicPage.getByText("Offline — showing the last checked status", { exact: true })).toBeVisible();
+    await expect(publicPage.getByText("Live updates connected", { exact: true })).toHaveCount(0);
+    await publicContext.setOffline(false);
+    await expect(publicPage.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
+    // A stalled response must never keep a green live badge indefinitely.
+    const rscPattern = `**/restaurants/auth-ci-${suffix}?*`;
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    await publicPage.route(rscPattern, async (route) => { await responseGate; await route.continue(); });
+    await publicPage.getByRole("button", { name: "Refresh now", exact: true }).click();
+    await expect(publicPage.getByText("Updates unconfirmed — retry", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(publicPage.getByText("Live updates connected", { exact: true })).toHaveCount(0);
+    releaseResponse();
+    await publicPage.unroute(rscPattern);
+    await expect(publicPage.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
+
     const staffApi = createClient(apiUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
     expect((await staffApi.auth.signInWithPassword({ email: worker.email, password })).error).toBeNull();
     expect((await staffApi.from("QueueEntry").select("id")).error).not.toBeNull();
@@ -151,6 +227,8 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
   } finally {
     await staffContext.close();
     await otherContext.close();
+    await customerContext.close();
+    await publicContext.close();
     await pool.query('DELETE FROM "SeatingAssignment" WHERE "restaurantId"=$1', [restaurantId]);
     await pool.query('DELETE FROM "Restaurant" WHERE id=ANY($1::uuid[])', [[restaurantId, otherRestaurantId]]);
     await pool.query('DELETE FROM "Profile" WHERE id=ANY($1::uuid[])', [userIds]);

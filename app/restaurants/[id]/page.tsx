@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
+import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
 import { LiveRestaurantDetail } from "@/components/customer/LiveRestaurantDetail";
 import { getCachedPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-restaurant-cache";
 import { reportDataError } from "@/lib/server/data-error";
@@ -18,7 +18,7 @@ export default async function RestaurantPage({
     view = await getCachedPublicRestaurantBySlug(slug);
   } catch (error) {
     const reference = reportDataError("public-restaurant-view", error);
-    return <DatabaseUnavailable reference={reference} />;
+    return <CustomerDataUnavailable reference={reference} />;
   }
 
   if (!view) notFound();

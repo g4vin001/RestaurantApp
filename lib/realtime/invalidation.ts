@@ -12,7 +12,7 @@ export type InvalidationEntity =
   | "staff";
 
 export async function broadcastRestaurantInvalidation(
-  client: PrismaClient,
+  client: Pick<PrismaClient, "$executeRaw">,
   input: {
     restaurantId: string;
     restaurantSlug: string;

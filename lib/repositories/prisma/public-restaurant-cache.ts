@@ -14,8 +14,8 @@ export const PUBLIC_RESTAURANTS_CACHE_TAG = "public-restaurants";
 // while operations remain near-live and existing revalidatePath calls can
 // invalidate the affected page immediately after writes.
 export const getCachedPublicRestaurants = unstable_cache(
-  async () => fetchPublicRestaurants(prisma),
-  ["public-restaurants-v1"],
+  async () => ({ restaurants: await fetchPublicRestaurants(prisma), checkedAt: new Date().toISOString() }),
+  ["public-restaurants-v2"],
   {
     revalidate: 5,
     tags: [PUBLIC_RESTAURANTS_CACHE_TAG],
@@ -24,7 +24,7 @@ export const getCachedPublicRestaurants = unstable_cache(
 
 export const getCachedPublicRestaurantBySlug = unstable_cache(
   async (slug: string) => fetchPublicRestaurantBySlug(prisma, slug),
-  ["public-restaurant-by-slug-v1"],
+  ["public-restaurant-by-slug-v2"],
   {
     revalidate: 5,
     tags: [PUBLIC_RESTAURANTS_CACHE_TAG],
