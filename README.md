@@ -135,7 +135,7 @@ restaurant's four-digit PIN; staff then clock in through `/work`.
    access, and assign the appropriate restricted role. Configure the restaurant
    PIN and share it with staff internally. The PIN alone does not grant access.
 5. Each employee signs into their own verified Halina account, opens **Work**
-   (`/work`), selects the restaurant and enters its PIN. **Enter work mode**
+   (`/work`), chooses **Clock in** for the restaurant and enters its PIN. **Enter work mode**
    opens `/ops`. Sessions expire after at most 16 hours; use **Shift access**
    to resume or clock out. This is workspace access, not payroll/timekeeping.
 
@@ -234,8 +234,8 @@ moves. Controls expire while the page is open. The server requires a 4–500
 character reason and verifies the latest command on every linked table before
 changing the group atomically. The Prisma regression suite covers staff pair
 seating, manager visibility, public availability, retries, conflicts and
-correction; it requires `HALINA_TEST_DATABASE_URL`. Browser verification with
-authenticated manager and staff accounts remains a separate release gate.
+correction; it requires `HALINA_TEST_DATABASE_URL`. The separate authenticated
+browser CI job verifies manager and staff interactions against local Supabase.
 
 For analytics, a combined party's size is distributed across its linked table
 capacities using the same allocation rule as demo mode. This prevents counting
@@ -282,7 +282,7 @@ and [Playwright CI guide](https://playwright.dev/docs/ci).
 - Automatic Vercel deployment remains disabled for `agent/shared-operations-staff-data-lab` in `vercel.json`; Preview deployments from that branch are deliberate and use the isolated Debug Supabase project.
 - Patched transitive versions for Prisma (`deepmerge-ts`), Next/PostCSS, and ExcelJS (`uuid`) are enforced with npm overrides. Remove an override only after its direct dependency ships an equivalent patched range and the full validation suite still passes.
 - The floor editor is intentionally limited to tablet-landscape and desktop widths.
-- No employee application, POS, payments, ordering, payroll, or invented revenue analytics are part of this milestone.
-- Demo browser end-to-end coverage and PostgreSQL command tests run in CI. Authenticated staff clock-in, import, Data API denial, and Supabase Realtime browser flows still need dedicated test accounts and an isolated Supabase environment.
+- POS, payments, ordering, payroll, and invented revenue analytics are outside the current scope.
+- CI covers manager demo workflows, PostgreSQL commands, and authenticated staff clock-in, seating, corrections, Data API denial and Supabase Realtime. Import workflows and deployment-specific configuration still need separate smoke checks with dedicated TEST data.
 
 Follow [AGENTS.md](AGENTS.md) for the production persistence and security phase.
