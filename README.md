@@ -142,7 +142,7 @@ restaurant's four-digit PIN; staff then clock in through `/work`.
 During service, add walk-ins to Queue, call the party, then open **Seat** and
 choose a fitting table or same-zone pair. Check that a proposed pair can actually
 be joined before confirming. Calling a party records its status; it does not
-send an SMS. Customer reservation requests require manager approval before
+send an SMS. Customer reservation requests require restaurant approval before
 seating. Authorized staff can mark arrival, seat confirmed bookings, and move
 seated reservations to another available table or pair.
 
@@ -263,6 +263,15 @@ does not emulate Supabase's Auth, Data API or Realtime services. The authenticat
 browser job uses actual local Supabase services for those boundaries. Neither
 job applies migrations to Debug or production. Deployment-specific configuration
 still needs a smoke check on the intended environment.
+
+The September 2026 MAIN database already has the staff clock-in schema and
+email lookup index, recorded in Supabase's migration history as
+`staff_whitelist_clock_in` and `staff_email_lookup_index`. Their corresponding
+Prisma migration entries are not yet recorded there. Before a future schema
+release, compare the installed schema with the committed SQL and reconcile
+those entries through `prisma migrate resolve --applied` using the direct
+connection. Do not reset the database or edit the migration ledger by hand.
+The schedule and shift-reliability changes in this release add no migration.
 
 Workflow setup follows the official [GitHub PostgreSQL service guide](https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers)
 and [Playwright CI guide](https://playwright.dev/docs/ci).
