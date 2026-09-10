@@ -105,6 +105,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
 
   return {
     restaurantId: restaurant.id,
+    checkedAt: nowIso,
     slug: restaurant.slug,
     cuisineType: restaurant.cuisineType ?? undefined,
     timezone: restaurant.timezone || "Asia/Manila",

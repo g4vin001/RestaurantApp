@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PageCard } from "@/components/PageCard";
 import { StatusBadge } from "@/components/StatusBadge";
-import { formatLastUpdated } from "@/lib/helpers";
+import { formatScheduledAt } from "@/lib/helpers";
 import type { PublicRestaurantView } from "@/lib/repositories/prisma/public-restaurant-view";
 
 export function RestaurantCard({ restaurant }: { restaurant: PublicRestaurantView }) {
@@ -18,9 +18,9 @@ export function RestaurantCard({ restaurant }: { restaurant: PublicRestaurantVie
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <p>
-          <b>{restaurant.walkInStatus === "Closed" || restaurant.walkInStatus === "Paused" ? "Unavailable" : `${restaurant.estimatedWaitMinutes} min`}</b>
+          <b>{restaurant.walkInStatus === "Closed" || restaurant.walkInStatus === "Paused" ? "Unavailable" : `~${restaurant.estimatedWaitMinutes} min`}</b>
           <br />
-          <span className="text-stone-500">estimated wait</span>
+          <span className="text-stone-500">rough wait estimate</span>
         </p>
         <p>
           <b>{restaurant.groupsWaiting}</b>
@@ -38,12 +38,12 @@ export function RestaurantCard({ restaurant }: { restaurant: PublicRestaurantVie
         </Link>
       </div>
       <p className="mt-3 text-sm text-stone-600">{restaurant.service.statusLabel}</p>
-      <p className="mt-3 text-xs text-stone-400">
-        Updated {formatLastUpdated(restaurant.lastUpdatedAt, restaurant.timezone)}
+      <p className="mt-3 text-xs leading-5 text-stone-600">
+        Last restaurant activity: {formatScheduledAt(restaurant.lastUpdatedAt, restaurant.timezone)}
       </p>
       {restaurant.stale && (
         <p className="mt-2 text-xs font-medium text-amber-700">
-          Live data may be stale
+          No recent activity recorded. Confirm availability with the host.
         </p>
       )}
     </PageCard>
