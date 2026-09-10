@@ -132,7 +132,9 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
     const staffApi = createClient(apiUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
     expect((await staffApi.auth.signInWithPassword({ email: worker.email, password })).error).toBeNull();
     expect((await staffApi.from("QueueEntry").select("id")).error).not.toBeNull();
-    await staffApi.auth.signOut();
+    // End only the API probe's session; the browser still needs its own
+    // authenticated session to verify route restrictions and clock-out.
+    expect((await staffApi.auth.signOut({ scope: "local" })).error).toBeNull();
     await staff.goto("/manager/queue");
     await expect(staff).toHaveURL(/\/onboarding\/restaurant$/);
     await expect(staff.getByText("Other tenant private party", { exact: true })).toHaveCount(0);
