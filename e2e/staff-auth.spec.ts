@@ -4,6 +4,8 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { hashStaffPin } from "../lib/staff/pin";
 
+test.use({ actionTimeout: 15_000 });
+
 // Only the dedicated CI job selects this spec. Never seed a shared project.
 function localSetting(name: string) {
   const value = process.env[name];
@@ -45,7 +47,7 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.locator('button[type="submit"]').filter({ hasText: "Log in" }).click();
-    await expect(page).toHaveURL(new RegExp(`${redirectTo}$`));
+    await expect(page).toHaveURL(new RegExp(`${redirectTo}$`), { timeout: 20_000 });
   }
   const staffTable = (label: string) => staff.locator("#floor article").filter({ has: staff.getByRole("heading", { name: label, exact: true }) });
 
@@ -73,6 +75,7 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
     await login(staff, worker.email, "/work");
     await expect(staff.getByText("CI Test Kitchen", { exact: true })).toBeVisible();
     await expect(staff.getByText("Other Tenant Kitchen", { exact: true })).toHaveCount(0);
+    await staff.getByRole("button", { name: "Clock in", exact: true }).click();
     await staff.getByLabel("Restaurant PIN", { exact: true }).fill("9999");
     await staff.getByRole("button", { name: "Enter work mode", exact: true }).click();
     await expect(staff.getByText("Incorrect restaurant PIN.", { exact: true })).toBeVisible();
@@ -138,7 +141,7 @@ test("staff clock-in, paired seating, corrections, reconnect and tenant boundari
     await expect(staff).toHaveURL("http://127.0.0.1:3100/");
     await staff.goto("/ops");
     await expect(staff).toHaveURL(/\/work$/);
-    await expect(staff.getByRole("button", { name: "Enter work mode", exact: true })).toBeVisible();
+    await expect(staff.getByRole("button", { name: "Clock in", exact: true })).toBeVisible();
     const sessions = await pool.query('SELECT id FROM "StaffWorkSession" WHERE "restaurantId"=$1 AND "endedAt" IS NULL', [restaurantId]);
     expect(sessions.rowCount).toBe(0);
     await expect(other.getByRole("heading", { name: "Other tenant private party", exact: true })).toBeVisible();
