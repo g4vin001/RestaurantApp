@@ -8,6 +8,7 @@ import { fetchPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-re
 import { createClient } from "@/lib/supabase/server";
 import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
+import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
 
 export type WaitlistJoinState = { error?: string };
 
@@ -58,8 +59,8 @@ export async function joinCustomerWaitlist(
     publicView?.estimatedWaitMinutes ?? 15,
   );
   const now = new Date();
-  await prisma.$transaction([
-    prisma.queueEntry.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.queueEntry.create({
       data: {
         restaurantId: restaurant.id,
         partyName,
@@ -69,12 +70,13 @@ export async function joinCustomerWaitlist(
         createdById: profile.id,
         source: "CUSTOMER",
       },
-    }),
-    prisma.restaurant.update({
+    });
+    await tx.restaurant.update({
       where: { id: restaurant.id },
       data: { lastOperationalUpdateAt: now },
-    }),
-  ]);
+    });
+    await broadcastRestaurantInvalidation(tx, { restaurantId: restaurant.id, restaurantSlug: slug, environment: "LIVE", entity: "queue", revision: now.toISOString() });
+  });
   revalidatePath(`/restaurants/${slug}`);
   revalidatePath("/");
   redirect("/my/waitlist");

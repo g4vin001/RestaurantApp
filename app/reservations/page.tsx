@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
-import { CustomerReservationsRefresh } from "@/components/customer/CustomerReservationsRefresh";
+import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
+import { randomUUID } from "node:crypto";
+import { CustomerRefresh } from "@/components/customer/CustomerRefresh";
 import { PageCard } from "@/components/PageCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatScheduledAt, reservationStatusLabel } from "@/lib/helpers";
@@ -25,15 +26,15 @@ export default async function MyReservationsPage() {
     reservations = await fetchCustomerReservations(prisma, user.id);
   } catch (error) {
     const reference = reportDataError("customer-reservations-list", error);
-    return <DatabaseUnavailable reference={reference} />;
+    return <CustomerDataUnavailable reference={reference} />;
   }
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-10">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-emerald-800">Your reservations</h1>
-        <CustomerReservationsRefresh />
       </div>
+      <div className="mt-4"><CustomerRefresh snapshotId={randomUUID()} checkedAt={new Date().toISOString()} intervalMs={15_000} /></div>
       {reservations.length === 0 ? (
         <p className="mt-4 text-sm text-stone-500">
           You haven&apos;t booked a table yet.

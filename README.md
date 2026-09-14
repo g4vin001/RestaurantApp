@@ -163,6 +163,34 @@ with one manager and one staff account on separate devices to confirm clock-in,
 seating, clearing, corrections and cross-device updates. Demo mode is useful for
 learning the manager interface, but cannot verify authenticated staff access.
 
+## Customer updates and waitlist status
+
+The customer directory checks for updates every 12 seconds, restaurant details
+and My waitlist every 10 seconds, and reservations every 15 seconds while visible.
+Restaurant details and My waitlist also listen for privacy-safe public
+invalidations. Reconnect and returning to a visible tab trigger another check.
+The public projection keeps a short five-second cache; these are refresh
+intervals, not guaranteed delivery deadlines.
+
+Customer badges confirm a new server response instead of treating a requested
+refresh as success. A live badge additionally requires a subscribed connection.
+Failed live subscriptions fall back to clearly labelled periodic checks;
+offline, overdue responses and retry states remain visible. Last checked means
+the data-fetch time, separately from the last recorded restaurant activity.
+A quiet restaurant is not automatically treated as a broken connection.
+
+My waitlist shows the signed-in customer's active entry, or the latest seated,
+cancelled or no-show outcome updated in the last 24 hours. Called parties see
+a prominent instruction to approach the host. These updates do not send SMS or
+push notifications. Customer joins and cancellations invalidate staff and public
+views after their transaction commits. Cancellation cannot overwrite a concurrent
+staff seating. Public views never include customer party names or contacts.
+
+Wait figures remain rough, uncalibrated queue/capacity estimates. The quoted
+wait on My waitlist is the initial estimate, not a countdown. Restaurant details
+prioritize hours, wait, queue size and customer actions, with secondary table
+statistics expandable below. No schema migration is required for these changes.
+
 ## Restaurant schedules
 
 Manager > Restaurant settings supports weekday hours, closed days, up to four

@@ -1,5 +1,6 @@
-import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
-import { PublicHomeRefresh } from "@/components/customer/PublicHomeRefresh";
+import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
+import { randomUUID } from "node:crypto";
+import { CustomerRefresh } from "@/components/customer/CustomerRefresh";
 import { RestaurantCard } from "@/components/RestaurantCard";
 import { getCachedPublicRestaurants } from "@/lib/repositories/prisma/public-restaurant-cache";
 import {
@@ -9,16 +10,16 @@ import { reportDataError } from "@/lib/server/data-error";
 
 export async function CustomerHome() {
   let restaurants: PublicRestaurantView[];
+  let checkedAt: string;
   try {
-    restaurants = await getCachedPublicRestaurants();
+    ({ restaurants, checkedAt } = await getCachedPublicRestaurants());
   } catch (error) {
     const reference = reportDataError("customer-home", error);
-    return <DatabaseUnavailable reference={reference} />;
+    return <CustomerDataUnavailable reference={reference} />;
   }
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-10">
-      <PublicHomeRefresh />
       <p className="text-sm font-semibold text-emerald-700">
         LIVE RESTAURANT PULSE
       </p>
@@ -27,6 +28,7 @@ export async function CustomerHome() {
         Halina helps you check crowd levels and walk-in availability at
         nearby Filipino restaurants.
       </p>
+      <div className="mt-5"><CustomerRefresh snapshotId={randomUUID()} checkedAt={checkedAt} intervalMs={12_000} /></div>
       {restaurants.length === 0 ? (
         <p className="mt-8 text-sm text-stone-500">
           No restaurants yet — check back soon.
