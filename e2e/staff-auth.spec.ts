@@ -206,6 +206,27 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await publicPage.unrouteAll({ behavior: "wait" });
     await expect(publicPage.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
 
+    // Close the service loop: the report must match actual persisted operations.
+    await manager.goto("/manager/analytics");
+    await manager.getByLabel("Date range", { exact: true }).selectOption("TODAY");
+    const turns = manager.getByRole("region", { name: "Table turns", exact: true }).locator("[data-metric-value]");
+    await expect(turns).toHaveText("4");
+    expect(await sessionCount("COMPLETED")).toBe(4);
+    await manager.getByText("More service metrics", { exact: true }).click();
+    await expect(manager.getByRole("region", { name: "Abandonment", exact: true }).locator("[data-metric-value]")).toHaveText("33%");
+    await expect(manager.getByRole("region", { name: "Queue wait", exact: true })).toContainText("2 seated queue parties");
+    await manager.setViewportSize({ width: 360, height: 800 });
+    await expect(manager.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+    const firstTableReport = manager.getByRole("article", { name: "CI T1 performance", exact: true });
+    await expect(firstTableReport).toBeVisible();
+    await expect(firstTableReport.locator("dl > div").filter({ has: manager.getByText("Turns", { exact: true }) }).locator("dd")).toHaveText("2");
+    await manager.getByLabel("Table", { exact: true }).selectOption({ label: "CI T1" });
+    await expect(turns).toHaveText("2");
+    await expect(manager.getByRole("region", { name: "Queue wait", exact: true })).toContainText("2 seated queue parties");
+    await manager.reload();
+    await expect(turns).toHaveText("4");
+    await expect(manager.getByText("Other tenant private party", { exact: false })).toHaveCount(0);
+
     const staffApi = createClient(apiUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
     expect((await staffApi.auth.signInWithPassword({ email: worker.email, password })).error).toBeNull();
     expect((await staffApi.from("QueueEntry").select("id")).error).not.toBeNull();

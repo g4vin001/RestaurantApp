@@ -242,7 +242,8 @@ export function deriveAnalytics(
     const tableSessions = sessions.filter(
       (session) => session.tableId === table.id,
     );
-    const tableCompleted = tableSessions.filter((session) => session.clearedAt);
+    // Use the same seating-date cohort as the headline and hourly totals.
+    const tableCompleted = completed.filter((session) => session.tableId === table.id);
     const durations = tableCompleted.map((session) =>
       minutesBetween(session.seatedAt, session.clearedAt as string),
     );
@@ -297,6 +298,13 @@ export function deriveAnalytics(
   return {
     range,
     turns: completed.length,
+    sampleCounts: {
+      tables: tables.length,
+      dining: diningDurations.length,
+      cleaning: cleaningDurations.length,
+      seatedQueue: seatedQueue.length,
+      resolvedQueue: resolvedQueue.length,
+    },
     occupiedMinutes: Math.round(occupied),
     occupancyRate:
       openMinutes && tables.length

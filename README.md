@@ -163,6 +163,39 @@ with one manager and one staff account on separate devices to confirm clock-in,
 seating, clearing, corrections and cross-device updates. Demo mode is useful for
 learning the manager interface, but cannot verify authenticated staff access.
 
+## Analytics and service rehearsal
+
+Manager > Analytics prioritizes table turns, occupancy, queue wait and cleaning.
+More service metrics expands dining duration, seat use, wait estimate error,
+abandonment and busiest hour. Comparisons include minutes, turns or percentage
+points (pp). Lower wait, cleaning, error and abandonment are favorable; occupancy,
+dining duration and turns are neutral comparisons rather than automatic grades.
+
+Reports show sample counts. Zero turns is a real count; missing duration samples
+remain “Not enough data”. Table totals use the same seating-date cohort as the
+headline and hourly totals. A joined pair contributes two table turns, while
+queue wait counts its party once. Queue metrics cover the whole restaurant even
+when a table or zone filter is selected. Phone layouts use expandable table
+cards, and hourly counts can be inspected by touch, keyboard or a text table.
+No database migration is needed.
+
+The authenticated CI service rehearsal uses separate manager, staff, customer
+and anonymous browser sessions against disposable local Supabase/PostgreSQL.
+It runs clock-in, paired seating, correction, cleaning, customer joining/calling,
+offline seating recovery, cancellation, public privacy and stalled-refresh
+recovery. It then reconciles Analytics against four persisted completed table
+sessions, two seated queue parties and one cancellation, checks table filtering
+and mobile width, reloads to verify persistence, and verifies staff clock-out.
+These are accelerated test operations, not observed restaurant service times.
+
+Before a restaurant pilot, repeat the flow on actual phones and restaurant Wi-Fi:
+one manager adds a walk-in, staff clock in and seat/correct/clear/ready the party,
+and a customer joins and watches the host call. Briefly disconnect the customer
+phone, seat the party, and reconnect. Check that the outcome catches up, then
+compare Analytics with the actions performed. Keep the waitlist page open;
+no SMS or push notification is sent. Record any missed update, confusing action
+or incorrect count. This physical-device check cannot be replaced by CI.
+
 ## Customer updates and waitlist status
 
 The customer directory checks for updates every 12 seconds, restaurant details

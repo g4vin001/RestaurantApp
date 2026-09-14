@@ -115,3 +115,33 @@ describe("overview analytics", () => {
     expect(deriveAnalytics(state, { start, end, label: "Holiday" }, {}, end).occupancyRate).toBeNull();
   });
 });
+
+describe("analytics report consistency", () => {
+  it("uses the same completed cohort for headline, hourly and table totals", () => {
+    const start = new Date("2026-08-01T10:00:00+08:00");
+    const end = new Date("2026-08-01T14:00:00+08:00");
+    const state = createDemoState(end);
+    state.tables = state.tables.slice(0, 1);
+    const tableId = state.tables[0].id;
+    state.sessions = [
+      { id: "carry-in", tableId, partySize: 2, seatedAt: "2026-08-01T09:30:00+08:00", clearedAt: "2026-08-01T10:30:00+08:00" },
+      { id: "in-range", tableId, partySize: 2, seatedAt: "2026-08-01T11:00:00+08:00", clearedAt: "2026-08-01T12:00:00+08:00" },
+    ];
+    const result = deriveAnalytics(state, { start, end, label: "Service" }, {}, end);
+    expect(result.turns).toBe(1);
+    expect(result.tableAnalytics[0].turns).toBe(1);
+    expect(result.tableAnalytics[0].averageDiningMinutes).toBe(result.averageDiningMinutes);
+    expect(result.hourlySeatings.reduce((sum, item) => sum + item.value, 0)).toBe(1);
+    expect(result.sampleCounts.dining).toBe(1);
+  });
+  it("keeps zero completed turns while duration samples remain unavailable", () => {
+    const now = new Date("2026-08-01T12:00:00+08:00");
+    const state = createDemoState(now);
+    state.sessions = [];
+    state.queue = [];
+    const result = deriveAnalytics(state, getAnalyticsRange("TODAY", now), {}, now);
+    expect(result.turns).toBe(0);
+    expect(result.averageDiningMinutes).toBeNull();
+    expect(result.sampleCounts).toEqual({ tables: 10, dining: 0, cleaning: 0, seatedQueue: 0, resolvedQueue: 0 });
+  });
+});
