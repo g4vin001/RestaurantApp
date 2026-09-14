@@ -33,9 +33,13 @@ function inputDate(date: Date, timeZone: string) {
 function customRange(start: string, end: string, timeZone: string): AnalyticsRange {
   const startAt = restaurantWallTimeToUtc(`${start}T00:00`, timeZone);
   const endAt = restaurantWallTimeToUtc(`${end}T23:59`, timeZone);
+  // Invalid input must not expand calculations from the Unix epoch to today.
+  if (!startAt || !endAt || endAt < startAt) {
+    return { start: new Date(0), end: new Date(0), label: "Invalid date range" };
+  }
   return {
-    start: startAt ?? new Date(0),
-    end: endAt ? new Date(endAt.getTime() + 59_999) : new Date(0),
+    start: startAt,
+    end: new Date(endAt.getTime() + 59_999),
     label: `${start} to ${end}`,
   };
 }
