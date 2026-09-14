@@ -202,7 +202,8 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await expect(publicPage.getByText("Updates unconfirmed — retry", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(publicPage.getByText("Live updates connected", { exact: true })).toHaveCount(0);
     releaseResponse();
-    await publicPage.unroute(rscPattern);
+    // Let every released handler finish before removing interception.
+    await publicPage.unrouteAll({ behavior: "wait" });
     await expect(publicPage.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     const staffApi = createClient(apiUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
