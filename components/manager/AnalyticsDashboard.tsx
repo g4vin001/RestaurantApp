@@ -235,6 +235,7 @@ export function AnalyticsDashboard() {
           <label className="text-xs font-semibold uppercase tracking-wide text-stone-500">
             Date range
             <select
+              aria-label="Date range"
               value={choice}
               onChange={(event) => setChoice(event.target.value as RangeChoice)}
               className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm font-medium text-stone-800"
@@ -272,6 +273,7 @@ export function AnalyticsDashboard() {
           <label className="text-xs font-semibold uppercase tracking-wide text-stone-500">
             Zone
             <select
+              aria-label="Zone"
               value={zone}
               onChange={(event) => {
                 setZone(event.target.value);
@@ -290,6 +292,7 @@ export function AnalyticsDashboard() {
           <label className="text-xs font-semibold uppercase tracking-wide text-stone-500">
             Table
             <select
+              aria-label="Table"
               value={tableId}
               onChange={(event) => setTableId(event.target.value)}
               className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm font-medium text-stone-800"
@@ -340,7 +343,7 @@ export function AnalyticsDashboard() {
           </svg>
           <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-stone-50 p-3">
             <label className="text-sm font-medium text-stone-700">Inspect hour
-              <select className="ml-2 min-h-11 rounded-lg border border-stone-300 bg-white px-3" value={selectedHour} onChange={(event) => setSelectedHour(Number(event.target.value))}>
+              <select aria-label="Inspect hour" className="ml-2 min-h-11 rounded-lg border border-stone-300 bg-white px-3" value={selectedHour} onChange={(event) => setSelectedHour(Number(event.target.value))}>
                 {analytics.hourlySeatings.map(({ hour }) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}
               </select>
             </label>
