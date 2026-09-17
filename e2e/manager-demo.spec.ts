@@ -121,3 +121,30 @@ test("weekly split service and a holiday closure survive saving and reload on a 
   await expect(page.getByText("Closed all day", { exact: true })).toBeVisible();
   await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).resolves.toBe(true);
 });
+
+test("analytics stays readable on phones and exposes exact hourly counts", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await resetDemo(page);
+  await page.goto("/manager/analytics");
+  await expect(page.getByRole("heading", { name: "Service summary", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Service summary", exact: true }).getByRole("region")).toHaveCount(4);
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+  await page.getByLabel("Inspect hour", { exact: true }).selectOption("12");
+  await expect(page.locator("output")).toContainText("completed table seatings");
+  await page.getByText("View hourly counts", { exact: true }).click();
+  const counts = page.getByRole("table", { name: "Exact completed table seatings by hour" });
+  await expect(counts.getByRole("row")).toHaveCount(25);
+  await page.getByText("More service metrics", { exact: true }).click();
+  await expect(page.getByRole("region", { name: "Wait estimate error", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Abandonment", exact: true })).toBeVisible();
+  await page.getByLabel("Date range", { exact: true }).selectOption("CUSTOM");
+  await page.getByLabel("Start", { exact: true }).fill("");
+  await expect(page.getByRole("alert").filter({ hasText: "Choose a start and end date" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Service summary", exact: true })).toHaveCount(0);
+  await page.getByLabel("Date range", { exact: true }).selectOption("LAST_7_DAYS");
+  await expect(page.getByRole("region", { name: "Service summary", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});

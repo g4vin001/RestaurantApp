@@ -214,7 +214,7 @@ function ShellContent({
       </aside>
 
       <div
-        className={`transition-[padding] duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-64"}`}
+        className={`lg:transition-[padding] lg:duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-64"}`}
       >
         <header className="sticky top-0 z-30 flex h-18 items-center justify-between border-b border-stone-200 bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
           <button
