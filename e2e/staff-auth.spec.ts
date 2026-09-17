@@ -216,7 +216,7 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await expect(manager.getByRole("region", { name: "Abandonment", exact: true }).locator("[data-metric-value]")).toHaveText("33%");
     await expect(manager.getByRole("region", { name: "Queue wait", exact: true })).toContainText("2 seated queue parties");
     await manager.setViewportSize({ width: 360, height: 800 });
-    await expect(manager.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+    await expect.poll(() => manager.evaluate(() => Math.max(0, document.documentElement.scrollWidth - innerWidth))).toBeLessThanOrEqual(1);
     const firstTableReport = manager.getByRole("article", { name: "CI T1 performance", exact: true });
     await expect(firstTableReport).toBeVisible();
     await expect(firstTableReport.locator("dl > div").filter({ has: manager.getByText("Turns", { exact: true }) }).locator("dd")).toHaveText("2");

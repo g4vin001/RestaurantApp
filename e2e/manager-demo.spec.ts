@@ -139,10 +139,12 @@ test("analytics stays readable on phones and exposes exact hourly counts", async
   await expect(page.getByRole("region", { name: "Abandonment", exact: true })).toBeVisible();
   await page.getByLabel("Date range", { exact: true }).selectOption("CUSTOM");
   await page.getByLabel("Start", { exact: true }).fill("");
-  await expect(page.getByRole("alert")).toContainText("Choose a start and end date");
+  await expect(page.getByRole("alert").filter({ hasText: "Choose a start and end date" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Service summary", exact: true })).toHaveCount(0);
   await page.getByLabel("Date range", { exact: true }).selectOption("LAST_7_DAYS");
   await expect(page.getByRole("region", { name: "Service summary", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect(page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
