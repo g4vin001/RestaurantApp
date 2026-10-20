@@ -4,6 +4,7 @@ import { Clock3, Save, Store } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { OperatingScheduleEditor } from "@/components/manager/OperatingScheduleEditor";
+import { RestaurantPhotoField } from "@/components/manager/RestaurantPhotoField";
 import { readOperatingSchedule, validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 
 export function RestaurantSettings() {
@@ -93,7 +94,7 @@ export function RestaurantSettings() {
             <div>
               <h2 className="font-semibold text-stone-950">Public identity</h2>
               <p className="mt-1 text-sm text-stone-500">
-                Customers see this name, location, and current walk-in status.
+                Customers see this photo, name, location, and current walk-in status.
               </p>
             </div>
           </div>
@@ -118,6 +119,8 @@ export function RestaurantSettings() {
               />
             </label>
           </div>
+
+          <RestaurantPhotoField />
 
           <label className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-stone-200 p-4">
             <span>

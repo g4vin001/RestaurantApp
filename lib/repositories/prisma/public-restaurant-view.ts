@@ -9,6 +9,7 @@ import {
 } from "@/lib/customer/public-floor";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
 import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { publicCoverImageUrl } from "@/lib/customer/cover-image";
 
 type PublicRestaurantRow = {
   id: string;
@@ -21,6 +22,7 @@ type PublicRestaurantRow = {
   walkInAvailability: string;
   lastOperationalUpdateAt: Date | null;
   updatedAt: Date;
+  coverImage?: { updatedAt: Date } | null;
   diningTables: {
     capacity: number;
     maxPartySize: number;
@@ -108,6 +110,9 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     checkedAt: nowIso,
     slug: restaurant.slug,
     cuisineType: restaurant.cuisineType ?? undefined,
+    coverImageUrl: restaurant.coverImage
+      ? publicCoverImageUrl(restaurant.slug, restaurant.coverImage.updatedAt)
+      : undefined,
     timezone: restaurant.timezone || "Asia/Manila",
     ...base,
     lastUpdatedAt,
@@ -152,6 +157,7 @@ export async function fetchPublicRestaurantBySlug(
       walkInAvailability: true,
       lastOperationalUpdateAt: true,
       updatedAt: true,
+      coverImage: { select: { updatedAt: true } },
       diningTables: {
         where: { active: true, archivedAt: null },
         select: {
@@ -255,6 +261,7 @@ export async function fetchPublicRestaurants(
       walkInAvailability: true,
       lastOperationalUpdateAt: true,
       updatedAt: true,
+      coverImage: { select: { updatedAt: true } },
       diningTables: {
         where: { active: true, archivedAt: null },
         select: {

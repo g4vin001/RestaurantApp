@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { randomUUID } from "node:crypto";
 import { PageCard } from "@/components/PageCard";
-import { StatusBadge } from "@/components/StatusBadge";
 import { PublicFloorMap } from "@/components/customer/PublicFloorMap";
 import { CustomerRefresh } from "@/components/customer/CustomerRefresh";
 import { OpeningHours } from "@/components/customer/OpeningHours";
+import { RestaurantHero } from "@/components/customer/RestaurantHero";
 import { formatScheduledAt } from "@/lib/helpers";
 import type { PublicRestaurantView } from "@/lib/repositories/prisma/public-restaurant-view";
 
@@ -12,11 +12,15 @@ export function LiveRestaurantDetail({ restaurant, slug }: { restaurant: PublicR
   const accepting = restaurant.service.openNow && restaurant.walkInStatus !== "Paused";
   return <main className="mx-auto max-w-5xl px-5 py-8 sm:py-10">
     <Link href="/" className="inline-flex min-h-11 items-center text-sm font-semibold text-emerald-800">← All restaurants</Link>
-    <p className="mt-3 text-sm text-stone-600">{[restaurant.cuisineType, restaurant.location].filter(Boolean).join(" · ")}</p>
-    <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-      <h1 className="text-3xl font-bold tracking-tight text-stone-950">{restaurant.name}</h1>
-      <StatusBadge status={restaurant.walkInStatus} />
-    </div>
+    <RestaurantHero
+      name={restaurant.name}
+      location={restaurant.location}
+      cuisineType={restaurant.cuisineType}
+      coverImageUrl={restaurant.coverImageUrl}
+      openNow={restaurant.service.openNow}
+      statusLabel={restaurant.service.statusLabel}
+      walkInStatus={restaurant.walkInStatus}
+    />
     <div className="mt-5"><OpeningHours service={restaurant.service} timeZone={restaurant.timezone} /></div>
     <section aria-label="Plan your visit" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 sm:p-6">
       <h2 className="text-sm font-semibold text-emerald-900">Plan your visit</h2>

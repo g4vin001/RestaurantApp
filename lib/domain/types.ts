@@ -101,6 +101,7 @@ export interface RestaurantIdentity {
   schedule?: import("@/lib/domain/restaurant-schedule").OperatingSchedule;
   environment?: RestaurantEnvironment;
   revision?: number;
+  coverImageUrl?: string;
 }
 
 export interface DiningTable {

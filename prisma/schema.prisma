@@ -193,8 +193,19 @@ model Restaurant {
   operationCommands       OperationCommand[]
   importBatches           SyntheticImportBatch[]
   adminAuditLogs          AdminAuditLog[]
+  coverImage              RestaurantCoverImage?
 
   @@index([environment, archivedAt])
+}
+
+// One public photo per restaurant, resized in the manager's browser before
+// upload. Kept out of Restaurant so list queries never load the bytes.
+model RestaurantCoverImage {
+  restaurantId String     @id @db.Uuid
+  contentType  String
+  data         Bytes
+  updatedAt    DateTime   @updatedAt
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 }
 
 model RestaurantMembership {
@@ -231,7 +242,7 @@ model StaffMember {
   emailNormalized   String?
   permissionPreset  StaffPermissionPreset
   accessStatus      StaffAccessStatus     @default(NOT_INVITED)
-  workAccessEnabled Boolean                @default(false)
+  workAccessEnabled Boolean               @default(false)
   active            Boolean               @default(true)
   archivedAt        DateTime?
   lastClockedInAt   DateTime?
@@ -249,7 +260,7 @@ model StaffMember {
   @@index([restaurantId, email])
   @@index([restaurantId, workAccessEnabled, emailNormalized])
   @@index([staffRoleId])
-  @@index([emailNormalized, workAccessEnabled, active, archivedAt])
+  @@index([emailNormalized, workAccessEnabled, active, archivedAt], map: "StaffMember_emailNormalized_workAccessEnabled_active_archivedAt")
 }
 
 model StaffRole {
@@ -261,7 +272,7 @@ model StaffRole {
   archivedAt   DateTime?
   revision     Int               @default(0)
   createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  updatedAt    DateTime          @default(now()) @updatedAt
   restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   staffMembers StaffMember[]
   invites      StaffInvite[]
@@ -349,6 +360,7 @@ model StaffPinAttempt {
   profile      Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([restaurantId, profileId, attemptedAt])
+  @@index([profileId])
 }
 
 model FloorPlan {
@@ -597,7 +609,7 @@ model SeatingAssignment {
   seatedAt      DateTime
   completedAt   DateTime?
   createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
+  updatedAt     DateTime                 @default(now()) @updatedAt
   restaurant    Restaurant               @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   queueEntry    QueueEntry?              @relation(fields: [queueEntryId], references: [id], onDelete: SetNull)
   reservation   Reservation?             @relation(fields: [reservationId], references: [id], onDelete: SetNull)

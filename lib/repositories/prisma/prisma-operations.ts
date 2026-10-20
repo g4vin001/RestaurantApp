@@ -19,6 +19,7 @@ import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-commands";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
 import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { publicCoverImageUrl } from "@/lib/customer/cover-image";
 import { allocatePartyAcrossTables } from "@/lib/domain/operations";
 
 const FLOOR_ELEMENT_TYPES = new Set<FloorElementType>([
@@ -180,6 +181,7 @@ async function fetchRestaurantSnapshot(
     },
     select: {
       id: true,
+      slug: true,
       name: true,
       location: true,
       timezone: true,
@@ -187,6 +189,7 @@ async function fetchRestaurantSnapshot(
       walkInAvailability: true,
       environment: true,
       revision: true,
+      coverImage: { select: { updatedAt: true } },
       lastOperationalUpdateAt: true,
       updatedAt: true,
       floorPlans: {
@@ -481,6 +484,9 @@ export function mapRestaurantSnapshot(
       schedule: readOperatingSchedule(settings ?? {}),
       environment: restaurant.environment,
       revision: restaurant.revision,
+      coverImageUrl: restaurant.coverImage
+        ? publicCoverImageUrl(restaurant.slug, restaurant.coverImage.updatedAt)
+        : undefined,
     },
     tables: restaurant.diningTables.map((table) => {
       const geometry = geometryByTableId.get(table.id);
