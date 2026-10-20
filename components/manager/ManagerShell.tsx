@@ -6,6 +6,7 @@ import { logout } from "@/app/login/actions";
 import {
   BarChart3,
   CircleUserRound,
+  House,
   LayoutDashboard,
   MapPinned,
   LogOut,
@@ -40,10 +41,12 @@ function ShellContent({
   children,
   demoMode,
   profileName,
+  accountEmail,
 }: {
   children: ReactNode;
   demoMode: boolean;
   profileName: string;
+  accountEmail?: string;
 }) {
   const pathname = usePathname();
   const { mode, state, reset, connectionStatus, changedOnAnotherDevice } = useDemo();
@@ -240,6 +243,27 @@ function ShellContent({
             <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
               {isDemoRepository ? "Demo data" : "Shared database"}
             </span>
+            {accountEmail && (
+              <span
+                className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-sm text-stone-700"
+                title={`Signed in as ${accountEmail}`}
+              >
+                <CircleUserRound size={16} className="shrink-0" aria-hidden />
+                <span className="sr-only">Signed in as </span>
+                {/* Phones show only the icon; the email lives in the title and screen-reader text. */}
+                <span className="sr-only md:not-sr-only md:max-w-56 md:truncate">
+                  {accountEmail}
+                </span>
+              </span>
+            )}
+            <Link
+              href="/"
+              className="rounded-lg border border-stone-200 p-2.5 text-stone-700 hover:bg-stone-50 hover:text-stone-950"
+              aria-label="Go to home page"
+              title="Home"
+            >
+              <House size={18} />
+            </Link>
           </div>
         </header>
         <main>{children}</main>
@@ -301,6 +325,7 @@ export function ManagerShell(props: {
   children: ReactNode;
   demoMode: boolean;
   profileName: string;
+  accountEmail?: string;
 }) {
   return <ShellContent {...props} />;
 }

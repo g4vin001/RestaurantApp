@@ -20,6 +20,12 @@ export function Modal({
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
+  // Callers usually pass an inline onClose. Reading it through a ref keeps the
+  // focus effect from re-running (and stealing focus) on every parent render.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -31,9 +37,12 @@ export function Modal({
         dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ??
           [],
       );
-    window.requestAnimationFrame(() => focusable()[0]?.focus());
+    // Respect a field's autoFocus; otherwise start on the first control.
+    window.requestAnimationFrame(() => {
+      if (!dialogRef.current?.contains(document.activeElement)) focusable()[0]?.focus();
+    });
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
       if (event.key !== "Tab") return;
       const items = focusable();
       if (!items.length) return;
@@ -52,7 +61,7 @@ export function Modal({
       window.removeEventListener("keydown", closeOnEscape);
       previousFocus?.focus();
     };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
   return (

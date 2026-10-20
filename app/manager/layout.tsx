@@ -84,6 +84,7 @@ export default async function ManagerLayout({
         <ManagerShell
           demoMode={false}
           profileName={membership.profile.displayName}
+          accountEmail={user.email}
         >
           {children}
         </ManagerShell>
