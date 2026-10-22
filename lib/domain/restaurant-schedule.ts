@@ -180,6 +180,92 @@ export function isWithinServiceHours(source: ScheduleSource, at: Date) {
   return serviceIntervalsBetween(readOperatingSchedule(source), at, new Date(at.getTime() + 1), source.timezone).length > 0;
 }
 
+export const DEFAULT_RESERVATION_MINUTES = 90;
+export const MIN_RESERVATION_MINUTES = 30;
+export const MAX_RESERVATION_MINUTES = 720;
+export const RESERVATION_MINUTE_STEP = 30;
+
+export function readReservationDurationMinutes(settings: { reservationDurationMinutes?: unknown } | null | undefined) {
+  const value = settings?.reservationDurationMinutes;
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_RESERVATION_MINUTES && value <= MAX_RESERVATION_MINUTES
+    ? value
+    : DEFAULT_RESERVATION_MINUTES;
+}
+
+export function formatDurationMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${rest} min`;
+  return rest ? `${hours} hr ${rest} min` : `${hours} hr`;
+}
+
+// Special dates are left out: a short holiday service should block late
+// bookings on that day, not shrink the length for the whole year.
+export function shortestServicePeriod(schedule: OperatingSchedule) {
+  let shortest: { day: Weekday; minutes: number } | null = null;
+  for (const day of WEEKDAYS) {
+    for (const period of schedule.weekly[day]) {
+      const { start, end } = periodMinutes(period);
+      if (!shortest || end - start < shortest.minutes) shortest = { day, minutes: end - start };
+    }
+  }
+  return shortest;
+}
+
+export function validateReservationDuration(minutes: unknown, schedule: OperatingSchedule):
+  | { ok: true; minutes: number }
+  | { ok: false; error: string } {
+  if (
+    typeof minutes !== "number" || !Number.isInteger(minutes) ||
+    minutes < MIN_RESERVATION_MINUTES || minutes > MAX_RESERVATION_MINUTES ||
+    minutes % RESERVATION_MINUTE_STEP !== 0
+  ) {
+    return { ok: false, error: `Reservation length must be between ${formatDurationMinutes(MIN_RESERVATION_MINUTES)} and ${formatDurationMinutes(MAX_RESERVATION_MINUTES)}, in ${RESERVATION_MINUTE_STEP}-minute steps.` };
+  }
+  const shortest = shortestServicePeriod(schedule);
+  if (shortest && minutes > shortest.minutes) {
+    return { ok: false, error: `Reservations can't be longer than your shortest service period (${weekdayLabel(shortest.day)}, ${formatDurationMinutes(shortest.minutes)}).` };
+  }
+  return { ok: true, minutes };
+}
+
+// A booking is valid only when the whole stay falls inside one continuous
+// service interval, so the last bookable start is closing time minus the length.
+export function fitsWithinServiceHours(source: ScheduleSource, start: Date, minutes: number) {
+  if (!Number.isFinite(start.getTime())) return false;
+  const end = new Date(start.getTime() + minutes * 60_000);
+  const intervals = serviceIntervalsBetween(readOperatingSchedule(source), start, end, source.timezone);
+  return intervals.length === 1 &&
+    intervals[0].start.getTime() === start.getTime() &&
+    intervals[0].end.getTime() === end.getTime();
+}
+
+export const MAX_BLOCKED_RESERVATION_DATES = 200;
+
+// Online-booking availability. Both settings restrict customer requests only;
+// managers can still add a booking by hand.
+export function readReservationAvailability(settings: { acceptsReservations?: unknown; reservationBlockedDates?: unknown } | null | undefined) {
+  const blocked = validateBlockedDates(settings?.reservationBlockedDates ?? []);
+  return {
+    acceptsReservations: settings?.acceptsReservations !== false,
+    blockedDates: blocked.ok ? blocked.dates : [],
+  };
+}
+
+export function validateBlockedDates(value: unknown):
+  | { ok: true; dates: string[] }
+  | { ok: false; error: string } {
+  if (!Array.isArray(value) || value.length > MAX_BLOCKED_RESERVATION_DATES) {
+    return { ok: false, error: `Block at most ${MAX_BLOCKED_RESERVATION_DATES} reservation dates.` };
+  }
+  if (!value.every(validDate)) return { ok: false, error: "Each blocked reservation date must be a real calendar date." };
+  return { ok: true, dates: [...new Set(value)].sort() };
+}
+
+export function isReservationDateBlocked(blockedDates: string[], at: Date, timeZone?: string | null) {
+  return Number.isFinite(at.getTime()) && blockedDates.includes(restaurantDateKey(at, timeZone));
+}
+
 export function servicePeriodLabel(period: ServicePeriod) {
   const clock = (value: string) => {
     const [hour, minute] = value.split(":").map(Number);

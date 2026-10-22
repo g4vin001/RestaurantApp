@@ -18,7 +18,11 @@ import {
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { executeOperationsCommand } from "@/lib/repositories/prisma/operations-commands";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
-import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import {
+  readOperatingSchedule,
+  readReservationAvailability,
+  readReservationDurationMinutes,
+} from "@/lib/domain/restaurant-schedule";
 import { publicCoverImageUrl } from "@/lib/customer/cover-image";
 import { allocatePartyAcrossTables } from "@/lib/domain/operations";
 
@@ -354,6 +358,7 @@ async function fetchRestaurantSnapshot(
           seatedAt: true,
           completedAt: true,
           cancelledAt: true,
+          cancellationReason: true,
           noShowAt: true,
           updatedAt: true,
           revision: true,
@@ -408,6 +413,7 @@ export function mapRestaurantSnapshot(
   restaurant: RestaurantSnapshotRecord,
 ): OperationsState {
   const settings = asRecord(restaurant.operatingSettings);
+  const availability = readReservationAvailability(settings);
 
   const floorPlans: FloorPlan[] = restaurant.floorPlans.map((plan) => {
     const draft = parseDraftSnapshot(
@@ -479,6 +485,9 @@ export function mapRestaurantSnapshot(
         settings?.cleaningTargetMinutes,
         12,
       ),
+      reservationDurationMinutes: readReservationDurationMinutes(settings),
+      acceptsReservations: availability.acceptsReservations,
+      reservationBlockedDates: availability.blockedDates,
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
       schedule: readOperatingSchedule(settings ?? {}),
@@ -579,6 +588,7 @@ export function mapRestaurantSnapshot(
       seatedAt: reservation.seatedAt?.toISOString(),
       completedAt: reservation.completedAt?.toISOString(),
       cancelledAt: reservation.cancelledAt?.toISOString(),
+      cancellationReason: reservation.cancellationReason ?? undefined,
       noShowAt: reservation.noShowAt?.toISOString(),
       updatedAt: reservation.updatedAt.toISOString(),
       revision: reservation.revision,

@@ -1,5 +1,11 @@
 import { canTransitionTable } from "@/lib/domain/transitions";
-import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
+import {
+  DEFAULT_RESERVATION_MINUTES,
+  fitsWithinServiceHours,
+  formatDurationMinutes,
+  isReservationDateBlocked,
+  isWithinServiceHours,
+} from "@/lib/domain/restaurant-schedule";
 import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
 import type {
   DemoState,
@@ -13,7 +19,15 @@ export type DomainResult =
   | { ok: true; state: DemoState }
   | { ok: false; error: string; code?: "RESERVATION_CLASH" };
 
-const RESERVATION_CLASH_WINDOW_MS = 90 * 60_000;
+// Two bookings on one table clash when their starts are less than one
+// reservation length apart.
+function reservationWindowMs(restaurant?: { reservationDurationMinutes?: number }) {
+  return (restaurant?.reservationDurationMinutes ?? DEFAULT_RESERVATION_MINUTES) * 60_000;
+}
+
+function reservationConflictError(state: DemoState) {
+  return `That table has another reservation within ${formatDurationMinutes(state.restaurant.reservationDurationMinutes)}.`;
+}
 
 function clockTime(value: string) {
   return new Intl.DateTimeFormat("en-PH", {
@@ -43,7 +57,7 @@ function reservationClash(
         (reservation.tableId ? [reservation.tableId] : []);
       if (!claimed.some((id) => tableIds.includes(id))) return false;
       const scheduled = Date.parse(reservation.scheduledAt);
-      return scheduled >= from && scheduled <= from + RESERVATION_CLASH_WINDOW_MS;
+      return scheduled >= from && scheduled <= from + reservationWindowMs(state.restaurant);
     }) ?? null
   );
 }
@@ -519,6 +533,8 @@ export interface TableRecommendation {
 export type SeatingRecommendationState = {
   tables: Array<Pick<DemoState["tables"][number], "id" | "label" | "capacity" | "zone" | "active" | "status" | "statusChangedAt">>;
   reservations: Array<Pick<DemoState["reservations"][number], "id" | "tableId" | "tableIds" | "status" | "scheduledAt">>;
+  // Optional so callers without settings fall back to the default length.
+  restaurant?: Pick<DemoState["restaurant"], "reservationDurationMinutes">;
 };
 
 function reservationConflictsWithTable(
@@ -532,7 +548,7 @@ function reservationConflictsWithTable(
         reservation.tableIds?.includes(tableId)) &&
       ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status) &&
       Math.abs(Date.parse(reservation.scheduledAt) - now.getTime()) <
-        90 * 60_000,
+        reservationWindowMs(state.restaurant),
   );
 }
 
@@ -860,10 +876,74 @@ export function reservationConflict(
         ["CONFIRMED", "ARRIVED", "SEATED"].includes(reservation.status) &&
         Math.abs(
           Date.parse(reservation.scheduledAt) - Date.parse(input.scheduledAt),
-        ) <
-          90 * 60_000,
+        ) < reservationWindowMs(state.restaurant),
     ) ?? null
   );
+}
+
+export const RESERVATIONS_OFF_REASON = "The restaurant stopped taking online reservations.";
+export const BLOCKED_DATE_REASON = "The restaurant isn't taking reservations on this date.";
+
+type ReservationAvailability = { acceptsReservations: boolean; blockedDates: string[] };
+
+/**
+ * Upcoming bookings a reservation-availability change cancels. Turning online
+ * reservations off cancels unreviewed requests only; newly blocked dates also
+ * cancel confirmed bookings on that day. Dates that were already blocked are
+ * skipped so a manager's deliberate override booking survives later saves.
+ */
+export function reservationsCancelledByAvailabilityChange<
+  T extends Pick<Reservation, "id" | "status" | "scheduledAt">,
+>(
+  reservations: T[],
+  before: ReservationAvailability,
+  after: ReservationAvailability,
+  now: Date,
+  timeZone?: string | null,
+): Array<{ reservation: T; reason: string }> {
+  const turnedOff = before.acceptsReservations && !after.acceptsReservations;
+  const newlyBlocked = after.blockedDates.filter((date) => !before.blockedDates.includes(date));
+  return reservations.flatMap((reservation) => {
+    const at = new Date(reservation.scheduledAt);
+    if (!(at.getTime() >= now.getTime())) return [];
+    if (["PENDING_APPROVAL", "CONFIRMED"].includes(reservation.status) && isReservationDateBlocked(newlyBlocked, at, timeZone)) {
+      return [{ reservation, reason: BLOCKED_DATE_REASON }];
+    }
+    if (turnedOff && reservation.status === "PENDING_APPROVAL") {
+      return [{ reservation, reason: RESERVATIONS_OFF_REASON }];
+    }
+    return [];
+  });
+}
+
+/** Demo-mode counterpart of the database settings save. */
+export function cancelReservationsForAvailability(
+  state: DemoState,
+  after: ReservationAvailability,
+  occurredAt: string,
+): { state: DemoState; cancelled: number } {
+  const cancellations = new Map(
+    reservationsCancelledByAvailabilityChange(
+      state.reservations,
+      { acceptsReservations: state.restaurant.acceptsReservations, blockedDates: state.restaurant.reservationBlockedDates },
+      after,
+      new Date(occurredAt),
+      state.restaurant.timezone,
+    ).map(({ reservation, reason }) => [reservation.id, reason]),
+  );
+  if (!cancellations.size) return { state, cancelled: 0 };
+  return {
+    cancelled: cancellations.size,
+    state: {
+      ...state,
+      reservations: state.reservations.map((reservation) => {
+        const reason = cancellations.get(reservation.id);
+        return reason
+          ? { ...reservation, status: "CANCELLED", cancelledAt: occurredAt, cancellationReason: reason, updatedAt: occurredAt }
+          : reservation;
+      }),
+    },
+  };
 }
 
 export function createReservation(
@@ -883,8 +963,15 @@ export function createReservation(
   if (Number.isNaN(Date.parse(input.scheduledAt)))
     return { ok: false, error: "Choose a valid reservation date and time." };
   const existing = state.reservations.find((item) => item.id === replacingReservationId);
-  if ((!existing || Date.parse(existing.scheduledAt) !== Date.parse(input.scheduledAt)) && !isWithinServiceHours(state.restaurant, new Date(input.scheduledAt))) {
-    return { ok: false, error: "This reservation falls outside opening hours. Choose a service time or update the restaurant's special-date hours first." };
+  if (!existing || Date.parse(existing.scheduledAt) !== Date.parse(input.scheduledAt)) {
+    const start = new Date(input.scheduledAt);
+    if (!isWithinServiceHours(state.restaurant, start)) {
+      return { ok: false, error: "This reservation falls outside opening hours. Choose a service time or update the restaurant's special-date hours first." };
+    }
+    if (!fitsWithinServiceHours(state.restaurant, start, state.restaurant.reservationDurationMinutes)) {
+      const length = formatDurationMinutes(state.restaurant.reservationDurationMinutes);
+      return { ok: false, error: `Reservations last ${length} and must finish by closing time. Choose a start at least ${length} before close.` };
+    }
   }
   const table = input.tableId
     ? state.tables.find((item) => item.id === input.tableId && item.active)
@@ -899,7 +986,7 @@ export function createReservation(
   if (reservationConflict(state, input, replacingReservationId))
     return {
       ok: false,
-      error: "That table has another reservation within 90 minutes.",
+      error: reservationConflictError(state),
     };
   const reservation: Reservation = {
     id: `reservation-${occurredAt}`,
@@ -945,7 +1032,7 @@ export function updateReservation(
   if (reservationConflict(state, input, reservationId))
     return {
       ok: false,
-      error: "That table has another reservation within 90 minutes.",
+      error: reservationConflictError(state),
     };
   return {
     ok: true,

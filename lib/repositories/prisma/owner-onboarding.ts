@@ -45,6 +45,7 @@ export async function createOwnedRestaurant(
             opensAtHour: 10,
             closesAtHour: 22,
             cleaningTargetMinutes: 12,
+            reservationDurationMinutes: 90,
           },
           memberships: {
             create: {

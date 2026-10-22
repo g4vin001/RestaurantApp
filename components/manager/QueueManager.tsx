@@ -23,6 +23,7 @@ import {
   estimateWaitForParty,
   recommendTables,
 } from "@/lib/domain/operations";
+import { formatDurationMinutes } from "@/lib/domain/restaurant-schedule";
 import type { QueueEntry, Reservation } from "@/lib/domain/types";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import {
@@ -312,7 +313,6 @@ function ReservationForm({
 export function QueueManager() {
   const demo = useDemo();
   const { state } = demo;
-  const now = useLiveNow(30_000, state.lastUpdatedAt);
   const now = useLiveNow(30_000, state.lastUpdatedAt, demo.renderedAt);
   const timeZone = state.restaurant.timezone;
   const [tab, setTab] = useState<"queue" | "reservations">("queue");
@@ -804,7 +804,7 @@ export function QueueManager() {
                 Reservation list and day view
               </h2>
               <p className="mt-1 text-xs text-stone-500">
-                Asia/Manila time · conflicts are checked within 90 minutes.
+                Asia/Manila time · reservations last {formatDurationMinutes(state.restaurant.reservationDurationMinutes)}, and table conflicts are checked within that window.
               </p>
             </div>
             <label className="text-xs font-semibold uppercase tracking-wide text-stone-500">
@@ -846,6 +846,11 @@ export function QueueManager() {
                       {reservation.notes && (
                         <p className="mt-2 text-xs text-stone-500">
                           {reservation.notes}
+                        </p>
+                      )}
+                      {reservation.status === "CANCELLED" && reservation.cancellationReason && (
+                        <p className="mt-2 text-xs font-medium text-rose-700">
+                          Cancelled: {reservation.cancellationReason}
                         </p>
                       )}
                     </div>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { PageCard } from "@/components/PageCard";
@@ -7,7 +8,12 @@ import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 import { ReservationBookingForm } from "./ReservationBookingForm";
 import { OpeningHours } from "@/components/customer/OpeningHours";
-import { readOperatingSchedule, restaurantServiceStatus } from "@/lib/domain/restaurant-schedule";
+import {
+  readOperatingSchedule,
+  readReservationAvailability,
+  readReservationDurationMinutes,
+  restaurantServiceStatus,
+} from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
 export default async function BookReservationPage({
@@ -41,6 +47,23 @@ export default async function BookReservationPage({
 
   if (!restaurant) notFound();
   const schedule = readOperatingSchedule(asRecord(restaurant.operatingSettings) ?? {});
+  const availability = readReservationAvailability(asRecord(restaurant.operatingSettings));
+
+  // The detail page hides the button, but this URL can still be opened directly.
+  if (!availability.acceptsReservations) {
+    return (
+      <main className="mx-auto max-w-lg px-5 py-14">
+        <h1 className="text-3xl font-bold tracking-tight text-stone-950">{restaurant.name}</h1>
+        <PageCard className="mt-6">
+          <h2 className="font-semibold text-stone-900">Online reservations are closed</h2>
+          <p className="mt-1 text-sm leading-6 text-stone-600">
+            This restaurant isn&apos;t taking online reservations right now. You can still join the walk-in waitlist during opening hours.
+          </p>
+          <Link href={`/restaurants/${slug}`} className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-emerald-800">← Back to {restaurant.name}</Link>
+        </PageCard>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-lg px-5 py-14">
@@ -59,6 +82,8 @@ export default async function BookReservationPage({
           restaurantId={restaurant.id}
           defaultPartyName={profile.displayName}
           schedule={schedule}
+          reservationDurationMinutes={readReservationDurationMinutes(asRecord(restaurant.operatingSettings))}
+          blockedDates={availability.blockedDates}
           timeZone={restaurant.timezone}
         />
       </PageCard>

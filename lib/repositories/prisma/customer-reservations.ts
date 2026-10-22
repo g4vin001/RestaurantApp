@@ -1,7 +1,14 @@
 import "server-only";
 import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
-import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
+import {
+  fitsWithinServiceHours,
+  formatDurationMinutes,
+  isReservationDateBlocked,
+  isWithinServiceHours,
+  readReservationAvailability,
+  readReservationDurationMinutes,
+} from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
 export type CreateCustomerReservationInput = {
@@ -24,6 +31,7 @@ export type CustomerReservation = {
   partySize: number;
   scheduledAt: Date;
   status: string;
+  cancellationReason: string | null;
 };
 
 export async function fetchCustomerReservations(
@@ -38,6 +46,7 @@ export async function fetchCustomerReservations(
       partySize: true,
       scheduledAt: true,
       status: true,
+      cancellationReason: true,
       restaurant: { select: { name: true, timezone: true } },
     },
     orderBy: { scheduledAt: "desc" },
@@ -51,13 +60,13 @@ export async function fetchCustomerReservations(
     partySize: reservation.partySize,
     scheduledAt: reservation.scheduledAt,
     status: reservation.status,
+    cancellationReason: reservation.cancellationReason,
   }));
 }
 
-// Matches the ±90min heuristic already used by the manager-side domain layer
-// (lib/domain/operations.ts's reservationConflict) — kept consistent rather
-// than inventing a different overlap model.
-const OVERLAP_WINDOW_MS = 90 * 60_000;
+// Matches the ±reservation-length heuristic used by the manager-side domain
+// layer (lib/domain/operations.ts's reservationConflict) — kept consistent
+// rather than inventing a different overlap model.
 // Includes PENDING_APPROVAL — an unreviewed booking still holds a claim on
 // capacity, otherwise a customer could stack multiple pending requests past
 // what the restaurant can actually seat.
@@ -89,8 +98,24 @@ async function attemptCreate(
           "This restaurant is no longer available.",
         );
       }
-      if (!isWithinServiceHours({ ...asRecord(restaurant[0].operatingSettings), timezone: restaurant[0].timezone }, input.scheduledAt)) {
+      const settings = asRecord(restaurant[0].operatingSettings);
+      // Read under the row lock, so a manager turning reservations off or
+      // blocking this date is never raced by a request saved just after it.
+      const availability = readReservationAvailability(settings);
+      if (!availability.acceptsReservations) {
+        throw new OperationsRepositoryError("VALIDATION", "This restaurant isn't taking online reservations right now.");
+      }
+      if (isReservationDateBlocked(availability.blockedDates, input.scheduledAt, restaurant[0].timezone)) {
+        throw new OperationsRepositoryError("VALIDATION", "This restaurant isn't taking reservations on that date. Choose another day.");
+      }
+      const reservationMinutes = readReservationDurationMinutes(settings);
+      const schedule = { ...settings, timezone: restaurant[0].timezone };
+      if (!isWithinServiceHours(schedule, input.scheduledAt)) {
         throw new OperationsRepositoryError("VALIDATION", "This restaurant is closed at that time. Choose a time within its opening hours.");
+      }
+      if (!fitsWithinServiceHours(schedule, input.scheduledAt, reservationMinutes)) {
+        const length = formatDurationMinutes(reservationMinutes);
+        throw new OperationsRepositoryError("VALIDATION", `Reservations here last ${length} and must finish by closing time. Choose a start at least ${length} before the restaurant closes.`);
       }
 
       const capacity = await tx.diningTable.aggregate({
@@ -99,8 +124,8 @@ async function attemptCreate(
       });
       const totalCapacity = capacity._sum.capacity ?? 0;
 
-      const windowStart = new Date(input.scheduledAt.getTime() - OVERLAP_WINDOW_MS);
-      const windowEnd = new Date(input.scheduledAt.getTime() + OVERLAP_WINDOW_MS);
+      const windowStart = new Date(input.scheduledAt.getTime() - reservationMinutes * 60_000);
+      const windowEnd = new Date(input.scheduledAt.getTime() + reservationMinutes * 60_000);
 
       const booked = await tx.reservation.aggregate({
         where: {

@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  fitsWithinServiceHours,
+  formatDurationMinutes,
+  isReservationDateBlocked,
   isWithinServiceHours,
   legacyOperatingSchedule,
   readOperatingSchedule,
+  readReservationAvailability,
+  readReservationDurationMinutes,
   restaurantServiceStatus,
   serviceIntervalsBetween,
+  shortestServicePeriod,
+  validateBlockedDates,
   validateOperatingSchedule,
+  validateReservationDuration,
   WEEKDAYS,
   type OperatingSchedule,
 } from "./restaurant-schedule";
@@ -129,5 +137,73 @@ describe("restaurant service schedules", () => {
   it("counts real elapsed time across a daylight-saving transition", () => {
     const intervals = serviceIntervalsBetween(legacyOperatingSchedule(0, 24), new Date("2026-03-08T05:00:00Z"), new Date("2026-03-09T04:00:00Z"), "America/New_York");
     expect(intervals.reduce((sum, item) => sum + (item.end.getTime() - item.start.getTime()) / 3_600_000, 0)).toBe(23);
+  });
+});
+
+describe("reservation length", () => {
+  const fits = (schedule: OperatingSchedule, value: string, minutes: number) =>
+    fitsWithinServiceHours({ schedule, timezone: "Asia/Manila" }, at(value), minutes);
+
+  it("defaults to 90 minutes when unset or invalid", () => {
+    expect(readReservationDurationMinutes({})).toBe(90);
+    expect(readReservationDurationMinutes({ reservationDurationMinutes: "120" })).toBe(90);
+    expect(readReservationDurationMinutes({ reservationDurationMinutes: 120 })).toBe(120);
+    expect(formatDurationMinutes(90)).toBe("1 hr 30 min");
+    expect(formatDurationMinutes(120)).toBe("2 hr");
+    expect(formatDurationMinutes(45)).toBe("45 min");
+  });
+
+  it("caps the length at the shortest weekly period, including overnight ones", () => {
+    const schedule = closedWeek();
+    schedule.weekly.monday = [{ opensAt: "11:00", closesAt: "13:30" }, { opensAt: "17:00", closesAt: "22:00" }];
+    schedule.weekly.friday = [{ opensAt: "20:00", closesAt: "02:00" }];
+    expect(shortestServicePeriod(schedule)).toEqual({ day: "monday", minutes: 150 });
+    expect(validateReservationDuration(150, schedule).ok).toBe(true);
+    const tooLong = validateReservationDuration(180, schedule);
+    expect(tooLong.ok).toBe(false);
+    expect(!tooLong.ok && tooLong.error).toContain("Monday, 2 hr 30 min");
+    expect(validateReservationDuration(100, schedule).ok).toBe(false);
+    expect(validateReservationDuration(105, schedule).ok).toBe(false);
+  });
+
+  it("ignores special dates when capping the length", () => {
+    const schedule = legacyOperatingSchedule(10, 22);
+    schedule.exceptions = [{ date: "2026-12-24", label: "Christmas Eve", periods: [{ opensAt: "10:00", closesAt: "11:00" }] }];
+    expect(validateReservationDuration(120, schedule).ok).toBe(true);
+    expect(fits(schedule, "2026-12-24T10:00", 120)).toBe(false);
+  });
+
+  it("requires a booking to finish by closing time", () => {
+    const schedule = legacyOperatingSchedule(10, 22);
+    expect(fits(schedule, "2026-09-07T20:30", 90)).toBe(true);
+    expect(fits(schedule, "2026-09-07T20:31", 90)).toBe(false);
+    expect(fits(schedule, "2026-09-07T09:59", 90)).toBe(false);
+  });
+
+  it("allows a stay that runs past midnight in one continuous period", () => {
+    const schedule = closedWeek();
+    schedule.weekly.friday = [{ opensAt: "20:00", closesAt: "02:00" }];
+    expect(fits(schedule, "2026-09-11T23:30", 150)).toBe(true);
+    expect(fits(schedule, "2026-09-11T23:31", 150)).toBe(false);
+  });
+});
+
+describe("reservation availability", () => {
+  it("defaults to accepting reservations with no blocked dates", () => {
+    expect(readReservationAvailability({})).toEqual({ acceptsReservations: true, blockedDates: [] });
+    expect(readReservationAvailability({ acceptsReservations: false, reservationBlockedDates: "nope" }))
+      .toEqual({ acceptsReservations: false, blockedDates: [] });
+  });
+
+  it("validates, dedupes, and sorts blocked dates", () => {
+    expect(validateBlockedDates(["2026-12-25", "2026-12-24", "2026-12-25"])).toEqual({ ok: true, dates: ["2026-12-24", "2026-12-25"] });
+    expect(validateBlockedDates(["2026-02-30"]).ok).toBe(false);
+    expect(validateBlockedDates("2026-12-25").ok).toBe(false);
+  });
+
+  it("checks blocked dates in restaurant time, not UTC", () => {
+    // 23:30 on the 24th in Manila is 15:30 UTC on the 24th; 00:30 on the 25th is still the 24th in UTC.
+    expect(isReservationDateBlocked(["2026-12-25"], at("2026-12-24T23:30"), "Asia/Manila")).toBe(false);
+    expect(isReservationDateBlocked(["2026-12-25"], at("2026-12-25T00:30"), "Asia/Manila")).toBe(true);
   });
 });

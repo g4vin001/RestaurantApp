@@ -61,6 +61,11 @@ export default async function MyReservationsPage() {
                   reservation.restaurantTimezone,
                 )}
               </p>
+              {reservation.status === "CANCELLED" && reservation.cancellationReason && (
+                <p className="mt-2 rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-700">
+                  {reservation.cancellationReason}
+                </p>
+              )}
             </PageCard>
           ))}
         </div>

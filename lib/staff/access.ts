@@ -12,7 +12,9 @@ import type {
   StaffPermission,
   StaffPermissionPreset,
 } from "@/lib/domain/types";
+import { readReservationDurationMinutes } from "@/lib/domain/restaurant-schedule";
 import { prisma } from "@/lib/prisma";
+import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import { normalizeStaffEmail, permissionsForPreset } from "@/lib/staff/policy";
 
 export const WORK_SESSION_COOKIE = "halina_work_session";
@@ -40,6 +42,7 @@ export type WorkContext = {
   restaurantSlug: string;
   restaurantTimezone: string;
   restaurantEnvironment: RestaurantEnvironment;
+  reservationDurationMinutes: number;
   walkInAvailability: "AVAILABLE" | "LIMITED" | "PAUSED";
   staffMemberId: string;
   staffName: string;
@@ -211,6 +214,7 @@ export async function getCurrentWorkContext(
           timezone: true,
           environment: true,
           walkInAvailability: true,
+          operatingSettings: true,
           archivedAt: true,
         },
       },
@@ -287,6 +291,7 @@ export async function getCurrentWorkContext(
     restaurantSlug: session.restaurant.slug,
     restaurantTimezone: session.restaurant.timezone,
     restaurantEnvironment: session.restaurant.environment,
+    reservationDurationMinutes: readReservationDurationMinutes(asRecord(session.restaurant.operatingSettings)),
     walkInAvailability: session.restaurant.walkInAvailability,
     staffMemberId: session.staffMember.id,
     staffName: session.staffMember.name,

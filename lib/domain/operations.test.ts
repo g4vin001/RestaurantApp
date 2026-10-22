@@ -4,11 +4,14 @@ import { createDemoState } from "@/lib/demo/seed";
 import {
   addQueueEntry,
   addStaffMember,
+  BLOCKED_DATE_REASON,
+  cancelReservationsForAvailability,
   createReservation,
   correctLastTableTransition,
   estimateWaitForParty,
   recommendTables,
   removeStaffMember,
+  RESERVATIONS_OFF_REASON,
   seatQueueEntry,
   seatReservation,
   setQueueStatus,
@@ -133,6 +136,40 @@ describe("manager operation commands", () => {
     );
   });
 
+  it("cancels only the bookings an availability change affects", () => {
+    const state = createDemoState(now);
+    const base = { partySize: 2, updatedAt: occurredAt };
+    state.reservations = [
+      { ...base, id: "pending-later", partyName: "A", status: "PENDING_APPROVAL", scheduledAt: "2026-08-05T19:00:00+08:00" },
+      { ...base, id: "confirmed-later", partyName: "B", status: "CONFIRMED", scheduledAt: "2026-08-05T19:00:00+08:00" },
+      { ...base, id: "confirmed-blocked", partyName: "C", status: "CONFIRMED", scheduledAt: "2026-08-06T12:00:00+08:00" },
+      { ...base, id: "arrived-blocked", partyName: "D", status: "ARRIVED", scheduledAt: "2026-08-06T13:00:00+08:00" },
+      { ...base, id: "pending-past", partyName: "E", status: "PENDING_APPROVAL", scheduledAt: "2026-07-01T19:00:00+08:00" },
+    ];
+
+    const off = cancelReservationsForAvailability(state, { acceptsReservations: false, blockedDates: [] }, occurredAt);
+    expect(off.cancelled).toBe(1);
+    expect(off.state.reservations.find((item) => item.id === "pending-later")).toMatchObject({ status: "CANCELLED", cancellationReason: RESERVATIONS_OFF_REASON });
+    expect(off.state.reservations.find((item) => item.id === "confirmed-later")?.status).toBe("CONFIRMED");
+
+    const blocked = cancelReservationsForAvailability(state, { acceptsReservations: true, blockedDates: ["2026-08-06"] }, occurredAt);
+    expect(blocked.cancelled).toBe(1);
+    expect(blocked.state.reservations.find((item) => item.id === "confirmed-blocked")).toMatchObject({ status: "CANCELLED", cancellationReason: BLOCKED_DATE_REASON });
+    expect(blocked.state.reservations.find((item) => item.id === "arrived-blocked")?.status).toBe("ARRIVED");
+
+    // A date that was already blocked doesn't cancel an override booking again.
+    state.restaurant.reservationBlockedDates = ["2026-08-06"];
+    expect(cancelReservationsForAvailability(state, { acceptsReservations: true, blockedDates: ["2026-08-06"] }, occurredAt).cancelled).toBe(0);
+  });
+
+  it("requires new reservations to finish by closing time", () => {
+    const state = createDemoState(now);
+    state.restaurant.schedule = legacyOperatingSchedule(11, 22);
+    state.restaurant.reservationDurationMinutes = 120;
+    expect(createReservation(state, { partyName: "Late party", partySize: 2, scheduledAt: "2026-08-03T20:01:00+08:00" }, occurredAt)).toMatchObject({ ok: false, error: expect.stringContaining("finish by closing time") });
+    expect(createReservation(state, { partyName: "Last seating", partySize: 2, scheduledAt: "2026-08-03T20:00:00+08:00" }, occurredAt).ok).toBe(true);
+  });
+
   it("recommends a fitting table and rejects reservation conflicts", () => {
     const state = createDemoState(now);
     const withoutReservations = { ...state, reservations: [] };
@@ -155,7 +192,7 @@ describe("manager operation commands", () => {
     );
     expect(conflict.ok).toBe(false);
     if (conflict.ok) throw new Error("Expected a reservation conflict");
-    expect(conflict.error).toContain("within 90 minutes");
+    expect(conflict.error).toContain("within 1 hr 30 min");
   });
 
   it("adds and deactivates staff without creating login access", () => {

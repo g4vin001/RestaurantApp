@@ -9,14 +9,24 @@ import type {
   StaffPermission,
   TableStatus,
 } from "@/lib/generated/prisma/client";
+import { reservationsCancelledByAvailabilityChange } from "@/lib/domain/operations";
 import { canTransitionTable } from "@/lib/domain/transitions";
 import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
-import { isWithinServiceHours, validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import {
+  fitsWithinServiceHours,
+  formatDurationMinutes,
+  isWithinServiceHours,
+  readOperatingSchedule,
+  readReservationAvailability,
+  readReservationDurationMinutes,
+  validateBlockedDates,
+  validateOperatingSchedule,
+  validateReservationDuration,
+} from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 
-const RESERVATION_CONFLICT_WINDOW_MS = 90 * 60 * 1_000;
 const MANAGER_ROLES: MembershipRole[] = ["OWNER", "MANAGER"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -104,13 +114,28 @@ function validateReservationInput(
   };
 }
 
-async function assertReservationHours(tx: Prisma.TransactionClient, scope: OperationsCommandScope, scheduledAt: Date) {
+// Opening hours and reservation length come from the restaurant's settings.
+async function reservationRules(tx: Prisma.TransactionClient, scope: OperationsCommandScope) {
   const restaurant = await tx.restaurant.findFirst({
     where: { id: scope.restaurantId, archivedAt: null },
     select: { timezone: true, operatingSettings: true },
   });
-  if (!restaurant || !isWithinServiceHours({ ...asRecord(restaurant.operatingSettings), timezone: restaurant.timezone }, scheduledAt)) {
+  const settings = asRecord(restaurant?.operatingSettings);
+  return {
+    restaurant,
+    schedule: { ...settings, timezone: restaurant?.timezone },
+    minutes: readReservationDurationMinutes(settings),
+  };
+}
+
+async function assertReservationHours(tx: Prisma.TransactionClient, scope: OperationsCommandScope, scheduledAt: Date) {
+  const { restaurant, schedule, minutes } = await reservationRules(tx, scope);
+  if (!restaurant || !isWithinServiceHours(schedule, scheduledAt)) {
     fail("VALIDATION", "This reservation falls outside opening hours. Choose a service time or update the restaurant's special-date hours first.");
+  }
+  if (!fitsWithinServiceHours(schedule, scheduledAt, minutes)) {
+    const length = formatDurationMinutes(minutes);
+    fail("VALIDATION", `Reservations last ${length} and must finish by closing time. Choose a start at least ${length} before close.`);
   }
 }
 
@@ -136,6 +161,7 @@ async function assertReservationTable(
   if (input.partySize > table.capacity) {
     fail("VALIDATION", `${table.label} is too small for this party.`);
   }
+  const { minutes } = await reservationRules(tx, scope);
   const conflict = await tx.reservation.findFirst({
     where: {
       restaurantId: scope.restaurantId,
@@ -146,17 +172,17 @@ async function assertReservationTable(
       },
       scheduledAt: {
         gt: new Date(
-          input.scheduledAt.getTime() - RESERVATION_CONFLICT_WINDOW_MS,
+          input.scheduledAt.getTime() - minutes * 60_000,
         ),
         lt: new Date(
-          input.scheduledAt.getTime() + RESERVATION_CONFLICT_WINDOW_MS,
+          input.scheduledAt.getTime() + minutes * 60_000,
         ),
       },
     },
     select: { id: true },
   });
   if (conflict) {
-    fail("VALIDATION", "That table has another reservation within 90 minutes.");
+    fail("VALIDATION", `That table has another reservation within ${formatDurationMinutes(minutes)}.`);
   }
 }
 
@@ -245,6 +271,7 @@ async function assertNoReservationClash(
   } = {},
 ) {
   if (options.acknowledged || !tableIds.length) return;
+  const { minutes } = await reservationRules(tx, scope);
   const now = new Date();
   const clash = await tx.reservation.findFirst({
     where: {
@@ -258,7 +285,7 @@ async function assertNoReservationClash(
       status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
       scheduledAt: {
         gte: now,
-        lte: new Date(now.getTime() + RESERVATION_CONFLICT_WINDOW_MS),
+        lte: new Date(now.getTime() + minutes * 60_000),
       },
     },
     orderBy: { scheduledAt: "asc" },
@@ -312,6 +339,47 @@ async function changeTables(
     })),
   });
   return now;
+}
+
+// Runs inside the settings save, so customers cannot book in between the new
+// rules taking effect and the affected bookings being cancelled.
+async function cancelReservationsForAvailability(
+  tx: Prisma.TransactionClient,
+  scope: OperationsCommandScope,
+  commandId: string,
+  timeZone: string,
+  before: { acceptsReservations: boolean; blockedDates: string[] },
+  after: { acceptsReservations: boolean; blockedDates: string[] },
+) {
+  const now = new Date();
+  const upcoming = await tx.reservation.findMany({
+    where: {
+      restaurantId: scope.restaurantId,
+      status: { in: ["PENDING_APPROVAL", "CONFIRMED"] },
+      scheduledAt: { gte: now },
+    },
+    select: { id: true, status: true, scheduledAt: true, assignedTableId: true },
+  });
+  const cancellations = reservationsCancelledByAvailabilityChange(
+    upcoming.map((reservation) => ({ ...reservation, scheduledAt: reservation.scheduledAt.toISOString() })),
+    before,
+    after,
+    now,
+    timeZone,
+  );
+  for (const { reservation, reason } of cancellations) {
+    await tx.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: now,
+        cancellationReason: reason,
+        assignedTableId: null,
+        revision: { increment: 1 },
+      },
+    });
+    await releaseHeldTable(tx, scope, reservation.assignedTableId, commandId, "Reservation cancelled by availability settings");
+  }
 }
 
 async function releaseHeldTable(
@@ -1105,7 +1173,7 @@ async function executeInTransaction(
       const input = command.input;
       const settings = await tx.restaurant.findFirst({
         where: { id: scope.restaurantId, archivedAt: null },
-        select: { operatingSettings: true, revision: true },
+        select: { operatingSettings: true, revision: true, timezone: true },
       });
       if (!settings || settings.revision !== command.expectedRevision) fail("CONFLICT", "Restaurant settings changed on another device.");
       const name = text(input.name, "Restaurant name", 80, true) as string;
@@ -1119,6 +1187,24 @@ async function executeInTransaction(
       const current = settings.operatingSettings && typeof settings.operatingSettings === "object" && !Array.isArray(settings.operatingSettings)
         ? settings.operatingSettings as Prisma.JsonObject
         : {};
+      // Checked against the schedule being saved, so shrinking a service period
+      // below the current reservation length is refused too.
+      const duration = validateReservationDuration(
+        input.reservationDurationMinutes,
+        schedule?.ok ? schedule.schedule : readOperatingSchedule(current),
+      );
+      if (!duration.ok) fail("VALIDATION", duration.error);
+      if (typeof input.acceptsReservations !== "boolean") fail("VALIDATION", "Choose whether online reservations are accepted.");
+      const blockedDates = validateBlockedDates(input.reservationBlockedDates);
+      if (!blockedDates.ok) fail("VALIDATION", blockedDates.error);
+      await cancelReservationsForAvailability(
+        tx,
+        scope,
+        command.commandId,
+        settings.timezone,
+        readReservationAvailability(current),
+        { acceptsReservations: input.acceptsReservations, blockedDates: blockedDates.dates },
+      );
       const changed = await tx.restaurant.updateMany({
         where: { id: scope.restaurantId, revision: command.expectedRevision, archivedAt: null },
         data: {
@@ -1127,6 +1213,9 @@ async function executeInTransaction(
           walkInAvailability: input.isOpen ? "AVAILABLE" : "PAUSED",
           operatingSettings: {
             ...current, cleaningTargetMinutes, opensAtHour, closesAtHour,
+            reservationDurationMinutes: duration.minutes,
+            acceptsReservations: input.acceptsReservations,
+            reservationBlockedDates: blockedDates.dates,
             ...(schedule?.ok ? { schedule: schedule.schedule as unknown as Prisma.InputJsonValue } : {}),
           },
           revision: { increment: 1 },

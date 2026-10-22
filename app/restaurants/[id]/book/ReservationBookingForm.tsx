@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { bookReservation, type ReservationBookingState } from "./actions";
-import { isWithinServiceHours, periodsForDate, servicePeriodLabel, type OperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import { fitsWithinServiceHours, formatDurationMinutes, isReservationDateBlocked, isWithinServiceHours, periodsForDate, servicePeriodLabel, type OperatingSchedule } from "@/lib/domain/restaurant-schedule";
 import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
 
 const initialState: ReservationBookingState = {};
@@ -16,18 +16,25 @@ export function ReservationBookingForm({
   restaurantId,
   defaultPartyName,
   schedule,
+  reservationDurationMinutes,
+  blockedDates,
   timeZone,
 }: {
   restaurantId: string;
   defaultPartyName: string;
   schedule: OperatingSchedule;
+  reservationDurationMinutes: number;
+  blockedDates: string[];
   timeZone: string;
 }) {
   const boundAction = bookReservation.bind(null, restaurantId);
   const [state, action, pending] = useActionState(boundAction, initialState);
   const [scheduledAt, setScheduledAt] = useState("");
   const selectedTime = restaurantWallTimeToUtc(scheduledAt, timeZone);
-  const outsideHours = !!selectedTime && !isWithinServiceHours({ schedule, timezone: timeZone }, selectedTime);
+  const length = formatDurationMinutes(reservationDurationMinutes);
+  const closedAtTime = !!selectedTime && !isWithinServiceHours({ schedule, timezone: timeZone }, selectedTime);
+  const dateBlocked = !!selectedTime && isReservationDateBlocked(blockedDates, selectedTime, timeZone);
+  const outsideHours = !!selectedTime && !fitsWithinServiceHours({ schedule, timezone: timeZone }, selectedTime, reservationDurationMinutes);
   const selectedHours = selectedTime ? periodsForDate(schedule, scheduledAt.slice(0, 10)).map(servicePeriodLabel) : [];
 
   if (state.success) {
@@ -68,8 +75,14 @@ export function ReservationBookingForm({
         Date and time · {timeZone}
         <input name="scheduledAt" type="datetime-local" required value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-describedby="booking-hours" className={inputClass} />
       </label>
-      <p id="booking-hours" role={outsideHours ? "alert" : "status"} className={`text-sm leading-6 ${outsideHours ? "text-rose-700" : "text-stone-600"}`}>
-        {outsideHours ? "The restaurant is closed at this time. Choose a time during service. " : ""}
+      <p id="booking-hours" role={outsideHours || dateBlocked ? "alert" : "status"} className={`text-sm leading-6 ${outsideHours || dateBlocked ? "text-rose-700" : "text-stone-600"}`}>
+        {dateBlocked ? "The restaurant isn't taking reservations on this date. Choose another day. " : ""}
+        {!dateBlocked && outsideHours
+          ? closedAtTime
+            ? "The restaurant is closed at this time. Choose a time during service. "
+            : `This reservation would run past closing. Choose a start at least ${length} before close. `
+          : ""}
+        {`Reservations last ${length}. `}
         {selectedTime ? `Service starting on this date: ${selectedHours.length ? selectedHours.join(" · ") : "none"}. Overnight service may continue from the previous day.` : "Choose a date to check its service hours."}
       </p>
 

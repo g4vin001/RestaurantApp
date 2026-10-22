@@ -18,6 +18,7 @@ import {
 import {
   addQueueEntry,
   addStaffMember,
+  cancelReservationsForAvailability,
   createReservation,
   correctLastTableTransition,
   moveReservationTable as moveReservationTableCommand,
@@ -43,7 +44,12 @@ import type {
   TableStatus,
 } from "@/lib/domain/types";
 import { createDemoState } from "@/lib/demo/seed";
-import { validateOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import {
+  readOperatingSchedule,
+  validateBlockedDates,
+  validateOperatingSchedule,
+  validateReservationDuration,
+} from "@/lib/domain/restaurant-schedule";
 import {
   type OperationsRepositoryMode,
 } from "@/lib/repositories/operations";
@@ -215,6 +221,9 @@ interface DemoContextValue {
       | "location"
       | "isOpen"
       | "cleaningTargetMinutes"
+      | "reservationDurationMinutes"
+      | "acceptsReservations"
+      | "reservationBlockedDates"
       | "opensAtHour"
       | "closesAtHour"
       | "schedule"
@@ -781,6 +790,9 @@ export function OperationsProvider({
         | "location"
         | "isOpen"
         | "cleaningTargetMinutes"
+        | "reservationDurationMinutes"
+        | "acceptsReservations"
+        | "reservationBlockedDates"
         | "opensAtHour"
         | "closesAtHour"
         | "schedule"
@@ -819,12 +831,27 @@ export function OperationsProvider({
           error: "Cleaning target must be between 1 and 120 minutes.",
         });
       }
+      const duration = validateReservationDuration(
+        input.reservationDurationMinutes,
+        input.schedule ?? readOperatingSchedule(state.restaurant),
+      );
+      if (!duration.ok) return Promise.resolve(duration);
+      if (typeof input.acceptsReservations !== "boolean") {
+        return Promise.resolve({ ok: false, error: "Choose whether online reservations are accepted." });
+      }
+      const blockedDates = validateBlockedDates(input.reservationBlockedDates);
+      if (!blockedDates.ok) return Promise.resolve(blockedDates);
       const occurredAt = new Date().toISOString();
+      const { state: cancelledState } = cancelReservationsForAvailability(
+        state,
+        { acceptsReservations: input.acceptsReservations, blockedDates: blockedDates.dates },
+        occurredAt,
+      );
       dispatch({
         type: "REPLACE",
         state: {
-          ...state,
-          restaurant: { ...state.restaurant, ...input, name, location },
+          ...cancelledState,
+          restaurant: { ...state.restaurant, ...input, reservationBlockedDates: blockedDates.dates, name, location },
           lastUpdatedAt: occurredAt,
         },
       });

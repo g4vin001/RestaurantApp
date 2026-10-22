@@ -578,6 +578,7 @@ model Reservation {
   seatedAt           DateTime?
   completedAt        DateTime?
   cancelledAt        DateTime?
+  cancellationReason String?
   noShowAt           DateTime?
   revision           Int                   @default(0)
   syntheticBatchId   String?               @db.Uuid

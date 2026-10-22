@@ -96,6 +96,9 @@ export interface RestaurantIdentity {
   timezone: string;
   isOpen: boolean;
   cleaningTargetMinutes: number;
+  reservationDurationMinutes: number;
+  acceptsReservations: boolean;
+  reservationBlockedDates: string[];
   opensAtHour: number;
   closesAtHour: number;
   schedule?: import("@/lib/domain/restaurant-schedule").OperatingSchedule;
@@ -184,6 +187,7 @@ export interface Reservation {
   seatedAt?: string;
   completedAt?: string;
   cancelledAt?: string;
+  cancellationReason?: string;
   noShowAt?: string;
   updatedAt: string;
   revision?: number;

@@ -564,6 +564,8 @@ export default async function StaffOperationsPage() {
   const now = new Date();
   const reservationWindowStart = startOfRestaurantDay(now, context.restaurantTimezone);
   const reservationWindowEnd = new Date(reservationWindowStart.getTime() + 48 * 60 * 60_000);
+  // Bookings this close to now may still hold, or are about to claim, a table.
+  const reservationWindowMs = context.reservationDurationMinutes * 60_000;
 
   const needsTableData = canViewFloor || canManageGuests || canSeat;
   const [error, message, tableResult, queueResult, reservationResult, seatingBookings] = await Promise.all([
@@ -659,7 +661,7 @@ export default async function StaffOperationsPage() {
         restaurantId: context.restaurantId,
         status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
         assignedTableId: { not: null },
-        scheduledAt: { gte: new Date(now.getTime() - 90 * 60_000), lte: new Date(now.getTime() + 90 * 60_000) },
+        scheduledAt: { gte: new Date(now.getTime() - reservationWindowMs), lte: new Date(now.getTime() + reservationWindowMs) },
       },
       select: { id: true, assignedTableId: true, scheduledAt: true, status: true },
     }) : Promise.resolve([]),
@@ -673,6 +675,7 @@ export default async function StaffOperationsPage() {
   );
   const availableTables = tables.filter((table) => table.currentStatus === "AVAILABLE");
   const seatingState: SeatingRecommendationState = {
+    restaurant: { reservationDurationMinutes: context.reservationDurationMinutes },
     tables: tables.map((table) => ({
       id: table.id, label: table.label, capacity: table.capacity, zone: table.zone,
       active: true, status: table.currentStatus, statusChangedAt: table.updatedAt.toISOString(),

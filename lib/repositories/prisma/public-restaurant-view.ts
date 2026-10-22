@@ -8,7 +8,11 @@ import {
   type PublicReservationSource,
 } from "@/lib/customer/public-floor";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
-import { readOperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import {
+  readOperatingSchedule,
+  readReservationAvailability,
+  readReservationDurationMinutes,
+} from "@/lib/domain/restaurant-schedule";
 import { publicCoverImageUrl } from "@/lib/customer/cover-image";
 
 type PublicRestaurantRow = {
@@ -43,6 +47,7 @@ const PUBLIC_RESERVATION_LOOKAHEAD_MS = 12 * 60 * 60_000;
 // host stands, and kitchen geometry never reach the customer browser.
 function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
   const settings = asRecord(restaurant.operatingSettings);
+  const availability = readReservationAvailability(settings);
   const nowIso = now.toISOString();
   const assembled: DemoState = {
     version: 2,
@@ -53,6 +58,9 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
       timezone: restaurant.timezone || "Asia/Manila",
       isOpen: restaurant.walkInAvailability !== "PAUSED",
       cleaningTargetMinutes: finiteNumber(settings?.cleaningTargetMinutes, 12),
+      reservationDurationMinutes: readReservationDurationMinutes(settings),
+      acceptsReservations: availability.acceptsReservations,
+      reservationBlockedDates: availability.blockedDates,
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
       schedule: readOperatingSchedule(settings ?? {}),
@@ -110,6 +118,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     checkedAt: nowIso,
     slug: restaurant.slug,
     cuisineType: restaurant.cuisineType ?? undefined,
+    acceptsReservations: availability.acceptsReservations,
     coverImageUrl: restaurant.coverImage
       ? publicCoverImageUrl(restaurant.slug, restaurant.coverImage.updatedAt)
       : undefined,

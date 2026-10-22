@@ -1,4 +1,5 @@
 import { recommendTables, type SeatingRecommendationState } from "@/lib/domain/operations";
+import { DEFAULT_RESERVATION_MINUTES } from "@/lib/domain/restaurant-schedule";
 
 export type StaffSeatingOption = {
   tableIds: string[];
@@ -20,12 +21,13 @@ export function staffSeatingOptions(
     reservations: state.reservations.filter((reservation) => reservation.id !== excludeReservationId),
   };
   const tables = new Map(state.tables.map((table) => [table.id, table]));
+  const windowMs = (state.restaurant?.reservationDurationMinutes ?? DEFAULT_RESERVATION_MINUTES) * 60_000;
   return recommendTables(candidates, { ...party, preferredZone: party.preferredZone ?? undefined }, now)
     // Managers retain deliberate booking-clash overrides in their workspace.
     .filter((option) => !candidates.reservations.some((reservation) =>
       ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status) &&
       Date.parse(reservation.scheduledAt) >= now.getTime() &&
-      Date.parse(reservation.scheduledAt) <= now.getTime() + 90 * 60_000 &&
+      Date.parse(reservation.scheduledAt) <= now.getTime() + windowMs &&
       (reservation.tableIds ?? (reservation.tableId ? [reservation.tableId] : []))
         .some((id) => option.tableIds.includes(id)),
     ))
