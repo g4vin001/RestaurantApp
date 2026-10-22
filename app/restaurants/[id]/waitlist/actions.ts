@@ -27,10 +27,13 @@ export async function joinCustomerWaitlist(
   const partyName = String(formData.get("partyName") ?? "").trim();
   const partySize = Number(formData.get("partySize") ?? 0);
   const contact = String(formData.get("contact") ?? "").trim();
+  const notes = String(formData.get("notes") ?? "").trim();
   if (partyName.length < 2 || partyName.length > 80)
     return { error: "Enter a party name between 2 and 80 characters." };
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > 30)
     return { error: "Party size must be between 1 and 30." };
+  if (notes.length > 500)
+    return { error: "Keep notes under 500 characters." };
 
   const restaurant = await prisma.restaurant.findFirst({
     where: { slug, environment: "LIVE", archivedAt: null },
@@ -66,6 +69,7 @@ export async function joinCustomerWaitlist(
         partyName,
         partySize,
         contact: contact || null,
+        notes: notes || null,
         promisedWaitMinutes,
         createdById: profile.id,
         source: "CUSTOMER",
