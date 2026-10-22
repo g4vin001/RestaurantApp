@@ -145,6 +145,9 @@ interface DemoContextValue {
   mode: OperationsRepositoryMode;
   state: DemoState;
   hydrated: boolean;
+  // When the server rendered this page. Live clocks start here so the first
+  // client render matches the server HTML.
+  renderedAt?: string;
   connectionStatus: "live" | "reconnecting" | "offline" | "stale";
   changedOnAnotherDevice: boolean;
   transitionTable: (
@@ -227,10 +230,12 @@ export function OperationsProvider({
   children,
   repositoryMode,
   initialState,
+  renderedAt,
 }: {
   children: ReactNode;
   repositoryMode: OperationsRepositoryMode;
   initialState?: DemoState;
+  renderedAt?: string;
 }) {
   const [state, dispatch] = useReducer(
     reducer,
@@ -841,6 +846,7 @@ export function OperationsProvider({
       mode: repositoryMode,
       state,
       hydrated,
+      renderedAt,
       connectionStatus,
       changedOnAnotherDevice,
       transitionTable,
@@ -872,6 +878,7 @@ export function OperationsProvider({
       state,
       repositoryMode,
       hydrated,
+      renderedAt,
       connectionStatus,
       changedOnAnotherDevice,
       transitionTable,

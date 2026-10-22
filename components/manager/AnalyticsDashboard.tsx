@@ -78,8 +78,8 @@ function MetricCard({ label, value, detail, change, icon: Icon }: {
 }
 
 export function AnalyticsDashboard() {
-  const { state } = useDemo();
-  const now = useLiveNow(60_000, state.lastUpdatedAt);
+  const { state, renderedAt } = useDemo();
+  const now = useLiveNow(60_000, state.lastUpdatedAt, renderedAt);
   const todayRange = getAnalyticsRange(
     "LAST_7_DAYS",
     now,

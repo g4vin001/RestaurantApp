@@ -295,11 +295,11 @@ function TableDetailPanel({
 
 export function LiveFloor() {
   const params = useSearchParams();
-  const { state, transitionTable, correctTable } = useDemo();
+  const { state, transitionTable, correctTable, renderedAt } = useDemo();
   const [view, setView] = useState<"map" | "list">("map");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const now = useLiveNow(30_000, state.lastUpdatedAt, renderedAt);
   const version = useMemo(() => getActiveFloorVersion(state), [state]);
   const activeTables = state.tables.filter((table) => table.active);
 

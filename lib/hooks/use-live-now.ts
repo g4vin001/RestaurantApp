@@ -2,8 +2,20 @@
 
 import { useEffect, useState } from "react";
 
-export function useLiveNow(intervalMs: number, resetKey?: string) {
-  const [now, setNow] = useState(() => new Date());
+// Flips after the first client render commits. Before that, a component may be
+// hydrating server HTML, so it must render with the server's clock or any
+// elapsed-minute text can differ and break hydration. Later mounts (client
+// navigation) have no server HTML to match and use the real time.
+let hydrated = false;
+
+export function useLiveNow(intervalMs: number, resetKey?: string, serverNow?: string) {
+  const [now, setNow] = useState(() =>
+    !hydrated && serverNow ? new Date(serverNow) : new Date(),
+  );
+
+  useEffect(() => {
+    hydrated = true;
+  }, []);
 
   useEffect(() => {
     let timer: number | undefined;

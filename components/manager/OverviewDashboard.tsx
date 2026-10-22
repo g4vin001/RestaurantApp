@@ -60,8 +60,8 @@ function MetricCard({
 }
 
 export function OverviewDashboard() {
-  const { state } = useDemo();
-  const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const { state, renderedAt } = useDemo();
+  const now = useLiveNow(30_000, state.lastUpdatedAt, renderedAt);
   const timeZone = restaurantTimeZone(state.restaurant.timezone);
   const manilaHour = Number(
     new Intl.DateTimeFormat("en-PH", {

@@ -30,6 +30,7 @@ export default async function ManagerLayout({
       <OperationsProvider
         repositoryMode={repository.mode}
         initialState={initialState}
+        renderedAt={new Date().toISOString()}
       >
         <div className="manager-app">
           <ManagerShell demoMode profileName="Demo manager">
@@ -79,6 +80,7 @@ export default async function ManagerLayout({
     <OperationsProvider
       repositoryMode={repository.mode}
       initialState={initialState}
+      renderedAt={new Date().toISOString()}
     >
       <div className="manager-app">
         <ManagerShell

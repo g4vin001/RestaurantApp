@@ -313,6 +313,7 @@ export function QueueManager() {
   const demo = useDemo();
   const { state } = demo;
   const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const now = useLiveNow(30_000, state.lastUpdatedAt, demo.renderedAt);
   const timeZone = state.restaurant.timezone;
   const [tab, setTab] = useState<"queue" | "reservations">("queue");
   const [rushMode, setRushMode] = useState(false);

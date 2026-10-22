@@ -49,12 +49,12 @@ function ShellContent({
   accountEmail?: string;
 }) {
   const pathname = usePathname();
-  const { mode, state, reset, connectionStatus, changedOnAnotherDevice } = useDemo();
+  const { mode, state, reset, connectionStatus, changedOnAnotherDevice, renderedAt } = useDemo();
   const isDemoRepository = mode === "demo";
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
-  const now = useLiveNow(30_000, state.lastUpdatedAt);
+  const now = useLiveNow(30_000, state.lastUpdatedAt, renderedAt);
   const inService = isWithinServiceHours(state.restaurant, now);
   const snapshotIsOld = isTimestampStale(
     state.lastUpdatedAt,
