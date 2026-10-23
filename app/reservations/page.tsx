@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
 import { randomUUID } from "node:crypto";
@@ -44,7 +45,14 @@ export default async function MyReservationsPage() {
           {reservations.map((reservation) => (
             <PageCard key={reservation.id}>
               <div className="flex items-start justify-between gap-4">
-                <h2 className="font-semibold">{reservation.restaurantName}</h2>
+                <h2 className="font-semibold">
+                  <Link
+                    href={`/restaurants/${reservation.restaurantSlug}`}
+                    className="text-emerald-800 underline-offset-4 hover:underline"
+                  >
+                    {reservation.restaurantName}
+                  </Link>
+                </h2>
                 <StatusBadge
                   status={reservation.status}
                   label={reservationStatusLabel(reservation.status)}

@@ -26,6 +26,7 @@ export type CreateCustomerReservationResult = { reservationId: string };
 export type CustomerReservation = {
   id: string;
   restaurantName: string;
+  restaurantSlug: string;
   restaurantTimezone: string;
   partyName: string;
   partySize: number;
@@ -47,7 +48,7 @@ export async function fetchCustomerReservations(
       scheduledAt: true,
       status: true,
       cancellationReason: true,
-      restaurant: { select: { name: true, timezone: true } },
+      restaurant: { select: { name: true, slug: true, timezone: true } },
     },
     orderBy: { scheduledAt: "desc" },
   });
@@ -55,6 +56,7 @@ export async function fetchCustomerReservations(
   return reservations.map((reservation) => ({
     id: reservation.id,
     restaurantName: reservation.restaurant.name,
+    restaurantSlug: reservation.restaurant.slug,
     restaurantTimezone: reservation.restaurant.timezone || "Asia/Manila",
     partyName: reservation.partyName,
     partySize: reservation.partySize,

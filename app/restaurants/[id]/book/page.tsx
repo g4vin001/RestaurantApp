@@ -67,7 +67,10 @@ export default async function BookReservationPage({
 
   return (
     <main className="mx-auto max-w-lg px-5 py-14">
-      <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
+      <Link href={`/restaurants/${slug}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-emerald-800">
+        ← Back to {restaurant.name}
+      </Link>
+      <p className="mt-3 text-sm font-semibold uppercase tracking-wide text-emerald-700">
         Book a table
       </p>
       <h1 className="mt-2 text-3xl font-bold tracking-tight text-stone-950">
