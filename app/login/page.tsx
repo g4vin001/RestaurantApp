@@ -1,4 +1,5 @@
 import { PageCard } from "@/components/PageCard";
+import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { AuthForms } from "./AuthForms";
 
@@ -22,7 +23,8 @@ export default async function LoginPage({
         an account that already has manager access.
       </p>
       <PageCard className="mt-6">
-        {notice && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{notice}</p>}
+        <ClearFlash />
+        {notice &&<p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{notice}</p>}
         {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         {message && <p className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
         <AuthForms redirectTo={redirectTo} />

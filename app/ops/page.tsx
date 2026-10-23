@@ -32,6 +32,7 @@ import { StaffTableCorrection } from "@/components/staff/StaffTableCorrection";
 import type { SeatingRecommendationState } from "@/lib/domain/operations";
 import type { TableStatus } from "@/lib/domain/types";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
+import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import { getCurrentWorkContext } from "@/lib/staff/access";
@@ -783,6 +784,7 @@ export default async function StaffOperationsPage() {
             </div>
           </section>
 
+          <ClearFlash />
           {error && <div role="alert" className="mt-4 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><DoorOpen className="mt-0.5 shrink-0" size={18} /><div><p className="font-bold">Action not saved</p><p className="mt-0.5">{error}</p></div></div>}
           {message && <div role="status" className="mt-4 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><CheckCircle2 className="mt-0.5 shrink-0" size={18} /><div><p className="font-bold">Done</p><p className="mt-0.5">{message}</p></div></div>}
 

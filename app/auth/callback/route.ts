@@ -21,6 +21,11 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
+  // A failed password-reset link should lead straight to requesting a new one.
+  if (error && next === "/reset-password") {
+    return NextResponse.redirect(new URL("/forgot-password?expired=1", request.url));
+  }
+
   if (error) {
     await setFlash(
       "error",

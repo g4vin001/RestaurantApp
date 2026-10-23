@@ -133,8 +133,8 @@ export async function signup(formData: FormData) {
 export async function requestPasswordReset(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   if (!email) {
-    await setFlash("error", "Enter your email first, then choose Forgot password.");
-    redirect("/login");
+    await setFlash("error", "Enter the email for your account.");
+    redirect("/forgot-password");
   }
 
   const origin = await authOrigin();
@@ -149,12 +149,14 @@ export async function requestPasswordReset(formData: FormData) {
   if (error) {
     await setFlash("error", error.message);
   } else {
+    // Same wording whether or not the account exists, so this page can't be
+    // used to discover which emails have Halina accounts.
     await setFlash(
       "message",
-      "If that account exists, a password reset email has been sent. Open the newest email only.",
+      `If an account exists for ${email}, we've sent a link to reset your password. Use the newest email only.`,
     );
   }
-  redirect("/login");
+  redirect("/forgot-password");
 }
 
 export async function resendConfirmation(formData: FormData) {

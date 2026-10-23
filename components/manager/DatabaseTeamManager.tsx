@@ -9,6 +9,7 @@ import {
 } from "@/app/manager/team/actions";
 import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
+import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 
@@ -204,6 +205,7 @@ export async function DatabaseTeamManager({ roles }: { roles: StaffRoleOption[] 
         </div>
       </div>
 
+      <ClearFlash />
       {(message || error) && (
         <div
           className={`mt-5 rounded-xl border px-4 py-3 text-sm font-medium ${

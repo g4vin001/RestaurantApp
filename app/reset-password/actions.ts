@@ -26,6 +26,9 @@ export async function updatePassword(formData: FormData) {
     redirect("/reset-password");
   }
 
-  await setFlash("message", "Password updated. You can now sign in with the new password.");
+  // The reset link signed the user in only to change the password. Sign out so
+  // they finish on the login page and prove the new password works.
+  await supabase.auth.signOut();
+  await setFlash("message", "Password updated. Log in with your new password.");
   redirect("/login");
 }

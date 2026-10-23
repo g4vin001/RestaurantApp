@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
 import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
 import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
+import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import {
@@ -33,6 +34,7 @@ export default async function AdminPage() {
       <main className="mx-auto max-w-sm px-5 py-16">
         <h1 className="text-2xl font-bold text-emerald-800">Admin panel</h1>
         <PageCard className="mt-6">
+          <ClearFlash />
           {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <form action={unlockAdminPanel} className="flex flex-col gap-3">
             <label className={labelClass}>
@@ -88,6 +90,7 @@ export default async function AdminPage() {
       </p>
       <Link href="/admin/data-lab" className="mt-4 inline-flex rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800">Open Operations Data Lab</Link>
 
+      <ClearFlash />
       {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
 import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
+import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
@@ -89,6 +90,7 @@ export default async function DataLabPage({
         <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-800">Permanent TEST boundary</span>
       </div>
 
+      <ClearFlash />
       {error && <p className="mt-5 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       {message && <p className="mt-5 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{message}</p>}
 

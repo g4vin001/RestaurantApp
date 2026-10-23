@@ -1,12 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import {
-  login,
-  requestPasswordReset,
-  resendConfirmation,
-  signup,
-} from "./actions";
+import { login, resendConfirmation, signup } from "./actions";
 
 type Mode = "login" | "register";
 
@@ -56,6 +52,12 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
                 className={inputClass}
               />
             </label>
+            <Link
+              href="/forgot-password"
+              className="-mt-1 self-end text-xs font-semibold text-emerald-700 underline-offset-4 hover:underline"
+            >
+              Forgot your password?
+            </Link>
             <button
               type="submit"
               className="mt-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white"
@@ -64,17 +66,7 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
             </button>
           </form>
 
-          <div className="grid grid-cols-2 gap-2">
-            <form action={requestPasswordReset}>
-              <label className="sr-only" htmlFor="reset-email">Email for password reset</label>
-              <input id="reset-email" name="email" type="email" required placeholder="Email" className={inputClass} />
-              <button
-                type="submit"
-                className="mt-2 w-full rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700"
-              >
-                Forgot password
-              </button>
-            </form>
+          <div>
             <form action={resendConfirmation}>
               {redirectTo && (
                 <input type="hidden" name="redirectTo" value={redirectTo} />
