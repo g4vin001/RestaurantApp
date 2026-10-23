@@ -74,12 +74,17 @@ describeWithDatabase("customer reservation booking", () => {
     expect(await client.reservation.count({ where: { restaurantId } })).toBe(0);
   });
 
-  it("accepts overnight reservations before, but not at, the closing boundary", async () => {
+  it("accepts overnight reservations that finish by closing, but not ones that run past it", async () => {
+    // 18:00–02:00 in Asia/Manila (UTC+8). With the default 90-minute length the
+    // last start is 00:30, which is 16:30 UTC.
     const schedule = legacyOperatingSchedule(18, 2);
     await client.restaurant.update({ where: { id: restaurantId }, data: { operatingSettings: { schedule } } });
     await createCustomerReservation(client, {
-      restaurantId, customerProfileId: customerAId, partyName: "Late dinner", partySize: 2, scheduledAt: new Date("2026-09-01T17:59:00Z"),
+      restaurantId, customerProfileId: customerAId, partyName: "Last seating", partySize: 2, scheduledAt: new Date("2026-09-01T16:30:00Z"),
     });
+    await expect(createCustomerReservation(client, {
+      restaurantId, customerProfileId: customerBId, partyName: "Runs past close", partySize: 2, scheduledAt: new Date("2026-09-01T16:31:00Z"),
+    })).rejects.toMatchObject({ code: "VALIDATION" });
     await expect(createCustomerReservation(client, {
       restaurantId, customerProfileId: customerBId, partyName: "After closing", partySize: 2, scheduledAt: new Date("2026-09-01T18:00:00Z"),
     })).rejects.toMatchObject({ code: "VALIDATION" });
