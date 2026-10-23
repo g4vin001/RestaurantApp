@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { login, resendConfirmation, signup } from "./actions";
+import { login, signup } from "./actions";
 
 type Mode = "login" | "register";
 
@@ -10,7 +10,13 @@ const inputClass =
   "mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm";
 const labelClass = "text-sm font-medium text-stone-700";
 
-export function AuthForms({ redirectTo }: { redirectTo?: string }) {
+export function AuthForms({
+  redirectTo,
+  defaultEmail,
+}: {
+  redirectTo?: string;
+  defaultEmail?: string;
+}) {
   const [mode, setMode] = useState<Mode>("login");
 
   return (
@@ -40,7 +46,7 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
             )}
             <label className={labelClass}>
               Email
-              <input name="email" type="email" required className={inputClass} />
+              <input name="email" type="email" required defaultValue={defaultEmail} className={inputClass} />
             </label>
             <label className={labelClass}>
               Password
@@ -65,22 +71,6 @@ export function AuthForms({ redirectTo }: { redirectTo?: string }) {
               Log in
             </button>
           </form>
-
-          <div>
-            <form action={resendConfirmation}>
-              {redirectTo && (
-                <input type="hidden" name="redirectTo" value={redirectTo} />
-              )}
-              <label className="sr-only" htmlFor="resend-email">Email for confirmation resend</label>
-              <input id="resend-email" name="email" type="email" required placeholder="Email" className={inputClass} />
-              <button
-                type="submit"
-                className="mt-2 w-full rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-700"
-              >
-                Resend confirmation
-              </button>
-            </form>
-          </div>
         </div>
       ) : (
         <form className="flex flex-col gap-3" action={signup}>

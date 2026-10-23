@@ -3,6 +3,11 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
+import {
+  forgetUnconfirmedEmail,
+  readUnconfirmedEmail,
+  rememberUnconfirmedEmail,
+} from "@/lib/auth/pending-confirmation";
 import { ensureProfile } from "@/lib/auth/profile";
 import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { setFlash } from "@/lib/flash";
@@ -66,9 +71,16 @@ export async function login(formData: FormData) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    await setFlash("error", error.message);
+    // The login page turns this into a one-click resend for the same email.
+    if (error.code === "email_not_confirmed") {
+      await rememberUnconfirmedEmail(email);
+      await setFlash("error", "Confirm your email before logging in. Check your inbox for the link we sent when you signed up.");
+    } else {
+      await setFlash("error", error.message);
+    }
     redirect(loginRedirect(redirectTo));
   }
+  await forgetUnconfirmedEmail();
 
   let membership: Awaited<ReturnType<typeof getActiveManagerMembership>>;
   try {
@@ -160,10 +172,12 @@ export async function requestPasswordReset(formData: FormData) {
 }
 
 export async function resendConfirmation(formData: FormData) {
-  const email = String(formData.get("email") ?? "").trim();
+  // Offered only after a login failed for an unconfirmed email, which the
+  // login action remembered; the button doesn't send the address itself.
+  const email = (await readUnconfirmedEmail())?.trim();
   const redirectTo = safeInternalRedirect(formData.get("redirectTo"), "/");
   if (!email) {
-    await setFlash("error", "Enter your email first, then choose Resend confirmation.");
+    await setFlash("error", "Log in again with your email and password, then choose Resend confirmation email.");
     redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
   }
 
@@ -181,7 +195,8 @@ export async function resendConfirmation(formData: FormData) {
   if (error) {
     await setFlash("error", error.message);
   } else {
-    await setFlash("message", "A fresh confirmation email has been sent. Use the newest link only.");
+    await forgetUnconfirmedEmail();
+    await setFlash("message", `A fresh confirmation email has been sent to ${email}. Use the newest link only, then log in.`);
   }
   redirect(loginRedirect(redirectTo === "/" ? "" : redirectTo));
 }
