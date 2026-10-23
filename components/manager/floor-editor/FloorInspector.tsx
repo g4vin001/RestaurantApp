@@ -241,6 +241,7 @@ export function FloorInspector({
                   onClick={() => onToggleVisible(element.id)}
                   className="mr-1 rounded-md p-2 text-stone-400 hover:bg-white hover:text-stone-700"
                   aria-label={`${element.visible ? "Hide" : "Show"} ${element.label}`}
+                  title={element.visible ? "Hide" : "Show"}
                 >
                   {element.visible ? <Eye size={15} /> : <EyeOff size={15} />}
                 </button>

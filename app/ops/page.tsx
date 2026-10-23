@@ -392,13 +392,13 @@ function QueueCard({
               <input type="hidden" name="queueId" value={entry.id} />
               <input type="hidden" name="expectedRevision" value={entry.revision} />
               <input type="hidden" name="direction" value={-1} />
-              <button disabled={index === 0} aria-label={`Move ${entry.partyName} up`} className="grid h-10 w-10 place-items-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-30"><ArrowUp size={15} /></button>
+              <button disabled={index === 0} aria-label={`Move ${entry.partyName} up`} title="Move up" className="grid h-10 w-10 place-items-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-30"><ArrowUp size={15} /></button>
             </form>
             <form action={reorderStaffQueueEntry}>
               <input type="hidden" name="queueId" value={entry.id} />
               <input type="hidden" name="expectedRevision" value={entry.revision} />
               <input type="hidden" name="direction" value={1} />
-              <button disabled={index === total - 1} aria-label={`Move ${entry.partyName} down`} className="grid h-10 w-10 place-items-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-30"><ArrowDown size={15} /></button>
+              <button disabled={index === total - 1} aria-label={`Move ${entry.partyName} down`} title="Move down" className="grid h-10 w-10 place-items-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-30"><ArrowDown size={15} /></button>
             </form>
           </>
         )}
@@ -741,7 +741,7 @@ export default async function StaffOperationsPage() {
           <div className="flex items-center gap-3">
             <span className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-sm font-bold">{context.staffName.charAt(0).toUpperCase()}</span>
             <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{context.staffName}</p><p className="truncate text-[11px] text-emerald-200">{context.jobTitle} · {context.staffRoleName ?? "Staff"}</p></div>
-            <form action={clockOut}><button className="grid h-9 w-9 place-items-center rounded-lg text-emerald-100 hover:bg-white/10 hover:text-white" aria-label="Clock out"><LogOut size={16} /></button></form>
+            <form action={clockOut}><button className="grid h-9 w-9 place-items-center rounded-lg text-emerald-100 hover:bg-white/10 hover:text-white" aria-label="Clock out" title="Clock out"><LogOut size={16} /></button></form>
           </div>
         </div>
       </aside>

@@ -31,7 +31,7 @@ function PeriodEditor({ label, periods, onChange }: {
               <input type="time" required step={60} value={period.closesAt} aria-label={`${label}, period ${index + 1}, closes`} className={`${inputClass} mt-1`}
                 onChange={(event) => onChange(periods.map((item, i) => i === index ? { ...item, closesAt: event.target.value } : item))} />
             </label>
-            <button type="button" className="grid min-h-11 min-w-11 place-items-center rounded-xl text-stone-500 hover:bg-rose-50 hover:text-rose-700" aria-label={`Remove ${label} period ${index + 1}`}
+            <button type="button" className="grid min-h-11 min-w-11 place-items-center rounded-xl text-stone-500 hover:bg-rose-50 hover:text-rose-700" aria-label={`Remove ${label} period ${index + 1}`} title="Remove service period"
               onClick={() => onChange(periods.filter((_, i) => i !== index))}><Trash2 size={17} /></button>
           </div>
           {period.closesAt && period.opensAt && period.closesAt <= period.opensAt && (

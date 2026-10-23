@@ -329,6 +329,7 @@ export function RestaurantSettings() {
                       }}
                       className="grid h-7 w-7 place-items-center rounded-full hover:bg-rose-100"
                       aria-label={`Unblock ${blockedDateLabel(date)}`}
+                      title="Unblock date"
                     >
                       <X size={14} />
                     </button>

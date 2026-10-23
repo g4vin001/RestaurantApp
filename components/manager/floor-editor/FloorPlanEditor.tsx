@@ -384,6 +384,7 @@ export function FloorPlanEditor() {
             onClick={requestNewFloor}
             className="grid h-9 w-9 place-items-center rounded-lg border border-stone-300 bg-white text-stone-600 hover:bg-stone-100"
             aria-label="Create floor plan"
+            title="Create floor plan"
           >
             <Plus size={16} />
           </button>

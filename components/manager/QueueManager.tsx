@@ -681,6 +681,7 @@ export function QueueManager() {
                           disabled={index === 0}
                           className="grid h-10 w-10 place-items-center rounded-lg border border-stone-200 text-stone-500 disabled:opacity-30"
                           aria-label={`Move ${entry.partyName} up`}
+                          title="Move up"
                         >
                           <ArrowUp size={16} />
                         </button>
@@ -695,6 +696,7 @@ export function QueueManager() {
                           disabled={index === activeQueue.length - 1}
                           className="grid h-10 w-10 place-items-center rounded-lg border border-stone-200 text-stone-500 disabled:opacity-30"
                           aria-label={`Move ${entry.partyName} down`}
+                          title="Move down"
                         >
                           <ArrowDown size={16} />
                         </button>
@@ -703,6 +705,7 @@ export function QueueManager() {
                           onClick={() => setQueueModal(entry)}
                           className="grid h-10 w-10 place-items-center rounded-lg border border-stone-200 text-stone-500 hover:bg-stone-50"
                           aria-label={`Edit ${entry.partyName}`}
+                          title="Edit party"
                         >
                           <Edit3 size={16} />
                         </button>
@@ -739,7 +742,8 @@ export function QueueManager() {
                             })
                           }
                           className="grid h-10 w-10 place-items-center rounded-lg text-stone-400 hover:bg-rose-50 hover:text-rose-700"
-                          aria-label={`Cancel ${entry.partyName}`}
+                          aria-label={`Remove ${entry.partyName} from queue`}
+                          title="Remove from queue"
                         >
                           <XCircle size={17} />
                         </button>
@@ -754,6 +758,7 @@ export function QueueManager() {
                           }
                           className="grid h-10 w-10 place-items-center rounded-lg text-stone-400 hover:bg-rose-50 hover:text-rose-700"
                           aria-label={`Mark ${entry.partyName} no-show`}
+                          title="Mark as no-show"
                         >
                           <UserRoundX size={17} />
                         </button>

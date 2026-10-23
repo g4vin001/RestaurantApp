@@ -171,6 +171,7 @@ function TableDetailPanel({
               }}
               className="rounded p-1 text-emerald-700"
               aria-label="Cancel seating"
+              title="Cancel seating"
             >
               <X size={16} />
             </button>

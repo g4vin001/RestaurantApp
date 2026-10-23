@@ -84,6 +84,7 @@ function ShellContent({
           className="hidden rounded-lg p-2 text-emerald-100 hover:bg-white/10 hover:text-white lg:inline-flex"
           onClick={() => setCollapsed((value) => !value)}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? (
             <PanelLeftOpen size={19} />
@@ -96,6 +97,7 @@ function ShellContent({
           className="rounded-lg p-2 text-white lg:hidden"
           onClick={() => setMobileOpen(false)}
           aria-label="Close navigation"
+          title="Close menu"
         >
           <X size={20} />
         </button>
@@ -185,6 +187,7 @@ function ShellContent({
                 type="submit"
                 className="rounded-lg p-1.5 hover:bg-white/10 hover:text-white"
                 aria-label="Log out"
+                title="Log out"
               >
                 <LogOut size={17} />
               </button>
@@ -225,6 +228,7 @@ function ShellContent({
             className="rounded-lg border border-stone-200 p-2.5 text-stone-700 lg:hidden"
             onClick={() => setMobileOpen(true)}
             aria-label="Open navigation"
+            title="Open menu"
           >
             <Menu size={20} />
           </button>

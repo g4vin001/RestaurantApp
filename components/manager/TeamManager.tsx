@@ -312,6 +312,7 @@ export function TeamManager({
                     onClick={() => setConfirming({ member, action: "remove" })}
                     className="grid h-10 w-10 place-items-center rounded-lg text-stone-400 hover:bg-rose-50 hover:text-rose-700"
                     aria-label={`Remove ${member.name}`}
+                    title="Remove from team"
                   >
                     <UserRoundX size={17} />
                   </button>

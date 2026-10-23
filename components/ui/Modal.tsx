@@ -94,6 +94,7 @@ export function Modal({
             onClick={onClose}
             className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
             aria-label="Close dialog"
+            title="Close"
           >
             <X size={18} />
           </button>
