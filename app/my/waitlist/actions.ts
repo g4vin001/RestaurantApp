@@ -46,3 +46,42 @@ export async function cancelMyWaitlist(_state: { error: string }, formData: Form
     return { error: "We couldn't confirm the cancellation. Refresh your status before trying again." };
   }
 }
+
+export async function markOnMyWay(_state: { error: string }, formData: FormData): Promise<{ error: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Please sign in again to let the host know." };
+  const queueId = String(formData.get("queueId") ?? "");
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const entry = await tx.queueEntry.findFirst({
+        where: {
+          id: queueId, createdById: user.id, source: "CUSTOMER", status: "CALLED",
+          restaurant: { environment: "LIVE", archivedAt: null },
+        },
+        select: { id: true, restaurantId: true, restaurant: { select: { slug: true } } },
+      });
+      if (!entry) return null;
+      const now = new Date();
+      // Revision is left alone: it guards manager edits, and this field is not
+      // one of them, so bumping it would only cause false edit conflicts.
+      const updated = await tx.queueEntry.updateMany({
+        where: { id: entry.id, createdById: user.id, source: "CUSTOMER", status: "CALLED", onTheWayAt: null },
+        data: { onTheWayAt: now },
+      });
+      if (!updated.count) return null;
+      await tx.restaurant.update({ where: { id: entry.restaurantId }, data: { lastOperationalUpdateAt: now } });
+      await broadcastRestaurantInvalidation(tx, {
+        restaurantId: entry.restaurantId, restaurantSlug: entry.restaurant.slug,
+        environment: "LIVE", entity: "queue", revision: now.toISOString(),
+      });
+      return { slug: entry.restaurant.slug };
+    });
+    revalidatePath("/my/waitlist");
+    if (!result) return { error: "Your party's status changed. Check the latest status before trying again." };
+    return { error: "" };
+  } catch (error) {
+    reportDataError("customer-waitlist-on-my-way", error);
+    return { error: "We couldn't let the host know. Check with them directly or try again." };
+  }
+}

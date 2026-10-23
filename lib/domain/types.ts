@@ -137,6 +137,7 @@ export interface QueueEntry {
   notes?: string;
   preferredZone?: string;
   calledAt?: string;
+  onTheWayAt?: string;
   seatedAt?: string;
   cancelledAt?: string;
   noShowAt?: string;

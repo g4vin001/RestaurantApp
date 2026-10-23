@@ -610,7 +610,7 @@ async function correctTable(
     if (assignment.queueEntryId) {
       await tx.queueEntry.update({
         where: { id: assignment.queueEntryId },
-        data: { status: "WAITING", seatedAt: null, assignedTableId: null, revision: { increment: 1 } },
+        data: { status: "WAITING", seatedAt: null, assignedTableId: null, onTheWayAt: null, revision: { increment: 1 } },
       });
     }
     if (assignment.reservationId) {
@@ -943,6 +943,8 @@ async function executeInTransaction(
         data: {
           status: command.status,
           calledAt: command.status === "CALLED" ? now : undefined,
+          // A fresh call needs a fresh "On my way!" from the customer.
+          onTheWayAt: command.status === "CALLED" ? null : undefined,
           cancelledAt: command.status === "CANCELLED" ? now : undefined,
           noShowAt: command.status === "NO_SHOW" ? now : undefined,
           assignedTableId:

@@ -536,6 +536,8 @@ model QueueEntry {
   promisedWaitMinutes Int
   joinedAt            DateTime              @default(now())
   calledAt            DateTime?
+  // Set when a called customer taps "On my way!"; cleared on a new call.
+  onTheWayAt          DateTime?
   seatedAt            DateTime?
   cancelledAt         DateTime?
   noShowAt            DateTime?

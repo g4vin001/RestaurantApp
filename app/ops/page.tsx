@@ -90,6 +90,7 @@ type QueueParty = {
   status: QueueStatus;
   promisedWaitMinutes: number;
   joinedAt: Date;
+  onTheWayAt: Date | null;
   revision: number;
   contact: string | null;
   notes: string | null;
@@ -349,6 +350,11 @@ function QueueCard({
             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${entry.status === "CALLED" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
               {entry.status === "CALLED" ? "Called" : "Waiting"}
             </span>
+            {entry.status === "CALLED" && entry.onTheWayAt && (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                On my way · {minutesSince(entry.onTheWayAt, now)} min ago
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-stone-500">
             {entry.partySize} guests · {waitLabel(entry, now)}
@@ -615,6 +621,7 @@ export default async function StaffOperationsPage() {
             status: true,
             promisedWaitMinutes: true,
             joinedAt: true,
+            onTheWayAt: true,
             revision: true,
             contact: canViewContacts,
             notes: true,

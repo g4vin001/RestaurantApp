@@ -5,8 +5,10 @@ import { PageCard } from "@/components/PageCard";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { CustomerRefresh } from "@/components/customer/CustomerRefresh";
+import { OnMyWayButton } from "./OnMyWayButton";
 import { WaitlistCancelForm } from "./WaitlistCancelForm";
 import { formatScheduledAt } from "@/lib/helpers";
+import { formatRestaurantTime } from "@/lib/time/restaurant-time";
 import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
 import { reportDataError } from "@/lib/server/data-error";
 
@@ -22,6 +24,7 @@ export default async function MyWaitlistPage() {
       status: true,
       promisedWaitMinutes: true,
       joinedAt: true,
+      onTheWayAt: true,
       updatedAt: true,
       restaurant: { select: { name: true, slug: true, timezone: true } },
   } as const;
@@ -41,7 +44,7 @@ export default async function MyWaitlistPage() {
   const active = entry?.status === "WAITING" || entry?.status === "CALLED";
   const statusMessage = entry ? {
     WAITING: { title: "You're on the waitlist", detail: "Keep this page open to see when the host calls your party." },
-    CALLED: { title: "Please approach the host", detail: "The restaurant has called your party. Check in with the host now. No SMS or push notification is sent." },
+    CALLED: { title: "Please approach the host", detail: "The restaurant has called your party. Check in with the host now, or tap On my way! so they know you're coming. No SMS or push notification is sent." },
     SEATED: { title: "You're seated", detail: "The restaurant has marked your party seated. Enjoy your meal." },
     CANCELLED: { title: "Your waitlist entry was cancelled", detail: "You're no longer waiting. Contact the host if this was unexpected." },
     NO_SHOW: { title: "Please check with the host", detail: "Your party was marked as a no-show and is no longer waiting." },
@@ -66,6 +69,9 @@ export default async function MyWaitlistPage() {
           <section role="status" aria-live="polite" aria-atomic="true" className={`mt-5 rounded-xl border p-4 ${entry.status === "CALLED" ? "border-amber-300 bg-amber-50 text-amber-950" : "border-stone-200 bg-stone-50 text-stone-800"}`}>
             <h3 className="text-lg font-bold">{statusMessage?.title}</h3>
             <p className="mt-2 text-sm leading-6">{statusMessage?.detail}</p>
+            {entry.status === "CALLED" && (entry.onTheWayAt
+              ? <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-sm font-semibold text-emerald-800">Thanks, the host knows you&apos;re on your way (sent {formatRestaurantTime(entry.onTheWayAt.toISOString(), entry.restaurant.timezone)}).</p>
+              : <OnMyWayButton queueId={entry.id} />)}
           </section>
           {active && <div className="mt-5 rounded-xl bg-stone-50 p-4">
             <p className="text-2xl font-bold">~{entry.promisedWaitMinutes} min</p>
