@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type {
   PublicFloorElement,
   PublicFloorView,
@@ -155,16 +156,19 @@ export function PublicFloorMap({ floor }: { floor: PublicFloorView }) {
             const alignRight = table.x / floor.logicalWidth > 0.6;
             const placeBelow = table.y / floor.logicalHeight < 0.35;
             return (
+              // The floor-plan layer is a CSS variable, not an inline z-index,
+              // so hovering or focusing a table can lift it (and its card)
+              // above every other table; an inline style would always win.
               <div
                 key={table.id}
-                className="group absolute"
+                className="group absolute z-[var(--table-layer)] hover:z-[1000] focus-within:z-[1000]"
                 style={{
                   left: pct(table.x, floor.logicalWidth),
                   top: pct(table.y, floor.logicalHeight),
                   width: pct(table.width, floor.logicalWidth),
                   height: pct(table.height, floor.logicalHeight),
-                  zIndex: table.zIndex,
-                }}
+                  "--table-layer": table.zIndex,
+                } as CSSProperties}
               >
                 <button
                   type="button"
