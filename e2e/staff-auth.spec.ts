@@ -141,7 +141,8 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await customer.getByLabel("Contact", { exact: false }).fill("09171234567");
     await customer.getByRole("button", { name: "Join waitlist", exact: true }).click();
     await expect(customer).toHaveURL(/\/my\/waitlist$/);
-    await expect(customer.getByRole("heading", { name: "You're on the waitlist", exact: true })).toBeVisible();
+    // The earlier walk-in was seated, so this customer is the only party waiting.
+    await expect(customer.getByRole("heading", { name: "You're 1st in line", exact: true })).toBeVisible();
     await expect(customer.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(customer.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
     const customerParty = staff.locator("#queue article").filter({ hasText: "Customer private party" });
@@ -181,7 +182,7 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await customer.goto(`/restaurants/auth-ci-${suffix}/waitlist`);
     await customer.getByLabel("Party name", { exact: true }).fill("Customer cancellation");
     await customer.getByRole("button", { name: "Join waitlist", exact: true }).click();
-    await expect(customer.getByRole("heading", { name: "You're on the waitlist", exact: true })).toBeVisible();
+    await expect(customer.getByRole("heading", { name: "You're 1st in line", exact: true })).toBeVisible();
     await expect(manager.getByRole("heading", { name: "Customer cancellation", exact: true })).toBeVisible({ timeout: 20_000 });
     await customer.getByRole("button", { name: "Leave waitlist", exact: true }).click();
     await expect(customer.getByRole("heading", { name: "Your waitlist entry was cancelled", exact: true })).toBeVisible();
