@@ -530,6 +530,28 @@ export interface TableRecommendation {
   reason: string;
 }
 
+/**
+ * New queue positions after moving one party up or down. The whole active queue
+ * is renumbered 0..n-1 in its new order rather than swapping two numbers: rows
+ * can share a position (older customer joins all defaulted to 0), and swapping
+ * equal numbers would leave the order unchanged. Returns only the rows whose
+ * position changes, or null when the move isn't possible.
+ */
+export function reorderedQueuePositions(
+  active: Array<{ id: string; position: number }>,
+  entryId: string,
+  direction: -1 | 1,
+): Array<{ id: string; position: number }> | null {
+  const order = [...active];
+  const index = order.findIndex((entry) => entry.id === entryId);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= order.length) return null;
+  [order[index], order[target]] = [order[target], order[index]];
+  return order.flatMap((entry, position) =>
+    entry.position === position ? [] : [{ id: entry.id, position }],
+  );
+}
+
 export type SeatingRecommendationState = {
   tables: Array<Pick<DemoState["tables"][number], "id" | "label" | "capacity" | "zone" | "active" | "status" | "statusChangedAt">>;
   reservations: Array<Pick<DemoState["reservations"][number], "id" | "tableId" | "tableIds" | "status" | "scheduledAt">>;

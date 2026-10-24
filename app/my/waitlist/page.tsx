@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CustomerRefresh } from "@/components/customer/CustomerRefresh";
 import { OnMyWayButton } from "./OnMyWayButton";
 import { WaitlistCancelForm } from "./WaitlistCancelForm";
-import { formatScheduledAt } from "@/lib/helpers";
+import { formatScheduledAt, ordinal } from "@/lib/helpers";
 import { formatRestaurantTime } from "@/lib/time/restaurant-time";
 import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
 import { reportDataError } from "@/lib/server/data-error";
@@ -26,6 +26,8 @@ export default async function MyWaitlistPage() {
       joinedAt: true,
       onTheWayAt: true,
       updatedAt: true,
+      restaurantId: true,
+      position: true,
       restaurant: { select: { name: true, slug: true, timezone: true } },
   } as const;
   // Show active work first, then a recent outcome instead of silently making
@@ -38,12 +40,33 @@ export default async function MyWaitlistPage() {
     where: { ...scope, status: { in: ["SEATED", "CANCELLED", "NO_SHOW"] }, updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) } },
     orderBy: { updatedAt: "desc" }, select,
   });
+  // Place in line, counted in the same order staff see the queue: manual
+  // position first, then join time. Only parties still waiting or called count.
+  const loadPlace = async (current: NonNullable<Awaited<ReturnType<typeof loadEntry>>>) => 1 + await prisma.queueEntry.count({
+    where: {
+      restaurantId: current.restaurantId,
+      status: { in: ["WAITING", "CALLED"] },
+      OR: [
+        { position: { lt: current.position } },
+        { position: current.position, joinedAt: { lt: current.joinedAt } },
+      ],
+    },
+  });
   let entry: Awaited<ReturnType<typeof loadEntry>>;
-  try { entry = await loadEntry(); }
+  let place: number | null = null;
+  try {
+    entry = await loadEntry();
+    if (entry?.status === "WAITING") place = await loadPlace(entry);
+  }
   catch (error) { return <CustomerDataUnavailable reference={reportDataError("customer-waitlist", error)} />; }
   const active = entry?.status === "WAITING" || entry?.status === "CALLED";
   const statusMessage = entry ? {
-    WAITING: { title: "You're on the waitlist", detail: "Keep this page open to see when the host calls your party." },
+    WAITING: {
+      title: place ? `You're ${ordinal(place)} in line` : "You're on the waitlist",
+      detail: place === 1
+        ? "You're next. Keep this page open to see when the host calls your party."
+        : "Your place moves up as parties ahead are seated. Keep this page open to see when the host calls your party.",
+    },
     CALLED: { title: "Please approach the host", detail: "The restaurant has called your party. Check in with the host now, or tap On my way! so they know you're coming. No SMS or push notification is sent." },
     SEATED: { title: "You're seated", detail: "The restaurant has marked your party seated. Enjoy your meal." },
     CANCELLED: { title: "Your waitlist entry was cancelled", detail: "You're no longer waiting. Contact the host if this was unexpected." },

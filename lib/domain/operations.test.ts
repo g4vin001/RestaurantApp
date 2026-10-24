@@ -11,6 +11,7 @@ import {
   estimateWaitForParty,
   recommendTables,
   removeStaffMember,
+  reorderedQueuePositions,
   RESERVATIONS_OFF_REASON,
   seatQueueEntry,
   seatReservation,
@@ -134,6 +135,22 @@ describe("manager operation commands", () => {
     expect(setQueueStatus(state, "queue-02", "NO_SHOW", occurredAt).ok).toBe(
       true,
     );
+  });
+
+  it("reorders the queue even when parties share a position", () => {
+    // Online joins used to all default to position 0; swapping 0 for 0 did nothing.
+    const sharedZero = [{ id: "a", position: 0 }, { id: "b", position: 0 }, { id: "c", position: 0 }];
+    // New order a, c, b: a keeps 0, c becomes 1, b becomes 2.
+    expect(reorderedQueuePositions(sharedZero, "c", -1)).toEqual([
+      { id: "c", position: 1 },
+      { id: "b", position: 2 },
+    ]);
+
+    const numbered = [{ id: "a", position: 0 }, { id: "b", position: 1 }, { id: "c", position: 2 }];
+    expect(reorderedQueuePositions(numbered, "a", 1)).toEqual([{ id: "b", position: 0 }, { id: "a", position: 1 }]);
+    expect(reorderedQueuePositions(numbered, "a", -1)).toBeNull();
+    expect(reorderedQueuePositions(numbered, "c", 1)).toBeNull();
+    expect(reorderedQueuePositions(numbered, "missing", 1)).toBeNull();
   });
 
   it("cancels only the bookings an availability change affects", () => {

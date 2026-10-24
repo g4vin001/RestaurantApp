@@ -9,7 +9,7 @@ import type {
   StaffPermission,
   TableStatus,
 } from "@/lib/generated/prisma/client";
-import { reservationsCancelledByAvailabilityChange } from "@/lib/domain/operations";
+import { reorderedQueuePositions, reservationsCancelledByAvailabilityChange } from "@/lib/domain/operations";
 import { canTransitionTable } from "@/lib/domain/transitions";
 import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
 import {
@@ -977,13 +977,21 @@ async function executeInTransaction(
         select: { id: true, position: true, revision: true },
       });
       const index = active.findIndex((entry) => entry.id === command.entryId);
-      const target = active[index + command.direction];
       const entry = active[index];
-      if (!entry || entry.revision !== command.expectedRevision || !target) {
+      const target = active[index + command.direction];
+      const updates = reorderedQueuePositions(active, command.entryId, command.direction);
+      if (!entry || entry.revision !== command.expectedRevision || !target || !updates) {
         fail("CONFLICT", "The queue order changed on another device.");
       }
-      await tx.queueEntry.update({ where: { id: entry.id }, data: { position: target.position, revision: { increment: 1 } } });
-      await tx.queueEntry.update({ where: { id: target.id }, data: { position: entry.position, revision: { increment: 1 } } });
+      // Only the two parties that traded places count as edited; the rest are
+      // just renumbered, so their pending edits shouldn't hit a false conflict.
+      const moved = new Set([entry.id, target.id]);
+      for (const update of updates) {
+        await tx.queueEntry.update({
+          where: { id: update.id },
+          data: { position: update.position, ...(moved.has(update.id) ? { revision: { increment: 1 } } : {}) },
+        });
+      }
       break;
     }
     case "ADD_RESERVATION": {

@@ -12,6 +12,14 @@ export function formatScheduledAt(date: Date | string, timeZone?: string) {
   return formatRestaurantDateTime(date, timeZone);
 }
 
+/** Queue place as an ordinal: 1st, 2nd, 3rd, 4th … 11th, 12th, 13th, 21st. */
+export function ordinal(position: number) {
+  const lastTwo = position % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${position}th`;
+  const suffix = ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[position % 10] ?? "th";
+  return `${position}${suffix}`;
+}
+
 export function statusClass(status: string) {
   const colours: Record<string, string> = {
     Available: "bg-emerald-100 text-emerald-800", Low: "bg-emerald-100 text-emerald-800",

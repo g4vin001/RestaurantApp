@@ -63,6 +63,12 @@ export async function joinCustomerWaitlist(
   );
   const now = new Date();
   await prisma.$transaction(async (tx) => {
+    // Join at the back of the line, as manager-added walk-ins do. Without this
+    // every customer stayed at position 0 and sorted ahead of earlier walk-ins.
+    const last = await tx.queueEntry.aggregate({
+      where: { restaurantId: restaurant.id, status: { in: ["WAITING", "CALLED"] } },
+      _max: { position: true },
+    });
     await tx.queueEntry.create({
       data: {
         restaurantId: restaurant.id,
@@ -73,6 +79,7 @@ export async function joinCustomerWaitlist(
         promisedWaitMinutes,
         createdById: profile.id,
         source: "CUSTOMER",
+        position: (last._max.position ?? -1) + 1,
       },
     });
     await tx.restaurant.update({

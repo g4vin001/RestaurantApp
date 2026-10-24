@@ -33,6 +33,7 @@ import type { SeatingRecommendationState } from "@/lib/domain/operations";
 import type { TableStatus } from "@/lib/domain/types";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { ClearFlash } from "@/components/ui/ClearFlash";
+import { ordinal } from "@/lib/helpers";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import { getCurrentWorkContext } from "@/lib/staff/access";
@@ -342,8 +343,8 @@ function QueueCard({
   return (
     <article className={`rounded-2xl border bg-white p-4 shadow-sm ${entry.status === "CALLED" ? "border-sky-200 ring-2 ring-sky-50" : isLate ? "border-amber-200" : "border-stone-200"}`}>
       <div className="flex items-start gap-3">
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-sm font-black ${entry.status === "CALLED" ? "bg-sky-100 text-sky-800" : "bg-stone-100 text-stone-700"}`}>
-          {index + 1}
+        <span aria-label={`${ordinal(index + 1)} in line`} className={`grid h-9 min-w-9 shrink-0 place-items-center rounded-xl px-1.5 text-sm font-black ${entry.status === "CALLED" ? "bg-sky-100 text-sky-800" : "bg-stone-100 text-stone-700"}`}>
+          {ordinal(index + 1)}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

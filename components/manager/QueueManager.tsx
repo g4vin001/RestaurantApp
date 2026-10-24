@@ -25,6 +25,7 @@ import {
 } from "@/lib/domain/operations";
 import { formatDurationMinutes } from "@/lib/domain/restaurant-schedule";
 import type { QueueEntry, Reservation } from "@/lib/domain/types";
+import { ordinal } from "@/lib/helpers";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import {
   formatRestaurantDateTime,
@@ -633,8 +634,11 @@ export function QueueManager() {
                   <article key={entry.id} className="p-5">
                     <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                       <div className="flex min-w-0 items-start gap-4">
-                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-stone-100 text-sm font-bold text-stone-600">
-                          {index + 1}
+                        <span
+                          className="grid h-10 min-w-10 shrink-0 place-items-center rounded-xl bg-stone-100 px-1.5 text-sm font-bold text-stone-600"
+                          aria-label={`${ordinal(index + 1)} in line`}
+                        >
+                          {ordinal(index + 1)}
                         </span>
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
