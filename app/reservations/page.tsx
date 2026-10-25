@@ -74,6 +74,12 @@ export default async function MyReservationsPage() {
                   {reservation.cancellationReason}
                 </p>
               )}
+              {["PENDING_APPROVAL", "CONFIRMED"].includes(reservation.status) && reservation.restaurantNotes && (
+                <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+                  <p className="text-xs font-semibold text-sky-900">Note from {reservation.restaurantName}</p>
+                  <p className="mt-0.5 whitespace-pre-line leading-6">{reservation.restaurantNotes}</p>
+                </div>
+              )}
             </PageCard>
           ))}
         </div>

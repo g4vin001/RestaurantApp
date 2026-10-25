@@ -61,6 +61,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
       reservationDurationMinutes: readReservationDurationMinutes(settings),
       acceptsReservations: availability.acceptsReservations,
       reservationBlockedDates: availability.blockedDates,
+      reservationNotes: "",
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
       schedule: readOperatingSchedule(settings ?? {}),

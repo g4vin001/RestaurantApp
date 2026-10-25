@@ -99,6 +99,7 @@ export interface RestaurantIdentity {
   reservationDurationMinutes: number;
   acceptsReservations: boolean;
   reservationBlockedDates: string[];
+  reservationNotes: string;
   opensAtHour: number;
   closesAtHour: number;
   schedule?: import("@/lib/domain/restaurant-schedule").OperatingSchedule;

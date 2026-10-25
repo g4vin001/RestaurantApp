@@ -22,6 +22,7 @@ import {
   readOperatingSchedule,
   readReservationAvailability,
   readReservationDurationMinutes,
+  readReservationNotes,
 } from "@/lib/domain/restaurant-schedule";
 import { publicCoverImageUrl } from "@/lib/customer/cover-image";
 import { allocatePartyAcrossTables } from "@/lib/domain/operations";
@@ -489,6 +490,7 @@ export function mapRestaurantSnapshot(
       reservationDurationMinutes: readReservationDurationMinutes(settings),
       acceptsReservations: availability.acceptsReservations,
       reservationBlockedDates: availability.blockedDates,
+      reservationNotes: readReservationNotes(settings),
       opensAtHour: finiteNumber(settings?.opensAtHour, 10),
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
       schedule: readOperatingSchedule(settings ?? {}),

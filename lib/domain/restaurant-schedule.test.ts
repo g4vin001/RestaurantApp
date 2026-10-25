@@ -7,6 +7,7 @@ import {
   legacyOperatingSchedule,
   readOperatingSchedule,
   readReservationAvailability,
+  readReservationNotes,
   readReservationDurationMinutes,
   restaurantServiceStatus,
   serviceIntervalsBetween,
@@ -189,6 +190,14 @@ describe("reservation length", () => {
 });
 
 describe("reservation availability", () => {
+  it("reads the manager's notes for customers, trimmed and length-capped", () => {
+    expect(readReservationNotes({})).toBe("");
+    expect(readReservationNotes({ reservationNotes: 42 })).toBe("");
+    expect(readReservationNotes({ reservationNotes: "  Held for 15 minutes.\nNo deposit needed.  " }))
+      .toBe("Held for 15 minutes.\nNo deposit needed.");
+    expect(readReservationNotes({ reservationNotes: "x".repeat(600) })).toHaveLength(500);
+  });
+
   it("defaults to accepting reservations with no blocked dates", () => {
     expect(readReservationAvailability({})).toEqual({ acceptsReservations: true, blockedDates: [] });
     expect(readReservationAvailability({ acceptsReservations: false, reservationBlockedDates: "nope" }))

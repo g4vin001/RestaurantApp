@@ -16,6 +16,7 @@ import {
   fitsWithinServiceHours,
   formatDurationMinutes,
   isWithinServiceHours,
+  MAX_RESERVATION_NOTES_LENGTH,
   readOperatingSchedule,
   readReservationAvailability,
   readReservationDurationMinutes,
@@ -1207,6 +1208,11 @@ async function executeInTransaction(
       if (typeof input.acceptsReservations !== "boolean") fail("VALIDATION", "Choose whether online reservations are accepted.");
       const blockedDates = validateBlockedDates(input.reservationBlockedDates);
       if (!blockedDates.ok) fail("VALIDATION", blockedDates.error);
+      // Kept as typed (line breaks included); text() would flatten them.
+      const reservationNotes = typeof input.reservationNotes === "string" ? input.reservationNotes.trim() : "";
+      if (reservationNotes.length > MAX_RESERVATION_NOTES_LENGTH) {
+        fail("VALIDATION", `Reservation notes must be ${MAX_RESERVATION_NOTES_LENGTH} characters or fewer.`);
+      }
       await cancelReservationsForAvailability(
         tx,
         scope,
@@ -1226,6 +1232,7 @@ async function executeInTransaction(
             reservationDurationMinutes: duration.minutes,
             acceptsReservations: input.acceptsReservations,
             reservationBlockedDates: blockedDates.dates,
+            reservationNotes,
             ...(schedule?.ok ? { schedule: schedule.schedule as unknown as Prisma.InputJsonValue } : {}),
           },
           revision: { increment: 1 },

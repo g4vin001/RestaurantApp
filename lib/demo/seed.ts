@@ -421,6 +421,7 @@ export function createDemoState(now = new Date()): DemoState {
       reservationDurationMinutes: 90,
       acceptsReservations: true,
       reservationBlockedDates: [],
+      reservationNotes: "",
       opensAtHour: 11,
       closesAtHour: 22,
     },

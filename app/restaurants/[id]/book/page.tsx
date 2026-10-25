@@ -12,6 +12,7 @@ import {
   readOperatingSchedule,
   readReservationAvailability,
   readReservationDurationMinutes,
+  readReservationNotes,
   restaurantServiceStatus,
 } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
@@ -48,6 +49,7 @@ export default async function BookReservationPage({
   if (!restaurant) notFound();
   const schedule = readOperatingSchedule(asRecord(restaurant.operatingSettings) ?? {});
   const availability = readReservationAvailability(asRecord(restaurant.operatingSettings));
+  const reservationNotes = readReservationNotes(asRecord(restaurant.operatingSettings));
 
   // The detail page hides the button, but this URL can still be opened directly.
   if (!availability.acceptsReservations) {
@@ -80,6 +82,12 @@ export default async function BookReservationPage({
         Request a time during opening hours. The restaurant must approve your request before it is confirmed.
       </p>
       <div className="mt-6"><OpeningHours service={restaurantServiceStatus({ schedule, timezone: restaurant.timezone })} timeZone={restaurant.timezone} /></div>
+      {reservationNotes && (
+        <section aria-label="Notes from the restaurant" className="mt-6 rounded-2xl border border-sky-200 bg-sky-50 p-4 sm:p-5">
+          <h2 className="text-sm font-semibold text-sky-900">Before you book</h2>
+          <p className="mt-1 whitespace-pre-line text-sm leading-6 text-sky-950">{reservationNotes}</p>
+        </section>
+      )}
       <PageCard className="mt-6">
         <ReservationBookingForm
           restaurantId={restaurant.id}

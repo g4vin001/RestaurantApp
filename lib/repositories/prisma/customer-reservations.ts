@@ -8,6 +8,7 @@ import {
   isWithinServiceHours,
   readReservationAvailability,
   readReservationDurationMinutes,
+  readReservationNotes,
 } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
@@ -28,6 +29,7 @@ export type CustomerReservation = {
   restaurantName: string;
   restaurantSlug: string;
   restaurantTimezone: string;
+  restaurantNotes: string;
   partyName: string;
   partySize: number;
   scheduledAt: Date;
@@ -48,7 +50,7 @@ export async function fetchCustomerReservations(
       scheduledAt: true,
       status: true,
       cancellationReason: true,
-      restaurant: { select: { name: true, slug: true, timezone: true } },
+      restaurant: { select: { name: true, slug: true, timezone: true, operatingSettings: true } },
     },
     orderBy: { scheduledAt: "desc" },
   });
@@ -57,6 +59,7 @@ export async function fetchCustomerReservations(
     id: reservation.id,
     restaurantName: reservation.restaurant.name,
     restaurantSlug: reservation.restaurant.slug,
+    restaurantNotes: readReservationNotes(asRecord(reservation.restaurant.operatingSettings)),
     restaurantTimezone: reservation.restaurant.timezone || "Asia/Manila",
     partyName: reservation.partyName,
     partySize: reservation.partySize,

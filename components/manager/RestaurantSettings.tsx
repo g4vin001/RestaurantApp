@@ -10,6 +10,7 @@ import { reservationsCancelledByAvailabilityChange } from "@/lib/domain/operatio
 import {
   formatDurationMinutes,
   MAX_RESERVATION_MINUTES,
+  MAX_RESERVATION_NOTES_LENGTH,
   MIN_RESERVATION_MINUTES,
   readOperatingSchedule,
   RESERVATION_MINUTE_STEP,
@@ -38,6 +39,7 @@ export function RestaurantSettings() {
   );
   const [acceptsReservations, setAcceptsReservations] = useState(state.restaurant.acceptsReservations);
   const [blockedDates, setBlockedDates] = useState(state.restaurant.reservationBlockedDates);
+  const [reservationNotes, setReservationNotes] = useState(state.restaurant.reservationNotes);
   const [newBlockedDate, setNewBlockedDate] = useState("");
   const [schedule, setSchedule] = useState(() => readOperatingSchedule(state.restaurant));
   const [confirmCancelCount, setConfirmCancelCount] = useState<number | null>(null);
@@ -57,6 +59,7 @@ export function RestaurantSettings() {
     setReservationDurationMinutes(state.restaurant.reservationDurationMinutes);
     setAcceptsReservations(state.restaurant.acceptsReservations);
     setBlockedDates(state.restaurant.reservationBlockedDates);
+    setReservationNotes(state.restaurant.reservationNotes);
     setSchedule(readOperatingSchedule(state.restaurant));
     setSourceRevision(state.restaurant.revision);
   }, [state.restaurant, dirty]);
@@ -130,6 +133,7 @@ export function RestaurantSettings() {
         reservationDurationMinutes,
         acceptsReservations,
         reservationBlockedDates: upcomingBlockedDates,
+        reservationNotes,
         opensAtHour: state.restaurant.opensAtHour,
         closesAtHour: state.restaurant.closesAtHour,
         schedule: validation.schedule,
@@ -340,6 +344,25 @@ export function RestaurantSettings() {
               <p className="mt-3 text-sm text-stone-500">No blocked dates.</p>
             )}
           </div>
+
+          <label className="mt-5 block text-sm font-medium text-stone-700">
+            Notes for customers
+            <span className="mt-1 block text-xs font-normal leading-5 text-stone-500">
+              Shown on the booking form and on customers&apos; upcoming reservations. Use it for policies like grace periods, deposits, or dress code.
+            </span>
+            <textarea
+              value={reservationNotes}
+              onChange={(event) => setReservationNotes(event.target.value)}
+              maxLength={MAX_RESERVATION_NOTES_LENGTH}
+              rows={3}
+              placeholder="e.g. We hold reservations for 15 minutes past the booking time before marking them as a no-show."
+              aria-describedby="reservation-notes-count"
+              className="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2 text-sm"
+            />
+            <span id="reservation-notes-count" className="mt-1 block text-right text-xs font-normal text-stone-400">
+              {reservationNotes.length}/{MAX_RESERVATION_NOTES_LENGTH}
+            </span>
+          </label>
         </section>
 
         <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">

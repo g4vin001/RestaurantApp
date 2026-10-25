@@ -45,6 +45,7 @@ import type {
 } from "@/lib/domain/types";
 import { createDemoState } from "@/lib/demo/seed";
 import {
+  MAX_RESERVATION_NOTES_LENGTH,
   readOperatingSchedule,
   validateBlockedDates,
   validateOperatingSchedule,
@@ -224,6 +225,7 @@ interface DemoContextValue {
       | "reservationDurationMinutes"
       | "acceptsReservations"
       | "reservationBlockedDates"
+      | "reservationNotes"
       | "opensAtHour"
       | "closesAtHour"
       | "schedule"
@@ -793,6 +795,7 @@ export function OperationsProvider({
         | "reservationDurationMinutes"
         | "acceptsReservations"
         | "reservationBlockedDates"
+        | "reservationNotes"
         | "opensAtHour"
         | "closesAtHour"
         | "schedule"
@@ -841,6 +844,10 @@ export function OperationsProvider({
       }
       const blockedDates = validateBlockedDates(input.reservationBlockedDates);
       if (!blockedDates.ok) return Promise.resolve(blockedDates);
+      const reservationNotes = (input.reservationNotes ?? "").trim();
+      if (reservationNotes.length > MAX_RESERVATION_NOTES_LENGTH) {
+        return Promise.resolve({ ok: false, error: `Reservation notes must be ${MAX_RESERVATION_NOTES_LENGTH} characters or fewer.` });
+      }
       const occurredAt = new Date().toISOString();
       const { state: cancelledState } = cancelReservationsForAvailability(
         state,
@@ -851,7 +858,7 @@ export function OperationsProvider({
         type: "REPLACE",
         state: {
           ...cancelledState,
-          restaurant: { ...state.restaurant, ...input, reservationBlockedDates: blockedDates.dates, name, location },
+          restaurant: { ...state.restaurant, ...input, reservationBlockedDates: blockedDates.dates, reservationNotes, name, location },
           lastUpdatedAt: occurredAt,
         },
       });

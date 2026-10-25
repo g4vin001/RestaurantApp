@@ -241,6 +241,13 @@ export function fitsWithinServiceHours(source: ScheduleSource, start: Date, minu
 }
 
 export const MAX_BLOCKED_RESERVATION_DATES = 200;
+export const MAX_RESERVATION_NOTES_LENGTH = 500;
+
+// The manager's message to customers who book, e.g. a no-show grace period.
+export function readReservationNotes(settings: { reservationNotes?: unknown } | null | undefined) {
+  const value = settings?.reservationNotes;
+  return typeof value === "string" ? value.trim().slice(0, MAX_RESERVATION_NOTES_LENGTH) : "";
+}
 
 // Online-booking availability. Both settings restrict customer requests only;
 // managers can still add a booking by hand.
