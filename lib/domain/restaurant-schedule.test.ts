@@ -3,11 +3,14 @@ import {
   fitsWithinServiceHours,
   formatDurationMinutes,
   isReservationDateBlocked,
+  isWithinReservationWindows,
   isWithinServiceHours,
   legacyOperatingSchedule,
   readOperatingSchedule,
   readReservationAvailability,
   readReservationNotes,
+  readReservationWindows,
+  reservationWindowLabels,
   readReservationDurationMinutes,
   restaurantServiceStatus,
   serviceIntervalsBetween,
@@ -15,6 +18,7 @@ import {
   validateBlockedDates,
   validateOperatingSchedule,
   validateReservationDuration,
+  validateReservationWindows,
   WEEKDAYS,
   type OperatingSchedule,
 } from "./restaurant-schedule";
@@ -190,6 +194,28 @@ describe("reservation length", () => {
 });
 
 describe("reservation availability", () => {
+  it("limits reservation start times to the weekly windows, when set", () => {
+    const windows = closedWeek().weekly;
+    windows.monday = [{ opensAt: "11:30", closesAt: "13:30" }, { opensAt: "18:00", closesAt: "20:30" }];
+    // 2026-09-07 is a Monday in Asia/Manila.
+    expect(isWithinReservationWindows(windows, at("2026-09-07T11:30"), "Asia/Manila")).toBe(true);
+    expect(isWithinReservationWindows(windows, at("2026-09-07T13:29"), "Asia/Manila")).toBe(true);
+    expect(isWithinReservationWindows(windows, at("2026-09-07T13:30"), "Asia/Manila")).toBe(false);
+    expect(isWithinReservationWindows(windows, at("2026-09-07T16:00"), "Asia/Manila")).toBe(false);
+    expect(isWithinReservationWindows(windows, at("2026-09-08T19:00"), "Asia/Manila")).toBe(false);
+    expect(isWithinReservationWindows(null, at("2026-09-08T19:00"), "Asia/Manila")).toBe(true);
+    expect(reservationWindowLabels(windows, "2026-09-07")).toEqual(["11:30 AM – 1:30 PM", "6:00 PM – 8:30 PM"]);
+  });
+
+  it("validates reservation windows like opening hours, with off meaning null", () => {
+    expect(validateReservationWindows(null)).toEqual({ ok: true, windows: null });
+    expect(readReservationWindows({})).toBeNull();
+    const overlapping = closedWeek().weekly;
+    overlapping.friday = [{ opensAt: "18:00", closesAt: "21:00" }, { opensAt: "20:00", closesAt: "22:00" }];
+    expect(validateReservationWindows(overlapping).ok).toBe(false);
+    expect(validateReservationWindows({ monday: [] }).ok).toBe(false);
+  });
+
   it("reads the manager's notes for customers, trimmed and length-capped", () => {
     expect(readReservationNotes({})).toBe("");
     expect(readReservationNotes({ reservationNotes: 42 })).toBe("");

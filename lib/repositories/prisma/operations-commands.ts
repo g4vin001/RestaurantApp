@@ -23,6 +23,7 @@ import {
   validateBlockedDates,
   validateOperatingSchedule,
   validateReservationDuration,
+  validateReservationWindows,
 } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
@@ -1213,6 +1214,8 @@ async function executeInTransaction(
       if (reservationNotes.length > MAX_RESERVATION_NOTES_LENGTH) {
         fail("VALIDATION", `Reservation notes must be ${MAX_RESERVATION_NOTES_LENGTH} characters or fewer.`);
       }
+      const reservationWindows = validateReservationWindows(input.reservationWindows);
+      if (!reservationWindows.ok) fail("VALIDATION", reservationWindows.error);
       await cancelReservationsForAvailability(
         tx,
         scope,
@@ -1233,6 +1236,8 @@ async function executeInTransaction(
             acceptsReservations: input.acceptsReservations,
             reservationBlockedDates: blockedDates.dates,
             reservationNotes,
+            // null switches the windows off (bookable whenever open).
+            reservationWindows: reservationWindows.windows as unknown as Prisma.InputJsonValue,
             ...(schedule?.ok ? { schedule: schedule.schedule as unknown as Prisma.InputJsonValue } : {}),
           },
           revision: { increment: 1 },

@@ -4,6 +4,7 @@ import { CalendarDays, Clock3, Plus, Save, Store, X } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { OperatingScheduleEditor } from "@/components/manager/OperatingScheduleEditor";
+import { ReservationWindowsEditor } from "@/components/manager/ReservationWindowsEditor";
 import { RestaurantPhotoField } from "@/components/manager/RestaurantPhotoField";
 import { Modal } from "@/components/ui/Modal";
 import { reservationsCancelledByAvailabilityChange } from "@/lib/domain/operations";
@@ -17,6 +18,7 @@ import {
   shortestServicePeriod,
   validateOperatingSchedule,
   validateReservationDuration,
+  validateReservationWindows,
 } from "@/lib/domain/restaurant-schedule";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import { restaurantDateKey } from "@/lib/time/restaurant-time";
@@ -40,6 +42,7 @@ export function RestaurantSettings() {
   const [acceptsReservations, setAcceptsReservations] = useState(state.restaurant.acceptsReservations);
   const [blockedDates, setBlockedDates] = useState(state.restaurant.reservationBlockedDates);
   const [reservationNotes, setReservationNotes] = useState(state.restaurant.reservationNotes);
+  const [reservationWindows, setReservationWindows] = useState(state.restaurant.reservationWindows);
   const [newBlockedDate, setNewBlockedDate] = useState("");
   const [schedule, setSchedule] = useState(() => readOperatingSchedule(state.restaurant));
   const [confirmCancelCount, setConfirmCancelCount] = useState<number | null>(null);
@@ -60,6 +63,7 @@ export function RestaurantSettings() {
     setAcceptsReservations(state.restaurant.acceptsReservations);
     setBlockedDates(state.restaurant.reservationBlockedDates);
     setReservationNotes(state.restaurant.reservationNotes);
+    setReservationWindows(state.restaurant.reservationWindows);
     setSchedule(readOperatingSchedule(state.restaurant));
     setSourceRevision(state.restaurant.revision);
   }, [state.restaurant, dirty]);
@@ -102,6 +106,12 @@ export function RestaurantSettings() {
       setMessage(duration.error);
       return;
     }
+    const windowsCheck = validateReservationWindows(reservationWindows);
+    if (!windowsCheck.ok) {
+      setFailed(true);
+      setMessage(windowsCheck.error);
+      return;
+    }
     // Warn before a save that cancels bookings; the server applies the same rule.
     const cancelling = reservationsCancelledByAvailabilityChange(
       state.reservations,
@@ -134,6 +144,7 @@ export function RestaurantSettings() {
         acceptsReservations,
         reservationBlockedDates: upcomingBlockedDates,
         reservationNotes,
+        reservationWindows,
         opensAtHour: state.restaurant.opensAtHour,
         closesAtHour: state.restaurant.closesAtHour,
         schedule: validation.schedule,
@@ -344,6 +355,15 @@ export function RestaurantSettings() {
               <p className="mt-3 text-sm text-stone-500">No blocked dates.</p>
             )}
           </div>
+
+          <ReservationWindowsEditor
+            windows={reservationWindows}
+            openingHours={schedule.weekly}
+            onChange={(value) => {
+              setReservationWindows(value);
+              setDirty(true);
+            }}
+          />
 
           <label className="mt-5 block text-sm font-medium text-stone-700">
             Notes for customers

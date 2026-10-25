@@ -240,6 +240,35 @@ export function fitsWithinServiceHours(source: ScheduleSource, start: Date, minu
     intervals[0].end.getTime() === end.getTime();
 }
 
+// Optional weekly windows for when customer reservations may START, separate
+// from opening hours. null means "whenever the restaurant is open" (the
+// finish-by-closing rule applies either way).
+export type ReservationWindows = OperatingSchedule["weekly"];
+
+export function validateReservationWindows(value: unknown):
+  | { ok: true; windows: ReservationWindows | null }
+  | { ok: false; error: string } {
+  if (value === null || value === undefined) return { ok: true, windows: null };
+  const parsed = validateOperatingSchedule({ weekly: value, exceptions: [] });
+  if (!parsed.ok) return { ok: false, error: `Reservation times: ${parsed.error}` };
+  return { ok: true, windows: parsed.schedule.weekly };
+}
+
+export function readReservationWindows(settings: { reservationWindows?: unknown } | null | undefined) {
+  const parsed = validateReservationWindows(settings?.reservationWindows);
+  return parsed.ok ? parsed.windows : null;
+}
+
+export function isWithinReservationWindows(windows: ReservationWindows | null, at: Date, timeZone?: string | null) {
+  if (!windows) return true;
+  return isWithinServiceHours({ schedule: { weekly: windows, exceptions: [] }, timezone: timeZone }, at);
+}
+
+/** Labels for the windows on a calendar date, e.g. ["11:30 AM – 1:30 PM"]. */
+export function reservationWindowLabels(windows: ReservationWindows, date: string) {
+  return periodsForDate({ weekly: windows, exceptions: [] }, date).map(servicePeriodLabel);
+}
+
 export const MAX_BLOCKED_RESERVATION_DATES = 200;
 export const MAX_RESERVATION_NOTES_LENGTH = 500;
 

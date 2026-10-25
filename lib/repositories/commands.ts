@@ -161,6 +161,7 @@ export type DatabaseOperationsCommand =
         | "acceptsReservations"
         | "reservationBlockedDates"
         | "reservationNotes"
+        | "reservationWindows"
         | "opensAtHour"
         | "closesAtHour"
         | "schedule"

@@ -50,6 +50,7 @@ import {
   validateBlockedDates,
   validateOperatingSchedule,
   validateReservationDuration,
+  validateReservationWindows,
 } from "@/lib/domain/restaurant-schedule";
 import {
   type OperationsRepositoryMode,
@@ -226,6 +227,7 @@ interface DemoContextValue {
       | "acceptsReservations"
       | "reservationBlockedDates"
       | "reservationNotes"
+      | "reservationWindows"
       | "opensAtHour"
       | "closesAtHour"
       | "schedule"
@@ -796,6 +798,7 @@ export function OperationsProvider({
         | "acceptsReservations"
         | "reservationBlockedDates"
         | "reservationNotes"
+        | "reservationWindows"
         | "opensAtHour"
         | "closesAtHour"
         | "schedule"
@@ -848,6 +851,8 @@ export function OperationsProvider({
       if (reservationNotes.length > MAX_RESERVATION_NOTES_LENGTH) {
         return Promise.resolve({ ok: false, error: `Reservation notes must be ${MAX_RESERVATION_NOTES_LENGTH} characters or fewer.` });
       }
+      const reservationWindows = validateReservationWindows(input.reservationWindows);
+      if (!reservationWindows.ok) return Promise.resolve(reservationWindows);
       const occurredAt = new Date().toISOString();
       const { state: cancelledState } = cancelReservationsForAvailability(
         state,
@@ -858,7 +863,7 @@ export function OperationsProvider({
         type: "REPLACE",
         state: {
           ...cancelledState,
-          restaurant: { ...state.restaurant, ...input, reservationBlockedDates: blockedDates.dates, reservationNotes, name, location },
+          restaurant: { ...state.restaurant, ...input, reservationBlockedDates: blockedDates.dates, reservationNotes, reservationWindows: reservationWindows.windows, name, location },
           lastUpdatedAt: occurredAt,
         },
       });

@@ -13,6 +13,7 @@ import {
   readReservationAvailability,
   readReservationDurationMinutes,
   readReservationNotes,
+  readReservationWindows,
   restaurantServiceStatus,
 } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
@@ -95,6 +96,7 @@ export default async function BookReservationPage({
           schedule={schedule}
           reservationDurationMinutes={readReservationDurationMinutes(asRecord(restaurant.operatingSettings))}
           blockedDates={availability.blockedDates}
+          reservationWindows={readReservationWindows(asRecord(restaurant.operatingSettings))}
           timeZone={restaurant.timezone}
         />
       </PageCard>

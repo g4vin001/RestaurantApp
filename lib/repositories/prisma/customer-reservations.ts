@@ -5,11 +5,15 @@ import {
   fitsWithinServiceHours,
   formatDurationMinutes,
   isReservationDateBlocked,
+  isWithinReservationWindows,
   isWithinServiceHours,
   readReservationAvailability,
   readReservationDurationMinutes,
   readReservationNotes,
+  readReservationWindows,
+  reservationWindowLabels,
 } from "@/lib/domain/restaurant-schedule";
+import { restaurantDateKey } from "@/lib/time/restaurant-time";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 
 export type CreateCustomerReservationInput = {
@@ -117,6 +121,16 @@ async function attemptCreate(
       const schedule = { ...settings, timezone: restaurant[0].timezone };
       if (!isWithinServiceHours(schedule, input.scheduledAt)) {
         throw new OperationsRepositoryError("VALIDATION", "This restaurant is closed at that time. Choose a time within its opening hours.");
+      }
+      const windows = readReservationWindows(settings);
+      if (!isWithinReservationWindows(windows, input.scheduledAt, restaurant[0].timezone)) {
+        const labels = windows ? reservationWindowLabels(windows, restaurantDateKey(input.scheduledAt, restaurant[0].timezone)) : [];
+        throw new OperationsRepositoryError(
+          "VALIDATION",
+          labels.length
+            ? `Reservations that day can start ${labels.join(" or ")}. Choose a time in one of those windows.`
+            : "This restaurant isn't taking reservations at that time of day. Choose another day or time.",
+        );
       }
       if (!fitsWithinServiceHours(schedule, input.scheduledAt, reservationMinutes)) {
         const length = formatDurationMinutes(reservationMinutes);

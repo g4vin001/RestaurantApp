@@ -3,7 +3,18 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { bookReservation, type ReservationBookingState } from "./actions";
-import { fitsWithinServiceHours, formatDurationMinutes, isReservationDateBlocked, isWithinServiceHours, periodsForDate, servicePeriodLabel, type OperatingSchedule } from "@/lib/domain/restaurant-schedule";
+import {
+  fitsWithinServiceHours,
+  formatDurationMinutes,
+  isReservationDateBlocked,
+  isWithinReservationWindows,
+  isWithinServiceHours,
+  periodsForDate,
+  reservationWindowLabels,
+  servicePeriodLabel,
+  type OperatingSchedule,
+  type ReservationWindows,
+} from "@/lib/domain/restaurant-schedule";
 import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
 
 const initialState: ReservationBookingState = {};
@@ -18,6 +29,7 @@ export function ReservationBookingForm({
   schedule,
   reservationDurationMinutes,
   blockedDates,
+  reservationWindows,
   timeZone,
 }: {
   restaurantId: string;
@@ -25,6 +37,7 @@ export function ReservationBookingForm({
   schedule: OperatingSchedule;
   reservationDurationMinutes: number;
   blockedDates: string[];
+  reservationWindows: ReservationWindows | null;
   timeZone: string;
 }) {
   const boundAction = bookReservation.bind(null, restaurantId);
@@ -36,6 +49,10 @@ export function ReservationBookingForm({
   const dateBlocked = !!selectedTime && isReservationDateBlocked(blockedDates, selectedTime, timeZone);
   const outsideHours = !!selectedTime && !fitsWithinServiceHours({ schedule, timezone: timeZone }, selectedTime, reservationDurationMinutes);
   const selectedHours = selectedTime ? periodsForDate(schedule, scheduledAt.slice(0, 10)).map(servicePeriodLabel) : [];
+  // Only reported when the restaurant is open, so "closed" stays the clearer message.
+  const outsideWindow = !!selectedTime && !closedAtTime && !isWithinReservationWindows(reservationWindows, selectedTime, timeZone);
+  const windowLabels = selectedTime && reservationWindows ? reservationWindowLabels(reservationWindows, scheduledAt.slice(0, 10)) : [];
+  const problem = dateBlocked || outsideHours || outsideWindow;
 
   if (state.success) {
     return (
@@ -75,15 +92,21 @@ export function ReservationBookingForm({
         Date and time · {timeZone}
         <input name="scheduledAt" type="datetime-local" required value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-describedby="booking-hours" className={inputClass} />
       </label>
-      <p id="booking-hours" role={outsideHours || dateBlocked ? "alert" : "status"} className={`text-sm leading-6 ${outsideHours || dateBlocked ? "text-rose-700" : "text-stone-600"}`}>
+      <p id="booking-hours" role={problem ? "alert" : "status"} className={`text-sm leading-6 ${problem ? "text-rose-700" : "text-stone-600"}`}>
         {dateBlocked ? "The restaurant isn't taking reservations on this date. Choose another day. " : ""}
         {!dateBlocked && outsideHours
           ? closedAtTime
             ? "The restaurant is closed at this time. Choose a time during service. "
             : `This reservation would run past closing. Choose a start at least ${length} before close. `
           : ""}
+        {!dateBlocked && !outsideHours && outsideWindow
+          ? windowLabels.length
+            ? "Reservations can't start at this time. Choose a time in one of the reservation windows below. "
+            : "The restaurant isn't taking reservations on this day. Choose another day. "
+          : ""}
         {`Reservations last ${length}. `}
         {selectedTime ? `Service starting on this date: ${selectedHours.length ? selectedHours.join(" · ") : "none"}. Overnight service may continue from the previous day.` : "Choose a date to check its service hours."}
+        {selectedTime && reservationWindows ? ` Reservations can start: ${windowLabels.length ? windowLabels.join(" · ") : "not on this day"}.` : ""}
       </p>
 
       <label className={labelClass}>
@@ -107,7 +130,7 @@ export function ReservationBookingForm({
 
       <button
         type="submit"
-        disabled={pending || outsideHours}
+        disabled={pending || outsideHours || outsideWindow}
         className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-wait disabled:opacity-60"
       >
         {pending ? "Sending request…" : "Request reservation"}
