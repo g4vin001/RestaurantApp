@@ -270,9 +270,19 @@ function TableDetailPanel({
         )}
       </div>
       <div className="mt-6 border-t border-stone-100 pt-5">
-        <p className="text-sm font-semibold text-stone-900">Recent history</p>
-        <div className="mt-3 space-y-3">
-          {events.slice(0, 4).map((event) => (
+        <p className="text-sm font-semibold text-stone-900">
+          Recent history
+          {events.length > 0 && <span className="font-normal text-stone-400"> · {events.length}</span>}
+        </p>
+        {/* Newest first; scrolls instead of hiding older changes. */}
+        <div
+          className="mt-3 max-h-64 space-y-3 overflow-y-auto overscroll-contain pr-1"
+          tabIndex={events.length > 4 ? 0 : undefined}
+          aria-label="Recent history for this table"
+        >
+          {[...events]
+            .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
+            .map((event) => (
             <div key={event.id} className="text-xs text-stone-600">
               <p>
                 {tableStatusLabel(event.previousStatus)} →{" "}

@@ -292,9 +292,16 @@ export function OverviewDashboard() {
         </section>
         <section className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-6">
           <h2 className="font-semibold text-stone-900">Recent activity</h2>
-          <div className="mt-4 space-y-3">
+          {/* Newest first; scrolls instead of hiding older changes. */}
+          <div
+            className="mt-4 max-h-80 space-y-3 overflow-y-auto overscroll-contain pr-1"
+            tabIndex={state.events.length > 4 ? 0 : undefined}
+            aria-label="Recent activity"
+          >
             {state.events.length ? (
-              state.events.slice(0, 4).map((event) => {
+              [...state.events]
+                .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
+                .map((event) => {
                 const table = state.tables.find(
                   (item) => item.id === event.tableId,
                 );
