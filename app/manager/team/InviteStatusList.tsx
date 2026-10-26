@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { copyText } from "@/lib/copy-text";
 import {
   regenerateStaffInvite,
   revokeStaffInvite,
@@ -18,18 +19,17 @@ type InviteSummary = {
 };
 
 function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   return (
     <button
       type="button"
       onClick={async () => {
-        await navigator.clipboard.writeText(value);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 2000);
+        setCopied(await copyText(value) ? "copied" : "failed");
+        window.setTimeout(() => setCopied("idle"), 2000);
       }}
       className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700"
     >
-      {copied ? "Copied" : `Copy ${label}`}
+      {copied === "copied" ? "Copied" : copied === "failed" ? "Copy failed — select it manually" : `Copy ${label}`}
     </button>
   );
 }
