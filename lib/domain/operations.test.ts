@@ -283,6 +283,29 @@ describe("manager operation commands", () => {
     expect(correctedState.events[0]?.note).toContain("Correction:");
   });
 
+  it("records the correction reason and enforces the correction rules", () => {
+    const seated = successful(transitionTable(createDemoState(now), "table-02", "OCCUPIED", occurredAt, "Manager", 2));
+    const inWindow = new Date(now.getTime() + 60_000).toISOString();
+
+    expect(correctLastTableTransition(seated, "table-02", "no", inWindow, "Manager"))
+      .toMatchObject({ ok: false, error: expect.stringContaining("between 4 and 500") });
+    expect(correctLastTableTransition(seated, "table-02", "Wrong table", new Date(now.getTime() + 16 * 60_000).toISOString(), "Manager"))
+      .toMatchObject({ ok: false, error: expect.stringContaining("15-minute correction window") });
+
+    const corrected = successful(correctLastTableTransition(seated, "table-02", "Seated the wrong party", inWindow, "Floor lead"));
+    // The original action stays in history; the correction is a new event on top.
+    expect(corrected.events[0]).toMatchObject({
+      tableId: "table-02",
+      previousStatus: "OCCUPIED",
+      newStatus: "AVAILABLE",
+      actor: "Floor lead",
+      note: "Correction: Seated the wrong party",
+    });
+    expect(corrected.events[1]).toMatchObject({ tableId: "table-02", newStatus: "OCCUPIED" });
+    expect(correctLastTableTransition(corrected, "table-02", "Undo the undo", inWindow, "Manager"))
+      .toMatchObject({ ok: false, error: expect.stringContaining("already a correction") });
+  });
+
   it("recommends and seats a same-zone table combination for a large party", () => {
     const state = createDemoState(now);
     const prepared = {

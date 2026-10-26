@@ -576,8 +576,9 @@ export function mapRestaurantSnapshot(
         occurredAt: event.occurredAt.toISOString(),
         actor: event.actorProfile?.displayName ?? "Manager",
         note: event.reason ?? undefined,
-      }))
-      .reverse(),
+      })),
+    // Newest first, as queried and as demo mode stores them. Consumers such as
+    // "Correct last action" and the activity lists read it in that order.
     reservations: restaurant.reservations.map((reservation) => ({
       id: reservation.id,
       partyName: reservation.partyName,

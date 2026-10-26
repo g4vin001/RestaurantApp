@@ -12,6 +12,7 @@ import {
 import { useDemo } from "@/components/demo/DemoProvider";
 import { StatusPill } from "@/components/manager/StatusPill";
 import { deriveOverview, minutesBetween } from "@/lib/domain/analytics";
+import { correctionReasonFromNote } from "@/lib/domain/table-correction";
 import { tableStatusLabel } from "@/lib/domain/transitions";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import {
@@ -305,15 +306,24 @@ export function OverviewDashboard() {
                 const table = state.tables.find(
                   (item) => item.id === event.tableId,
                 );
+                const correctedReason = correctionReasonFromNote(event.note);
                 return (
                   <div key={event.id} className="flex gap-3">
-                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                    <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${correctedReason ? "bg-amber-500" : "bg-emerald-500"}`} />
                     <div>
                       <p className="text-sm text-stone-700">
+                        {correctedReason && (
+                          <span className="mr-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                            Correction
+                          </span>
+                        )}
                         <strong>{table?.label}</strong> changed from{" "}
                         {tableStatusLabel(event.previousStatus)} to{" "}
                         {tableStatusLabel(event.newStatus)}
                       </p>
+                      {correctedReason && (
+                        <p className="mt-1 text-sm text-amber-950">Reason: {correctedReason}</p>
+                      )}
                       <p className="mt-1 text-xs text-stone-400">
                         {formatRestaurantTime(event.occurredAt, timeZone)} ·{" "}
                         {event.actor}

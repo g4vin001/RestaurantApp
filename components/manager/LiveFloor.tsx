@@ -17,6 +17,7 @@ import { FloorMapCanvas } from "@/components/manager/FloorMapCanvas";
 import { StatusPill } from "@/components/manager/StatusPill";
 import { minutesBetween } from "@/lib/domain/analytics";
 import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
+import { correctionReasonFromNote, latestTableEvent } from "@/lib/domain/table-correction";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import { useTableCorrection } from "@/lib/hooks/use-table-correction";
@@ -58,7 +59,7 @@ function TableDetailPanel({
   const [correcting, setCorrecting] = useState(false);
   const [correctionReason, setCorrectionReason] = useState("");
   const [correctionPending, setCorrectionPending] = useState(false);
-  const correction = useTableCorrection(table.status, events[0], now.getTime());
+  const correction = useTableCorrection(table.status, latestTableEvent(events), now.getTime());
 
   useEffect(() => {
     setSeating(false);
@@ -282,20 +283,34 @@ function TableDetailPanel({
         >
           {[...events]
             .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
-            .map((event) => (
-            <div key={event.id} className="text-xs text-stone-600">
+            .map((event) => {
+            const correctedReason = correctionReasonFromNote(event.note);
+            return (
+            <div
+              key={event.id}
+              className={`text-xs text-stone-600 ${correctedReason ? "rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2" : ""}`}
+            >
               <p>
+                {correctedReason && (
+                  <span className="mr-1.5 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                    Correction
+                  </span>
+                )}
                 {tableStatusLabel(event.previousStatus)} →{" "}
                 <strong>{tableStatusLabel(event.newStatus)}</strong>
               </p>
+              {correctedReason && (
+                <p className="mt-1 text-amber-950">Reason: {correctedReason}</p>
+              )}
               <p className="mt-0.5 text-stone-400">
                 {formatRestaurantTime(event.occurredAt, timeZone)}
               </p>
             </div>
-          ))}
+            );
+          })}
           {!events.length && (
             <p className="text-xs text-stone-400">
-              No changes in this demo session.
+              No changes recorded yet.
             </p>
           )}
         </div>
