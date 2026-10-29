@@ -119,6 +119,14 @@ export function validateFloor(
   return issues;
 }
 
+/** Every floor with a published layout, in floor order. All of them are live. */
+export function getLiveFloors(state: DemoState) {
+  return state.floorPlans.flatMap((plan) => {
+    const version = plan.versions.find((item) => item.id === plan.activeVersionId);
+    return version ? [{ id: plan.id, name: plan.name, version }] : [];
+  });
+}
+
 export function getActiveFloorVersion(state: DemoState) {
   const plan = state.floorPlans.find(
     (item) => item.id === state.activeFloorPlanId,
@@ -165,15 +173,53 @@ export function saveFloorDraft(
   };
 }
 
-function publishConflicts(state: DemoState, elements: FloorElement[]) {
+/**
+ * Tables on the other live floors, keyed by id, with the floor's name. Several
+ * floors can be live at once; a floor owns every active table not listed here,
+ * which for a single-floor restaurant is every active table.
+ */
+export function tablesOnOtherLiveFloors(state: DemoState, planId: string) {
+  const owners = new Map<string, string>();
+  for (const plan of state.floorPlans) {
+    if (plan.id === planId || !plan.activeVersionId) continue;
+    const version = plan.versions.find((item) => item.id === plan.activeVersionId);
+    for (const element of version?.elements ?? []) {
+      if (element.type !== "TABLE" || !element.tableId) continue;
+      if (state.tables.some((table) => table.id === element.tableId && table.active)) {
+        owners.set(element.tableId, plan.name);
+      }
+    }
+  }
+  return owners;
+}
+
+function publishConflicts(state: DemoState, planId: string, elements: FloorElement[]) {
   const nextTables = elements.filter(
     (element) => element.type === "TABLE" && element.tableId,
   );
   const nextTableIds = new Set(nextTables.map((element) => element.tableId));
+  const otherFloors = tablesOnOtherLiveFloors(state, planId);
   const removed = state.tables
-    .filter((table) => table.active && !nextTableIds.has(table.id))
+    .filter((table) => table.active && !nextTableIds.has(table.id) && !otherFloors.has(table.id))
     .map((table) => table.id);
   const conflicts: string[] = [];
+
+  // Labels identify tables everywhere (queue, reservations, staff), so they
+  // must be unique across live floors.
+  const otherLabels = new Map(
+    [...otherFloors].map(([tableId, floorName]) => [
+      state.tables.find((table) => table.id === tableId)?.label.trim().toLocaleLowerCase("en"),
+      floorName,
+    ]),
+  );
+  for (const element of elements.filter((item) => item.type === "TABLE")) {
+    const takenBy =
+      (element.tableId ? otherFloors.get(element.tableId) : undefined) ??
+      otherLabels.get(element.label.trim().toLocaleLowerCase("en"));
+    if (takenBy) {
+      conflicts.push(`${element.label} is already a table on ${takenBy}. Table labels must be unique across floors.`);
+    }
+  }
 
   for (const tableId of removed) {
     const table = state.tables.find((item) => item.id === tableId);
@@ -232,7 +278,7 @@ export function publishFloorPlan(
   )
     .filter((issue) => issue.blocking)
     .map((issue) => issue.message);
-  const conflicts = publishConflicts(state, elements);
+  const conflicts = publishConflicts(state, planId, elements);
   const errors = [...blocking, ...conflicts];
   if (errors.length) return { ok: false, errors };
 
@@ -274,8 +320,14 @@ export function publishFloorPlan(
       active: true,
     };
   });
+  const otherFloors = tablesOnOtherLiveFloors(state, planId);
+  // Other live floors keep their tables untouched; only this floor's own
+  // dropped tables are retired.
+  const keptTables = state.tables.filter(
+    (table) => !publishedTableIds.has(table.id) && otherFloors.has(table.id),
+  );
   const archivedTables = state.tables
-    .filter((table) => !publishedTableIds.has(table.id))
+    .filter((table) => !publishedTableIds.has(table.id) && !otherFloors.has(table.id))
     .map((table) => ({ ...table, active: false }));
   const updatedPlan: FloorPlan = {
     ...plan,
@@ -295,7 +347,7 @@ export function publishFloorPlan(
     ok: true,
     state: {
       ...state,
-      tables: [...publishedTables, ...archivedTables],
+      tables: [...publishedTables, ...keptTables, ...archivedTables],
       floorPlans: state.floorPlans.map((item) =>
         item.id === planId ? updatedPlan : item,
       ),
@@ -322,4 +374,46 @@ export function restoreFloorVersion(
     version.elements,
     occurredAt,
   );
+}
+
+/** Demo-mode counterpart of the database archiveFloorPlan command. */
+export function deleteFloorPlan(state: DemoState, planId: string): FloorCommandResult {
+  const plan = state.floorPlans.find((item) => item.id === planId);
+  if (!plan) return { ok: false, errors: ["Floor plan was not found."] };
+  if (state.floorPlans.length < 2) {
+    return { ok: false, errors: ["A restaurant needs at least one floor. Create another floor before deleting this one."] };
+  }
+  const version = plan.versions.find((item) => item.id === plan.activeVersionId);
+  const tableIds = new Set(
+    (version?.elements ?? [])
+      .filter((element) => element.type === "TABLE" && element.tableId)
+      .map((element) => element.tableId as string),
+  );
+  const tables = state.tables.filter((table) => table.active && tableIds.has(table.id));
+  const busy = tables.filter(
+    (table) =>
+      ["HELD", "RESERVED", "OCCUPIED", "CLEANING"].includes(table.status) ||
+      state.sessions.some((session) => session.tableId === table.id && !session.readyAt) ||
+      state.reservations.some(
+        (reservation) =>
+          (reservation.tableId === table.id || reservation.tableIds?.includes(table.id)) &&
+          ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status),
+      ),
+  );
+  if (busy.length) {
+    return {
+      ok: false,
+      errors: [`${plan.name} still has tables in use or booked (${busy.map((table) => table.label).join(", ")}). Clear them or move their reservations, then delete the floor.`],
+    };
+  }
+  const floorPlans = state.floorPlans.filter((item) => item.id !== planId);
+  return {
+    ok: true,
+    state: {
+      ...state,
+      floorPlans,
+      tables: state.tables.map((table) => (tableIds.has(table.id) ? { ...table, active: false } : table)),
+      activeFloorPlanId: state.activeFloorPlanId === planId ? floorPlans[0].id : state.activeFloorPlanId,
+    },
+  };
 }

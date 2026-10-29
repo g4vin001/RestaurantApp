@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   PublicFloorElement,
   PublicFloorView,
@@ -103,7 +103,7 @@ function StructureElement({
   );
 }
 
-export function PublicFloorMap({ floor }: { floor: PublicFloorView }) {
+export function PublicFloorMap({ floor, floorSwitcher }: { floor: PublicFloorView; floorSwitcher?: ReactNode }) {
   const tables = floor.elements.filter(
     (element) => element.type === "TABLE" && element.status,
   );
@@ -122,6 +122,7 @@ export function PublicFloorMap({ floor }: { floor: PublicFloorView }) {
         </div>
         <p className="text-xs text-stone-400">Published layout v{floor.version}</p>
       </div>
+      {floorSwitcher}
 
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-stone-600">
         {(Object.keys(statusMeta) as PublicTableStatus[]).map((status) => (

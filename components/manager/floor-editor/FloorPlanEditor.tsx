@@ -7,6 +7,7 @@ import {
   Clock3,
   Layers3,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
@@ -91,7 +92,7 @@ function PublishedHistory({
 }
 
 export function FloorPlanEditor() {
-  const { state, saveFloor, publishFloor, restoreFloor, createFloor } =
+  const { state, saveFloor, publishFloor, restoreFloor, createFloor, deleteFloor } =
     useDemo();
   const [selectedPlanId, setSelectedPlanId] = useState(state.activeFloorPlanId);
   const plan =
@@ -113,6 +114,8 @@ export function FloorPlanEditor() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [newFloorOpen, setNewFloorOpen] = useState(false);
+  const [deleteFloorOpen, setDeleteFloorOpen] = useState(false);
+  const [deletingFloor, setDeletingFloor] = useState(false);
   const [newFloorName, setNewFloorName] = useState("");
   const [toast, setToast] = useState<{
     tone: "success" | "error";
@@ -388,6 +391,16 @@ export function FloorPlanEditor() {
           >
             <Plus size={16} />
           </button>
+          <button
+            type="button"
+            onClick={() => setDeleteFloorOpen(true)}
+            disabled={state.floorPlans.length < 2}
+            className="grid h-9 w-9 place-items-center rounded-lg border border-stone-300 bg-white text-stone-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-stone-300 disabled:hover:bg-white disabled:hover:text-stone-600"
+            aria-label={`Delete ${plan.name}`}
+            title={state.floorPlans.length < 2 ? "A restaurant needs at least one floor" : "Delete this floor"}
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
         <div className="flex items-center gap-4 text-xs text-stone-500">
           <span>{activeTableCount} active tables</span>
@@ -596,6 +609,52 @@ export function FloorPlanEditor() {
             className="min-h-11 rounded-xl bg-rose-700 px-4 text-sm font-semibold text-white"
           >
             Remove
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={deleteFloorOpen}
+        title={`Delete ${plan.name}?`}
+        description="Its tables are taken out of service, and the floor disappears from the live floor and the customer map. Past history and analytics are kept. A floor with seated, held, or booked tables can't be deleted."
+        onClose={() => setDeleteFloorOpen(false)}
+        width="max-w-md"
+      >
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setDeleteFloorOpen(false)}
+            disabled={deletingFloor}
+            className="min-h-11 rounded-xl border border-stone-300 px-4 text-sm font-semibold text-stone-700"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={deletingFloor}
+            onClick={async () => {
+              setDeletingFloor(true);
+              const deletedName = plan.name;
+              const result = await deleteFloor(plan.id);
+              setDeletingFloor(false);
+              setDeleteFloorOpen(false);
+              if (!result.ok) {
+                notify("error", result.error);
+                return;
+              }
+              // Show a remaining floor; drafts of other floors are unchanged.
+              const next = state.floorPlans.find((item) => item.id !== plan.id);
+              if (next) {
+                setSelectedPlanId(next.id);
+                setPlanName(next.name);
+                setHistory(createEditorHistory(next.draft.elements));
+                setSelectedIds([]);
+              }
+              notify("success", `${deletedName} was deleted.`);
+            }}
+            className="min-h-11 rounded-xl bg-rose-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {deletingFloor ? "Deleting…" : "Delete floor"}
           </button>
         </div>
       </Modal>

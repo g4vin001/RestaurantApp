@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   publishFloorPlan,
+  deleteFloorPlan,
   restoreFloorVersion,
   saveFloorDraft,
 } from "@/lib/domain/floor-plan";
@@ -64,6 +65,7 @@ import { loadManagerSnapshotAction, runManagerCommand } from "@/app/manager/acti
 import { createClient as createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   createFloorPlanAction,
+  deleteFloorPlanAction,
   publishFloorPlanAction,
   restoreFloorPlanVersionAction,
   saveFloorPlanDraftAction,
@@ -177,6 +179,7 @@ interface DemoContextValue {
   ) => Promise<CommandFeedback>;
   restoreFloor: (planId: string, versionId: string) => Promise<CommandFeedback>;
   createFloor: (name: string) => Promise<string | null>;
+  deleteFloor: (planId: string) => Promise<CommandFeedback>;
   addQueue: (input: QueueInput) => Promise<CommandFeedback>;
   updateQueue: (entryId: string, input: QueueInput) => Promise<CommandFeedback>;
   callQueue: (entryId: string) => Promise<CommandFeedback>;
@@ -515,6 +518,18 @@ export function OperationsProvider({
       return applyResult(
         restoreFloorVersion(state, planId, versionId, new Date().toISOString()),
       );
+    },
+    [applyResult, repositoryMode, state],
+  );
+  const deleteFloor = useCallback(
+    async (planId: string): Promise<CommandFeedback> => {
+      if (repositoryMode === "database") {
+        const result = await deleteFloorPlanAction({ commandId: newCommandId(), planId });
+        if (!result.ok) return result;
+        dispatch({ type: "REPLACE", state: result.state });
+        return { ok: true, state: result.state } as const;
+      }
+      return applyResult(deleteFloorPlan(state, planId));
     },
     [applyResult, repositoryMode, state],
   );
@@ -894,6 +909,7 @@ export function OperationsProvider({
       publishFloor,
       restoreFloor,
       createFloor,
+      deleteFloor,
       addQueue,
       updateQueue,
       callQueue: (entryId) => queueStatus(entryId, "CALLED"),
@@ -926,6 +942,7 @@ export function OperationsProvider({
       publishFloor,
       restoreFloor,
       createFloor,
+      deleteFloor,
       addQueue,
       updateQueue,
       queueStatus,

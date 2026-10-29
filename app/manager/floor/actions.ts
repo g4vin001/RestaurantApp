@@ -6,6 +6,7 @@ import type { OperationsState } from "@/lib/domain/types";
 import { prisma } from "@/lib/prisma";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import {
+  archiveFloorPlan,
   createFloorPlan,
   publishFloorPlan,
   restoreFloorPlanVersion,
@@ -142,6 +143,28 @@ export async function restoreFloorPlanVersionAction(input: {
     return {
       ok: false,
       error: `Halina could not restore that floor version. Support reference: ${reference}`,
+    };
+  }
+}
+
+export async function deleteFloorPlanAction(input: {
+  commandId: string;
+  planId: string;
+}): Promise<FloorPlanActionResult> {
+  try {
+    const scope = await managerScope();
+    await archiveFloorPlan(prisma, scope, input);
+    const state = await new PrismaOperationsRepository(prisma, scope).loadSnapshot();
+    await finishFloorMutation(scope, input.commandId);
+    return { ok: true, state };
+  } catch (error) {
+    if (error instanceof OperationsRepositoryError) {
+      return { ok: false, error: error.message };
+    }
+    const reference = reportDataError("floor-plan-delete", error);
+    return {
+      ok: false,
+      error: `Halina could not delete that floor. Support reference: ${reference}`,
     };
   }
 }

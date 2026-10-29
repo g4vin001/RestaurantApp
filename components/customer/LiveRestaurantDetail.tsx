@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { randomUUID } from "node:crypto";
 import { PageCard } from "@/components/PageCard";
-import { PublicFloorMap } from "@/components/customer/PublicFloorMap";
+import { PublicFloorTabs } from "@/components/customer/PublicFloorTabs";
 import { CustomerRefresh } from "@/components/customer/CustomerRefresh";
 import { OpeningHours } from "@/components/customer/OpeningHours";
 import { RestaurantHero } from "@/components/customer/RestaurantHero";
@@ -54,7 +54,7 @@ export function LiveRestaurantDetail({ restaurant, slug }: { restaurant: PublicR
       </dl>
       {restaurant.reservedTables > 0 && <p className="mt-4 text-sm text-stone-600">{restaurant.reservedTables} {restaurant.reservedTables === 1 ? "table has" : "tables have"} upcoming reservations.</p>}
     </details>
-    {restaurant.publicFloor ? <PublicFloorMap floor={restaurant.publicFloor} /> : <PageCard className="mt-6">
+    {restaurant.publicFloors.length ? <PublicFloorTabs floors={restaurant.publicFloors} /> : <PageCard className="mt-6">
       <h2 className="font-semibold text-stone-800">Dining layout not published yet</h2>
       <p className="mt-1 text-sm leading-6 text-stone-600">Wait and table totals are available. The restaurant has not published a floor layout yet.</p>
     </PageCard>}

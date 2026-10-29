@@ -401,6 +401,51 @@ export async function publishFloorPlan(
       const suppliedTableIds = tableElements
         .map((element) => element.tableId)
         .filter((id): id is string => Boolean(id && UUID_PATTERN.test(id)));
+
+      // Several floors can be live at once. Tables on another live floor belong
+      // to that floor: this publish must neither reuse nor retire them. This
+      // floor owns every other active table, which for a single-floor
+      // restaurant is exactly every active table, as before.
+      const otherLiveFloors = await transaction.floorPlan.findMany({
+        where: {
+          restaurantId: scope.restaurantId,
+          archivedAt: null,
+          id: { not: plan.id },
+          activeVersionId: { not: null },
+        },
+        select: {
+          name: true,
+          activeVersion: {
+            select: {
+              elements: {
+                where: { diningTableId: { not: null } },
+                select: { diningTableId: true, diningTable: { select: { label: true, active: true, archivedAt: true } } },
+              },
+            },
+          },
+        },
+      });
+      const otherFloorByTableId = new Map<string, string>();
+      const otherFloorByLabel = new Map<string, string>();
+      for (const floor of otherLiveFloors) {
+        for (const element of floor.activeVersion?.elements ?? []) {
+          if (!element.diningTableId || !element.diningTable?.active || element.diningTable.archivedAt) continue;
+          otherFloorByTableId.set(element.diningTableId, floor.name);
+          otherFloorByLabel.set(element.diningTable.label.trim().toLocaleLowerCase("en"), floor.name);
+        }
+      }
+      for (const element of tableElements) {
+        const takenBy =
+          (element.tableId ? otherFloorByTableId.get(element.tableId) : undefined) ??
+          otherFloorByLabel.get(element.label.trim().toLocaleLowerCase("en"));
+        if (takenBy) {
+          throw new OperationsRepositoryError(
+            "VALIDATION",
+            `${element.label} is already a table on ${takenBy}. Table labels must be unique across floors.`,
+          );
+        }
+      }
+
       const existingTables = await transaction.diningTable.findMany({
         where: {
           restaurantId: scope.restaurantId,
@@ -413,7 +458,7 @@ export async function publishFloorPlan(
       const existingById = new Map(existingTables.map((table) => [table.id, table]));
       const existingByLabel = new Map(
         existingTables
-          .filter((table) => table.active && !table.archivedAt)
+          .filter((table) => table.active && !table.archivedAt && !otherFloorByTableId.has(table.id))
           .map((table) => [
             table.label.trim().toLocaleLowerCase("en"),
             table,
@@ -449,7 +494,7 @@ export async function publishFloorPlan(
         select: { id: true, label: true, capacity: true },
       });
       const removedTableIds = activeTables
-        .filter((table) => !publishedTableIds.has(table.id))
+        .filter((table) => !publishedTableIds.has(table.id) && !otherFloorByTableId.has(table.id))
         .map((table) => table.id);
       const changedTableIds = tableElements
         .map((element) => canonicalTableIdByElementId.get(element.id) as string);
@@ -762,6 +807,111 @@ export async function restoreFloorPlanVersion(
         entityId: plan.id,
         payload: input,
         result: { versionId: version.id },
+      });
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    throw errorFromUnknown(error);
+  }
+}
+
+// Tables that still matter for service: someone is seated or about to be, the
+// table is held, or a booking is assigned to it. Deleting their floor would
+// strand that party, so the delete is refused until they're cleared or moved.
+const BUSY_TABLE_STATUSES = ["HELD", "RESERVED", "OCCUPIED", "CLEANING"] as const;
+
+export async function archiveFloorPlan(
+  client: PrismaClient,
+  scope: PrismaOperationsScope,
+  input: { commandId: string; planId: string },
+) {
+  if (!UUID_PATTERN.test(input.commandId) || !UUID_PATTERN.test(input.planId)) {
+    invalid("Floor plan is invalid.");
+  }
+  try {
+    await client.$transaction(async (transaction) => {
+      if (await findFloorCommandReplay(transaction, scope, input.commandId, "ARCHIVE_FLOOR_PLAN", input)) {
+        return;
+      }
+      const plan = await transaction.floorPlan.findFirst({
+        where: { ...scopedPlanWhere(scope, input.planId), archivedAt: null },
+        select: {
+          id: true,
+          name: true,
+          activeVersion: {
+            select: { elements: { where: { diningTableId: { not: null } }, select: { diningTableId: true } } },
+          },
+        },
+      });
+      if (!plan) {
+        throw new OperationsRepositoryError("FORBIDDEN", "You cannot delete this floor.");
+      }
+      const remaining = await transaction.floorPlan.count({
+        where: { restaurantId: scope.restaurantId, archivedAt: null, id: { not: plan.id } },
+      });
+      if (remaining < 1) {
+        throw new OperationsRepositoryError(
+          "VALIDATION",
+          "A restaurant needs at least one floor. Create another floor before deleting this one.",
+        );
+      }
+
+      const tableIds = [...new Set(
+        (plan.activeVersion?.elements ?? []).map((element) => element.diningTableId as string),
+      )];
+      const tables = await transaction.diningTable.findMany({
+        where: { restaurantId: scope.restaurantId, id: { in: tableIds }, active: true, archivedAt: null },
+        select: { id: true, label: true, currentStatus: true },
+      });
+      const now = new Date();
+      const [sessions, reservations] = await Promise.all([
+        transaction.diningSession.findMany({
+          where: {
+            restaurantId: scope.restaurantId,
+            diningTableId: { in: tables.map((table) => table.id) },
+            status: { in: ["ACTIVE", "CLEARED", "CLEANING"] },
+          },
+          select: { diningTableId: true },
+        }),
+        transaction.reservation.findMany({
+          where: {
+            restaurantId: scope.restaurantId,
+            assignedTableId: { in: tables.map((table) => table.id) },
+            status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
+            // Older open bookings are stale, not upcoming service.
+            scheduledAt: { gte: new Date(now.getTime() - 24 * 60 * 60_000) },
+          },
+          select: { assignedTableId: true },
+        }),
+      ]);
+      const busyIds = new Set<string>([
+        ...tables
+          .filter((table) => (BUSY_TABLE_STATUSES as readonly string[]).includes(table.currentStatus))
+          .map((table) => table.id),
+        ...sessions.map((session) => session.diningTableId),
+        ...reservations.flatMap((reservation) => (reservation.assignedTableId ? [reservation.assignedTableId] : [])),
+      ]);
+      if (busyIds.size) {
+        const labels = tables.filter((table) => busyIds.has(table.id)).map((table) => table.label);
+        throw new OperationsRepositoryError(
+          "CONFLICT",
+          `${plan.name} still has tables in use or booked (${labels.join(", ")}). Clear them or move their reservations, then delete the floor.`,
+        );
+      }
+
+      // Soft delete: history, analytics and past bookings keep their links.
+      await transaction.floorPlan.update({ where: { id: plan.id }, data: { archivedAt: now } });
+      if (tables.length) {
+        await transaction.diningTable.updateMany({
+          where: { restaurantId: scope.restaurantId, id: { in: tables.map((table) => table.id) } },
+          data: { active: false, archivedAt: now },
+        });
+      }
+      await recordFloorCommand(transaction, scope, {
+        commandId: input.commandId,
+        commandType: "ARCHIVE_FLOOR_PLAN",
+        entityId: plan.id,
+        payload: input,
+        result: { planId: plan.id },
       });
     }, { isolationLevel: "Serializable" });
   } catch (error) {

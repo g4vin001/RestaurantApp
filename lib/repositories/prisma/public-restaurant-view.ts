@@ -102,14 +102,18 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
   };
 
   const base = selectPublicRestaurantState(assembled, now);
-  const publicFloor = buildPublicFloor(
-    restaurant.floorPlans?.[0],
-    restaurant.reservations ?? [],
-  );
+  // Every published floor is live; customers switch between them.
+  const publicFloors = (restaurant.floorPlans ?? []).flatMap((plan) => {
+    const floor = buildPublicFloor(plan, restaurant.reservations ?? []);
+    return floor ? [floor] : [];
+  });
   const available = restaurant.diningTables.filter(
     (table) => table.currentStatus === "AVAILABLE",
   );
-  const floorPublishedAt = publicFloor?.publishedAt;
+  const floorPublishedAt = publicFloors
+    .map((floor) => floor.publishedAt)
+    .sort()
+    .at(-1);
   const lastUpdatedAt =
     floorPublishedAt && Date.parse(floorPublishedAt) > Date.parse(base.lastUpdatedAt)
       ? floorPublishedAt
@@ -127,7 +131,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     timezone: restaurant.timezone || "Asia/Manila",
     ...base,
     lastUpdatedAt,
-    publicFloor,
+    publicFloors,
     availableSeatCapacity: available.reduce(
       (sum, table) => sum + table.capacity,
       0,
@@ -140,11 +144,11 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     ).length,
     // Mirrors what the map actually shows when a floor is published, so the
     // count and the blue tables can't disagree.
-    reservedTables:
-      publicFloor?.elements.filter(
+    reservedTables: publicFloors.length
+      ? publicFloors.flatMap((floor) => floor.elements).filter(
         (element) => element.type === "TABLE" && element.status === "RESERVED",
-      ).length ??
-      restaurant.diningTables.filter(
+      ).length
+      : restaurant.diningTables.filter(
         (table) => table.currentStatus === "RESERVED",
       ).length,
   };
@@ -202,8 +206,7 @@ export async function fetchPublicRestaurantBySlug(
           archivedAt: null,
           activeVersionId: { not: null },
         },
-        orderBy: { updatedAt: "desc" },
-        take: 1,
+        orderBy: { createdAt: "asc" },
         select: {
           id: true,
           name: true,

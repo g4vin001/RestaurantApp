@@ -16,7 +16,7 @@ import { useDemo } from "@/components/demo/DemoProvider";
 import { FloorMapCanvas } from "@/components/manager/FloorMapCanvas";
 import { StatusPill } from "@/components/manager/StatusPill";
 import { minutesBetween } from "@/lib/domain/analytics";
-import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
+import { getLiveFloors } from "@/lib/domain/floor-plan";
 import { correctionReasonFromNote, latestTableEvent } from "@/lib/domain/table-correction";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
@@ -326,7 +326,8 @@ export function LiveFloor() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const now = useLiveNow(30_000, state.lastUpdatedAt, renderedAt);
-  const version = useMemo(() => getActiveFloorVersion(state), [state]);
+  const floors = useMemo(() => getLiveFloors(state), [state]);
+  const version = floors[0]?.version;
   const activeTables = state.tables.filter((table) => table.active);
 
   useEffect(() => {
@@ -375,10 +376,11 @@ export function LiveFloor() {
             Live floor
           </h1>
           <p className="mt-2 text-sm text-stone-500">
-            Published{" "}
-            {version
-              ? `version ${version.version} · ${version.name}`
-              : "floor unavailable"}
+            {floors.length > 1
+              ? `${floors.length} live floors`
+              : version
+                ? `Published version ${version.version} · ${version.name}`
+                : "Published floor unavailable"}
             . Draft edits do not appear here.
           </p>
         </div>

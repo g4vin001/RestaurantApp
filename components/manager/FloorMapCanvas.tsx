@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { getActiveFloorVersion } from "@/lib/domain/floor-plan";
+import { useEffect, useState, type ReactNode } from "react";
+import { getLiveFloors } from "@/lib/domain/floor-plan";
 import { tableStatusLabel } from "@/lib/domain/transitions";
 import type {
   DemoState,
@@ -112,7 +112,20 @@ export function FloorMapCanvas({
   onSelectTable: (tableId: string) => void;
   emptyState?: ReactNode;
 }) {
-  const version = getActiveFloorVersion(state);
+  const floors = getLiveFloors(state);
+  const [floorId, setFloorId] = useState<string | null>(null);
+  // Follow the table being acted on (a ?table= link, a selection or a seating
+  // recommendation) to whichever floor it's on.
+  const focusTableId = selectedIds[0] ?? recommendedTableIds[0];
+  useEffect(() => {
+    if (!focusTableId) return;
+    const owner = getLiveFloors(state).find((floor) =>
+      floor.version.elements.some((element) => element.tableId === focusTableId),
+    );
+    if (owner) setFloorId(owner.id);
+  }, [focusTableId, state]);
+  const current = floors.find((floor) => floor.id === floorId) ?? floors[0];
+  const version = current?.version;
   if (!version) {
     return (
       emptyState ?? (
@@ -124,6 +137,25 @@ export function FloorMapCanvas({
   }
   return (
     <div className="overflow-auto bg-stone-200 p-5">
+      {floors.length > 1 && (
+        <div role="tablist" aria-label="Floors" className="mx-auto mb-3 flex max-w-[1000px] flex-wrap gap-2">
+          {floors.map((floor) => {
+            const active = floor.id === current.id;
+            return (
+              <button
+                key={floor.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setFloorId(floor.id)}
+                className={`min-h-9 rounded-full px-4 text-sm font-semibold transition ${active ? "bg-stone-900 text-white" : "bg-white text-stone-700 hover:bg-stone-100"}`}
+              >
+                {floor.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="relative mx-auto aspect-[8/5] min-w-[760px] max-w-[1000px] overflow-hidden border-2 border-stone-300 bg-[#fffdf8] shadow-inner">
         {version.elements
           .filter((element) => element.visible && element.type !== "TABLE")
