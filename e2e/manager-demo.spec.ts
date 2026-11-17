@@ -148,3 +148,19 @@ test("analytics stays readable on phones and exposes exact hourly counts", async
   await page.setViewportSize({ width: 360, height: 800 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
+
+test("reservation settings accept a cleared field and persist a new minimum notice", async ({ page }) => {
+  await resetDemo(page);
+  await page.goto("/manager/settings");
+  const duration = page.getByRole("spinbutton", { name: /Reservation length/ });
+  const lead = page.getByRole("spinbutton", { name: /Minimum online reservation notice/ });
+  await duration.fill("");
+  await expect(duration).toHaveValue("");
+  await duration.fill("120");
+  await lead.fill("180");
+  await page.getByRole("button", { name: "Save settings", exact: true }).click();
+  await expect(page.getByText("Restaurant settings saved.", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(duration).toHaveValue("120");
+  await expect(lead).toHaveValue("180");
+});

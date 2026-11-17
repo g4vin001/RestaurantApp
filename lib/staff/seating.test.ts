@@ -21,9 +21,11 @@ describe("staff seating options", () => {
     expect(staffSeatingOptions(state, { partySize: 2 }, now)).toEqual([]);
     expect(staffSeatingOptions(state, { partySize: 2 }, now, "booking")[0]?.tableIds).toEqual(["T1"]);
   });
-  it("blocks a pending booking on either half of a proposed pair", () => {
-    const state: SeatingRecommendationState = { tables: [table("T1"), table("T2")], reservations: [{ id: "booking", tableId: "T2", status: "CONFIRMED", scheduledAt: new Date(now.getTime() + 90 * 60_000).toISOString() }] };
+  it("blocks an overlap on either half of a pair and allows the exact end boundary", () => {
+    const state: SeatingRecommendationState = { tables: [table("T1"), table("T2")], reservations: [{ id: "booking", tableId: "T2", status: "CONFIRMED", scheduledAt: new Date(now.getTime() + 89 * 60_000).toISOString() }] };
     expect(staffSeatingOptions(state, { partySize: 6 }, now)).toEqual([]);
+    state.reservations[0].scheduledAt = new Date(now.getTime() + 90 * 60_000).toISOString();
+    expect(staffSeatingOptions(state, { partySize: 6 }, now)[0]?.tableIds).toEqual(["T1", "T2"]);
   });
   it("keeps both table IDs in form submissions and accepts older single-table forms", () => {
     const pair = new FormData();

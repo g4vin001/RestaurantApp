@@ -14,6 +14,7 @@ export function StaffOperationsRefresh({
     : connection === "stale" ? "Updates unconfirmed — retry refresh"
       : connection === "refreshing" ? "Updating floor and guests…"
         : connection === "live" ? state.changedElsewhere ? "Updated from another device" : "Live across devices"
+          : connection === "periodic" ? "Status checked — periodic updates"
           : "Reconnecting to live updates…";
 
   return (

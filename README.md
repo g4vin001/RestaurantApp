@@ -72,7 +72,8 @@ revisioned, idempotent server commands. Table/session changes, combined seating,
 queue, reservations, Team records, settings, and floor drafts/publishing persist
 transactionally. Conflict and database failures never silently fall back to demo
 data. Private Realtime broadcasts invalidate manager/staff snapshots; public
-clients receive only safe projection invalidations.
+clients receive only safe projection invalidations. The visible manager
+workspace checks the database about every 15 seconds while Realtime is down.
 
 Team uses verified personal-account email whitelisting, restricted staff roles,
 and a shared restaurant PIN for deliberate clock-in through `/work`. `/ops`
@@ -95,16 +96,16 @@ npm run build
 
 `npm run test:e2e` starts the app in explicit demo mode on port 3100 and checks
 the manager shell, queue persistence, cross-tab synchronization, and mobile
-operation without requiring database credentials. Authenticated tenant and
-database command behavior is covered by the isolated Preview PostgreSQL
-integration suite. Full authenticated browser flows still require dedicated
-test accounts.
+operation without requiring database credentials. The PostgreSQL integration
+suite covers authenticated tenant and database command behavior. The
+authenticated GitHub Actions browser suite provisions local Supabase services
+and creates disposable manager, staff, and customer accounts.
 
 ## Available routes
 
 - `/` — customer restaurant feed
 - `/login` — log in or create a customer account; staff access is not publicly self-service
-- `/onboarding/restaurant` — authenticated first-restaurant creation; creates a new restaurant and OWNER membership
+- /onboarding/restaurant is the authenticated restaurant application. An admin reviews the submitted location and approves or declines the request.
 - `/restaurants/salu-salo` — sample restaurant detail
 - `/manager` — live manager overview (manager account, or explicit demo mode)
 - `/manager/floor` — interactive live floor and table transitions
@@ -124,7 +125,7 @@ restaurant's four-digit PIN; staff then clock in through `/work`.
 ## Manager and staff quick start
 
 1. Sign in with the restaurant owner's or manager's account and open `/manager`.
-   A first-time owner can create their restaurant at `/onboarding/restaurant`.
+   A first-time owner applies at `/onboarding/restaurant`. Approval creates the restaurant and grants the applicant owner access.
 2. In **Restaurant settings**, check the timezone, weekly service periods,
    holiday exceptions and walk-in switch. Save before taking bookings. Existing
    bookings remain actionable if you later change the hours; review affected
@@ -199,11 +200,12 @@ or incorrect count. This physical-device check cannot be replaced by CI.
 ## Customer updates and waitlist status
 
 The customer directory checks for updates every 12 seconds, restaurant details
-and My waitlist every 10 seconds, and reservations every 15 seconds while visible.
-Restaurant details and My waitlist also listen for privacy-safe public
-invalidations. Reconnect and returning to a visible tab trigger another check.
-The public projection keeps a short five-second cache; these are refresh
-intervals, not guaranteed delivery deadlines.
+and My waitlist and reservations every 10 seconds while visible. Restaurant
+details, My waitlist, and reservations for a single restaurant also listen
+for privacy-safe public invalidations. Reconnect and returning to a visible
+tab trigger another check. Public availability is queried for each refresh.
+Staff also check every 15 seconds while visible so an interrupted live
+subscription does not leave an open shift screen indefinitely stale.
 
 Customer badges confirm a new server response instead of treating a requested
 refresh as success. A live badge additionally requires a subscribed connection.

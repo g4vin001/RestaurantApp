@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { formatRestaurantDateTime } from "@/lib/time/restaurant-time";
 import type {
   PublicFloorElement,
   PublicFloorView,
@@ -30,16 +31,6 @@ const statusMeta: Record<
     className: "border-stone-300 bg-stone-100 text-stone-500",
   },
 };
-
-const timeFormatter = new Intl.DateTimeFormat("en-PH", {
-  timeZone: "Asia/Manila",
-  hour: "numeric",
-  minute: "2-digit",
-});
-
-function formatBookingTime(iso: string) {
-  return timeFormatter.format(new Date(iso));
-}
 
 function pct(value: number, total: number) {
   return `${(value / Math.max(1, total)) * 100}%`;
@@ -103,7 +94,7 @@ function StructureElement({
   );
 }
 
-export function PublicFloorMap({ floor, floorSwitcher }: { floor: PublicFloorView; floorSwitcher?: ReactNode }) {
+export function PublicFloorMap({ floor, floorSwitcher, timeZone }: { floor: PublicFloorView; floorSwitcher?: ReactNode; timeZone: string }) {
   const tables = floor.elements.filter(
     (element) => element.type === "TABLE" && element.status,
   );
@@ -117,7 +108,7 @@ export function PublicFloorMap({ floor, floorSwitcher }: { floor: PublicFloorVie
           <h2 className="mt-1 text-xl font-bold text-stone-950">{floor.name}</h2>
           <p className="mt-1 text-sm text-stone-500">
             Table colors show the restaurant&apos;s current public availability.
-            Hover or tap a table to see its bookings for the rest of today.
+            Hover or tap a table to see upcoming bookings.
           </p>
         </div>
         <p className="text-xs text-stone-400">Published layout v{floor.version}</p>
@@ -149,10 +140,10 @@ export function PublicFloorMap({ floor, floorSwitcher }: { floor: PublicFloorVie
             const status = table.status as PublicTableStatus;
             const meta = statusMeta[status];
             const bookings = table.upcomingReservations ?? [];
-            const times = bookings.map(formatBookingTime);
+            const times = bookings.map((time) => formatRestaurantDateTime(time, timeZone));
             const spokenBookings = times.length
               ? `Booked at ${times.join(", ")}.`
-              : "No bookings for the rest of today.";
+              : "No upcoming bookings in the next 12 hours.";
             // Flip the tooltip away from the nearest edge so it stays on screen.
             const alignRight = table.x / floor.logicalWidth > 0.6;
             const placeBelow = table.y / floor.logicalHeight < 0.35;
@@ -202,7 +193,7 @@ export function PublicFloorMap({ floor, floorSwitcher }: { floor: PublicFloorVie
                     {meta.label}
                   </p>
                   <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
-                    Booked later today
+                    Upcoming bookings
                   </p>
                   {times.length ? (
                     <ul className="mt-1 space-y-0.5">

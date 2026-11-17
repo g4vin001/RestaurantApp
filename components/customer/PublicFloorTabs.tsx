@@ -5,13 +5,14 @@ import { PublicFloorMap } from "@/components/customer/PublicFloorMap";
 import type { PublicFloorView } from "@/lib/customer/public-floor";
 
 // Restaurants with several floors show one at a time, with a switch between them.
-export function PublicFloorTabs({ floors }: { floors: PublicFloorView[] }) {
+export function PublicFloorTabs({ floors, timeZone }: { floors: PublicFloorView[]; timeZone: string }) {
   const [floorId, setFloorId] = useState(floors[0]?.id);
   const current = floors.find((floor) => floor.id === floorId) ?? floors[0];
   if (!current) return null;
   return (
     <PublicFloorMap
       floor={current}
+      timeZone={timeZone}
       floorSwitcher={floors.length > 1 && (
         <div role="tablist" aria-label="Floors" className="mt-4 flex flex-wrap gap-2">
           {floors.map((floor) => {

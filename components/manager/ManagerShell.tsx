@@ -22,9 +22,9 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useDemo } from "@/components/demo/DemoProvider";
+import { AccountIdentity } from "@/components/ui/AccountIdentity";
 import { formatLastUpdated } from "@/lib/helpers";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
-import { isTimestampStale } from "@/lib/time/restaurant-time";
 import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
 
 const navigation = [
@@ -56,11 +56,7 @@ function ShellContent({
   const [resetOpen, setResetOpen] = useState(false);
   const now = useLiveNow(30_000, state.lastUpdatedAt, renderedAt);
   const inService = isWithinServiceHours(state.restaurant, now);
-  const snapshotIsOld = isTimestampStale(
-    state.lastUpdatedAt,
-    now,
-    5 * 60_000,
-  );
+  const lastUpdate = formatLastUpdated(state.lastUpdatedAt, state.restaurant.timezone);
 
   const sidebar = (
     <>
@@ -234,32 +230,22 @@ function ShellContent({
           </button>
           <div className="hidden items-center gap-2 text-sm text-stone-500 sm:flex" role="status">
             <span className={`h-2 w-2 rounded-full ${connectionStatus === "live" ? "bg-emerald-500" : connectionStatus === "offline" ? "bg-rose-500" : "bg-amber-500"}`} />
-            {connectionStatus === "live" && !snapshotIsOld
-              ? `${changedOnAnotherDevice ? "Changed on another device · " : ""}Updated ${formatLastUpdated(state.lastUpdatedAt, state.restaurant.timezone)}`
+            {connectionStatus === "live"
+              ? `${changedOnAnotherDevice ? "Changed on another device · " : ""}Updated ${lastUpdate}`
               : connectionStatus === "offline"
                 ? "Offline · changes cannot be saved"
-                : connectionStatus === "stale" || snapshotIsOld
+                : connectionStatus === "stale"
                   ? "Data may be stale"
-                  : "Reconnecting…"}
+                  : connectionStatus === "periodic"
+                    ? `Periodic updates · Updated ${lastUpdate}`
+                    : "Reconnecting…"}
           </div>
           <div className="flex items-center gap-2">
             {state.restaurant.environment === "TEST" && <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800">Test restaurant</span>}
             <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
               {isDemoRepository ? "Demo data" : "Shared database"}
             </span>
-            {accountEmail && (
-              <span
-                className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-sm text-stone-700"
-                title={`Signed in as ${accountEmail}`}
-              >
-                <CircleUserRound size={16} className="shrink-0" aria-hidden />
-                <span className="sr-only">Signed in as </span>
-                {/* Phones show only the icon; the email lives in the title and screen-reader text. */}
-                <span className="sr-only md:not-sr-only md:max-w-56 md:truncate">
-                  {accountEmail}
-                </span>
-              </span>
-            )}
+            {accountEmail && <AccountIdentity email={accountEmail} />}
             <Link
               href="/"
               className="rounded-lg border border-stone-200 p-2.5 text-stone-700 hover:bg-stone-50 hover:text-stone-950"

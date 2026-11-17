@@ -1,4 +1,5 @@
 import type { DemoState, TableSession } from "@/lib/domain/types";
+import { reservationsHoldingTables } from "@/lib/domain/booking-conflicts";
 import {
   restaurantDateParts,
   startOfRestaurantDay,
@@ -66,7 +67,7 @@ function average(values: number[]) {
     : null;
 }
 
-export function estimateCurrentWait(state: DemoState) {
+export function estimateCurrentWait(state: DemoState, reservedForBookings: ReadonlySet<string> = new Set()) {
   const waiting = state.queue.filter((entry) =>
     ["WAITING", "CALLED"].includes(entry.status),
   );
@@ -76,7 +77,7 @@ export function estimateCurrentWait(state: DemoState) {
     0,
   );
   const availableSeats = state.tables
-    .filter((table) => table.active && table.status === "AVAILABLE")
+    .filter((table) => table.active && table.status === "AVAILABLE" && !reservedForBookings.has(table.id))
     .reduce((sum, table) => sum + table.capacity, 0);
   if (availableSeats >= guestsWaiting) return 5;
   const occupiedShare =
@@ -90,9 +91,11 @@ export function estimateCurrentWait(state: DemoState) {
 
 export function deriveOverview(state: DemoState, now = new Date()) {
   const activeTables = state.tables.filter((table) => table.active);
+  const reservedForBookings = reservationsHoldingTables(state.reservations, now, state.restaurant.reservationDurationMinutes);
   const counts = activeTables.reduce<Record<string, number>>(
     (result, table) => {
-      result[table.status] = (result[table.status] ?? 0) + 1;
+      const status = table.status === "AVAILABLE" && reservedForBookings.has(table.id) ? "RESERVED" : table.status;
+      result[status] = (result[status] ?? 0) + 1;
       return result;
     },
     {},
@@ -131,7 +134,7 @@ export function deriveOverview(state: DemoState, now = new Date()) {
       ? Math.round(((counts.OCCUPIED ?? 0) / activeTables.length) * 100)
       : null,
     queueCount: waiting.length,
-    estimatedWaitMinutes: estimateCurrentWait(state),
+    estimatedWaitMinutes: estimateCurrentWait(state, reservedForBookings),
     longestWaiting,
     longestWaitMinutes: longestWaiting
       ? minutesBetween(longestWaiting.joinedAt, now.toISOString())

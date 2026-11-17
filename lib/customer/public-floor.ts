@@ -134,6 +134,7 @@ function groupReservationsByTable(reservations: PublicReservationSource[]) {
 export function buildPublicFloor(
   plan: PublicFloorSource | null | undefined,
   reservations: PublicReservationSource[] = [],
+  liveStatuses?: ReadonlyMap<string, PublicTableStatus>,
 ): PublicFloorView | null {
   const version = plan?.activeVersion;
   if (!plan || !version) return null;
@@ -148,12 +149,8 @@ export function buildPublicFloor(
       if (!table || !table.active || table.archivedAt) continue;
       const upcoming = reservationsByTable.get(table.id) ?? [];
       const liveStatus = toPublicTableStatus(table.currentStatus);
-      // A booking only recolors a table that is otherwise free. A table in use,
-      // being prepared, or out of service keeps its live colour — what is
-      // happening right now is the more useful signal for someone deciding
-      // whether to walk in — and its bookings still show on hover.
-      const status =
-        liveStatus === "AVAILABLE" && upcoming.length ? "RESERVED" : liveStatus;
+      // A booked-later time in the detail card is separate from the live status.
+      const status = liveStatuses?.get(table.id) ?? liveStatus;
       elements.push({
         id: element.stableElementId,
         type: "TABLE",

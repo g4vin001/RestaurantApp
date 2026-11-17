@@ -1,14 +1,10 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { ensureProfile } from "@/lib/auth/profile";
-import {
-  createRestaurantSlug,
-  validateRestaurantSetup,
-} from "@/lib/auth/restaurant-onboarding";
+import { validateRestaurantApplication } from "@/lib/auth/restaurant-onboarding";
 import { prisma } from "@/lib/prisma";
-import { createOwnedRestaurant } from "@/lib/repositories/prisma/owner-onboarding";
+import { submitRestaurantApplication } from "@/lib/repositories/prisma/restaurant-applications";
 import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 
@@ -16,11 +12,11 @@ export type RestaurantSetupState = {
   error?: string;
 };
 
-export async function createRestaurantForOwner(
+export async function applyToListRestaurant(
   _previousState: RestaurantSetupState,
   formData: FormData,
 ): Promise<RestaurantSetupState> {
-  const validation = validateRestaurantSetup(formData);
+  const validation = validateRestaurantApplication(formData);
   if (!validation.ok) return { error: validation.error };
 
   const supabase = await createClient();
@@ -29,24 +25,17 @@ export async function createRestaurantForOwner(
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login?redirectTo=/onboarding/restaurant");
+  if (!user.email_confirmed_at) return { error: "Confirm your Halina email before applying." };
 
   try {
     await ensureProfile(user);
-    await createOwnedRestaurant(prisma, {
-      profileId: user.id,
-      name: validation.input.name,
-      location: validation.input.location,
-      slug: createRestaurantSlug(
-        validation.input.name,
-        randomUUID().replaceAll("-", "").slice(0, 8),
-      ),
-    });
+    await submitRestaurantApplication(prisma, user.id, validation.input);
   } catch (error) {
     const reference = reportDataError("owner-onboarding", error);
     return {
-      error: `We could not create the restaurant right now. Please try again. Support reference: ${reference}`,
+      error: "We could not submit the application right now. Please try again. Support reference: " + reference,
     };
   }
 
-  redirect("/manager");
+  redirect("/onboarding/restaurant");
 }

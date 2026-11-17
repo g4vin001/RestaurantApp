@@ -19,6 +19,7 @@ import { minutesBetween } from "@/lib/domain/analytics";
 import { getLiveFloors } from "@/lib/domain/floor-plan";
 import { correctionReasonFromNote, latestTableEvent } from "@/lib/domain/table-correction";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
+import { reservationsHoldingTables } from "@/lib/domain/booking-conflicts";
 import { useLiveNow } from "@/lib/hooks/use-live-now";
 import { useTableCorrection } from "@/lib/hooks/use-table-correction";
 import { formatRestaurantTime } from "@/lib/time/restaurant-time";
@@ -34,10 +35,12 @@ function TableDetailPanel({
   events,
   onChange,
   onCorrect,
+  reservedForBooking,
 }: {
   table: DiningTable;
   now: Date;
   timeZone: string;
+  reservedForBooking: boolean;
   events: Array<{
     id: string;
     previousStatus: TableStatus;
@@ -130,7 +133,7 @@ function TableDetailPanel({
             {table.zone} · {table.capacity} seats
           </p>
         </div>
-        <StatusPill status={table.status} />
+        <StatusPill status={reservedForBooking ? "RESERVED" : table.status} />
       </div>
       <div className="mt-6 rounded-xl bg-stone-50 p-4">
         <p className="text-xs font-medium text-stone-500">
@@ -140,6 +143,9 @@ function TableDetailPanel({
           {minutesBetween(table.statusChangedAt, now.toISOString())} min
         </p>
       </div>
+      {reservedForBooking && (
+        <p className="mt-3 text-sm text-stone-600">This table has a booking in the current seating window. Use Reservations to seat the booking.</p>
+      )}
       <div className="mt-6">
         <p className="text-sm font-semibold text-stone-900">
           Available actions
@@ -329,6 +335,7 @@ export function LiveFloor() {
   const floors = useMemo(() => getLiveFloors(state), [state]);
   const version = floors[0]?.version;
   const activeTables = state.tables.filter((table) => table.active);
+  const reservedTableIds = reservationsHoldingTables(state.reservations, now, state.restaurant.reservationDurationMinutes);
 
   useEffect(() => {
     const requested = params.get("table");
@@ -408,6 +415,7 @@ export function LiveFloor() {
             <FloorMapCanvas
               state={state}
               activeTables={activeTables}
+              reservedTableIds={reservedTableIds}
               selectedIds={selected ? [selected.id] : []}
               onSelectTable={(tableId) => setSelectedId(tableId)}
             />
@@ -446,7 +454,7 @@ export function LiveFloor() {
                       min
                     </p>
                   </div>
-                  <StatusPill status={table.status} />
+                  <StatusPill status={table.status === "AVAILABLE" && reservedTableIds.has(table.id) ? "RESERVED" : table.status} />
                 </button>
               ))}
             </div>
@@ -459,6 +467,7 @@ export function LiveFloor() {
               table={selected}
               now={now}
               timeZone={state.restaurant.timezone}
+              reservedForBooking={selected.status === "AVAILABLE" && reservedTableIds.has(selected.id)}
               events={state.events.filter(
                 (event) => event.tableId === selected.id,
               )}

@@ -285,13 +285,22 @@ function ReservationForm({
         />
       </label>
       <label className={labelClass}>
-        Notes
+        Internal notes
         <textarea
           name="notes"
           defaultValue={reservation?.notes}
           className={`${inputClass} min-h-20 py-2`}
         />
       </label>
+      {reservation?.hasCustomerAccount && <label className={labelClass}>
+        Note to customer
+        <textarea
+          name="customerNote"
+          maxLength={500}
+          defaultValue={reservation.customerNote}
+          className={inputClass + " min-h-20 py-2"}
+        />
+      </label>}
       <div className="flex justify-end gap-3 pt-2">
         <button
           type="button"
@@ -472,6 +481,7 @@ export function QueueManager() {
       tableId: String(form.get("tableId") ?? "") || undefined,
       contact: String(form.get("contact") ?? ""),
       notes: String(form.get("notes") ?? ""),
+      customerNote: form.get("customerNote")?.toString(),
     };
     const result =
       reservationModal && reservationModal !== "new"
@@ -866,6 +876,9 @@ export function QueueManager() {
                         <p className="mt-2 text-xs font-medium text-rose-700">
                           Cancelled: {reservation.cancellationReason}
                         </p>
+                      )}
+                      {reservation.customerNote && (
+                        <p className="mt-2 text-xs text-stone-500">Note to customer · {reservation.customerNote}</p>
                       )}
                     </div>
                   </div>

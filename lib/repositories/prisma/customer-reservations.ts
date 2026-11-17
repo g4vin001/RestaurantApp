@@ -1,6 +1,8 @@
 import "server-only";
 import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
+import { overlappingReservationStarts } from "@/lib/domain/booking-conflicts";
+import { reservationNoticeError } from "@/lib/customer/reservation-booking";
 import {
   fitsWithinServiceHours,
   formatDurationMinutes,
@@ -9,12 +11,14 @@ import {
   isWithinServiceHours,
   readReservationAvailability,
   readReservationDurationMinutes,
+  readReservationLeadMinutes,
   readReservationNotes,
   readReservationWindows,
   reservationWindowLabels,
 } from "@/lib/domain/restaurant-schedule";
 import { restaurantDateKey } from "@/lib/time/restaurant-time";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
+import { loadPublishedFloors } from "@/lib/repositories/prisma/published-floors";
 
 export type CreateCustomerReservationInput = {
   restaurantId: string;
@@ -22,6 +26,7 @@ export type CreateCustomerReservationInput = {
   partyName: string;
   partySize: number;
   scheduledAt: Date;
+  requestedAt?: Date;
   contact?: string;
   notes?: string;
 };
@@ -39,6 +44,7 @@ export type CustomerReservation = {
   scheduledAt: Date;
   status: string;
   cancellationReason: string | null;
+  customerNote: string | null;
 };
 
 export async function fetchCustomerReservations(
@@ -54,6 +60,7 @@ export async function fetchCustomerReservations(
       scheduledAt: true,
       status: true,
       cancellationReason: true,
+      customerNote: true,
       restaurant: { select: { name: true, slug: true, timezone: true, operatingSettings: true } },
     },
     orderBy: { scheduledAt: "desc" },
@@ -70,6 +77,7 @@ export async function fetchCustomerReservations(
     scheduledAt: reservation.scheduledAt,
     status: reservation.status,
     cancellationReason: reservation.cancellationReason,
+    customerNote: reservation.customerNote,
   }));
 }
 
@@ -108,6 +116,10 @@ async function attemptCreate(
         );
       }
       const settings = asRecord(restaurant[0].operatingSettings);
+      if (input.requestedAt) {
+        const noticeError = reservationNoticeError(input.scheduledAt, input.requestedAt, readReservationLeadMinutes(settings));
+        if (noticeError) throw new OperationsRepositoryError("VALIDATION", noticeError);
+      }
       // Read under the row lock, so a manager turning reservations off or
       // blocking this date is never raced by a request saved just after it.
       const availability = readReservationAvailability(settings);
@@ -137,26 +149,45 @@ async function attemptCreate(
         throw new OperationsRepositoryError("VALIDATION", `Reservations here last ${length} and must finish by closing time. Choose a start at least ${length} before the restaurant closes.`);
       }
 
-      const capacity = await tx.diningTable.aggregate({
-        where: { restaurantId: input.restaurantId, active: true, archivedAt: null },
-        _sum: { capacity: true },
+      const [tables, floors, booked] = await Promise.all([
+        tx.diningTable.findMany({
+          where: { restaurantId: input.restaurantId, active: true, archivedAt: null, currentStatus: { not: "OUT_OF_SERVICE" } },
+          select: { id: true, capacity: true, zone: true },
+        }),
+        loadPublishedFloors(tx, input.restaurantId),
+        tx.reservation.findMany({
+          where: {
+            restaurantId: input.restaurantId,
+            status: { in: [...ACTIVE_STATUSES] },
+            scheduledAt: overlappingReservationStarts(input.scheduledAt, reservationMinutes),
+          },
+          select: {
+            partySize: true,
+            assignedTableId: true,
+            seatingAssignments: {
+              where: { status: "ACTIVE" },
+              select: { tables: { select: { diningTableId: true } } },
+            },
+          },
+        }),
+      ]);
+      const totalCapacity = tables.reduce((total, table) => total + table.capacity, 0);
+      const bookedPartySize = booked.reduce((total, booking) => total + booking.partySize, 0);
+      const floorIds = new Map(floors.flatMap((floor) => floor.tableIds.map((id) => [id, floor.id] as const)));
+      const assignedTableIds = new Set(booked.flatMap((booking) => [
+        booking.assignedTableId,
+        ...booking.seatingAssignments.flatMap((assignment) => assignment.tables.map((table) => table.diningTableId)),
+      ]));
+      const seatingAreas = Map.groupBy(
+        tables.filter((table) => !assignedTableIds.has(table.id)),
+        (table) => JSON.stringify([floorIds.get(table.id) ?? null, table.zone]),
+      );
+      const fits = Array.from(seatingAreas.values()).some((area) => {
+        const [largest = 0, next = 0] = area.map((table) => table.capacity).sort((a, b) => b - a);
+        return largest >= input.partySize || (input.partySize >= 3 && largest + next >= input.partySize);
       });
-      const totalCapacity = capacity._sum.capacity ?? 0;
 
-      const windowStart = new Date(input.scheduledAt.getTime() - reservationMinutes * 60_000);
-      const windowEnd = new Date(input.scheduledAt.getTime() + reservationMinutes * 60_000);
-
-      const booked = await tx.reservation.aggregate({
-        where: {
-          restaurantId: input.restaurantId,
-          status: { in: [...ACTIVE_STATUSES] },
-          scheduledAt: { gte: windowStart, lte: windowEnd },
-        },
-        _sum: { partySize: true },
-      });
-      const bookedPartySize = booked._sum.partySize ?? 0;
-
-      if (totalCapacity === 0 || bookedPartySize + input.partySize > totalCapacity) {
+      if (!fits || bookedPartySize + input.partySize > totalCapacity) {
         throw new OperationsRepositoryError(
           "CONFLICT",
           "This restaurant is fully booked around that time. Try a different time or a smaller party.",
@@ -175,6 +206,10 @@ async function attemptCreate(
           customerProfileId: input.customerProfileId,
         },
         select: { id: true },
+      });
+      await tx.restaurant.update({
+        where: { id: input.restaurantId },
+        data: { lastOperationalUpdateAt: new Date() },
       });
 
       return { reservationId: created.id };

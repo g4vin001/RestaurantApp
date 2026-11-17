@@ -27,22 +27,26 @@ import {
 import { clockOut } from "@/app/work/actions";
 import { StaffOperationsRefresh } from "@/components/staff/StaffOperationsRefresh";
 import { StaffOperationsProvider } from "@/components/staff/StaffOperationsProvider";
+import { StaffFloorTabs } from "@/components/staff/StaffFloorTabs";
 import { StaffSeatingPicker } from "@/components/staff/StaffSeatingPicker";
 import { StaffTableCorrection } from "@/components/staff/StaffTableCorrection";
 import type { SeatingRecommendationState } from "@/lib/domain/operations";
-import type { TableStatus } from "@/lib/domain/types";
+import { overlappingReservationStarts, reservationsHoldingTables, TABLE_HOLD_RESERVATION_STATUSES } from "@/lib/domain/booking-conflicts";
+import type { Reservation, TableStatus } from "@/lib/domain/types";
 import { TABLE_TRANSITIONS, tableStatusLabel } from "@/lib/domain/transitions";
 import { ClearFlash } from "@/components/ui/ClearFlash";
 import { ordinal } from "@/lib/helpers";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
+import { loadPublishedFloors } from "@/lib/repositories/prisma/published-floors";
 import { getCurrentWorkContext } from "@/lib/staff/access";
 import { STAFF_PERMISSION_LABELS } from "@/lib/staff/permissions";
 import {
   formatRestaurantDateTime,
   formatRestaurantTime,
   restaurantDateTimeInput,
-  startOfRestaurantDay,
+  restaurantDateKey,
+  restaurantDayRange,
 } from "@/lib/time/restaurant-time";
 import {
   addStaffQueueEntry,
@@ -57,15 +61,13 @@ import {
   updateStaffQueueStatus,
   updateStaffReservationStatus,
 } from "./actions";
+import { StaffReservationForm } from "@/components/staff/StaffReservationForm";
 
 export const dynamic = "force-dynamic";
 
 type QueueStatus = "WAITING" | "CALLED";
-type ReservationStatus =
-  | "PENDING_APPROVAL"
-  | "CONFIRMED"
-  | "ARRIVED"
-  | "SEATED";
+type ReservationStatus = Reservation["status"];
+const pastReservationStatuses = new Set<ReservationStatus>(["COMPLETED", "CANCELLED", "NO_SHOW"]);
 
 type FloorTable = {
   id: string;
@@ -111,6 +113,8 @@ type ShiftReservation = {
   notes: string | null;
   assignedTable: { label: string } | null;
   seatingAssignments: Array<{ tables: Array<{ diningTable: { label: string } }> }>;
+  customerNote: string | null;
+  customerProfileId: string | null;
 };
 
 const inputClass =
@@ -138,6 +142,9 @@ const reservationStatusStyle: Record<ReservationStatus, string> = {
   CONFIRMED: "border-violet-200 bg-violet-50 text-violet-800",
   ARRIVED: "border-sky-200 bg-sky-50 text-sky-800",
   SEATED: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  COMPLETED: "border-stone-200 bg-stone-100 text-stone-700",
+  CANCELLED: "border-rose-200 bg-rose-50 text-rose-800",
+  NO_SHOW: "border-rose-200 bg-rose-50 text-rose-800",
 };
 
 function tableActionLabel(status: TableStatus, currentStatus: TableStatus) {
@@ -149,12 +156,12 @@ function tableActionLabel(status: TableStatus, currentStatus: TableStatus) {
     return "Release table";
   }
   if (status === "OUT_OF_SERVICE") return "Take offline";
-  if (status === "RESERVED") return "Reserve";
   return "Hold";
 }
 
 function reservationStatusLabel(status: ReservationStatus) {
   if (status === "PENDING_APPROVAL") return "Needs approval";
+  if (status === "NO_SHOW") return "No-show";
   return status.charAt(0) + status.slice(1).toLowerCase();
 }
 
@@ -250,20 +257,23 @@ function TableCard({
   timeZone,
   canChange,
   canCorrect,
+  reservedForBooking,
 }: {
   table: FloorTable;
   now: Date;
   timeZone: string;
   canChange: boolean;
   canCorrect: boolean;
+  reservedForBooking: boolean;
 }) {
   const session = table.sessions[0];
   const guestName = session?.queueEntry?.partyName ?? session?.reservation?.partyName;
   const linkedLabels = session?.seatingAssignment?.tables.filter((item) => item.diningTable.id !== table.id).map((item) => item.diningTable.label) ?? [];
   const latestEvent = table.statusEvents?.[0];
+  const displayStatus = reservedForBooking ? "RESERVED" : table.currentStatus;
   return (
     <article className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      <div className={`h-1.5 ${table.currentStatus === "AVAILABLE" ? "bg-emerald-500" : table.currentStatus === "OCCUPIED" ? "bg-sky-500" : table.currentStatus === "CLEANING" ? "bg-orange-400" : table.currentStatus === "OUT_OF_SERVICE" ? "bg-rose-500" : "bg-violet-400"}`} />
+      <div className={`h-1.5 ${displayStatus === "AVAILABLE" ? "bg-emerald-500" : displayStatus === "OCCUPIED" ? "bg-sky-500" : displayStatus === "CLEANING" ? "bg-orange-400" : displayStatus === "OUT_OF_SERVICE" ? "bg-rose-500" : "bg-violet-400"}`} />
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -272,8 +282,8 @@ function TableCard({
               <UsersRound size={13} aria-hidden="true" /> {table.capacity} seats
             </p>
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${tableStatusStyle[table.currentStatus]}`}>
-            {tableStatusLabel(table.currentStatus)}
+          <span className={"rounded-full border px-2.5 py-1 text-[11px] font-bold " + tableStatusStyle[displayStatus]}>
+            {tableStatusLabel(displayStatus)}
           </span>
         </div>
 
@@ -289,9 +299,10 @@ function TableCard({
           )}
         </div>
 
+        {reservedForBooking && <p className="mt-2 text-xs text-stone-600">Seat this booking from Reservations.</p>}
         {canChange && TABLE_TRANSITIONS[table.currentStatus].length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
-            {TABLE_TRANSITIONS[table.currentStatus].map((status) => (
+            {TABLE_TRANSITIONS[table.currentStatus].filter((status) => !reservedForBooking || (status !== "OCCUPIED" && status !== "HELD")).map((status) => (
               <form key={status} action={transitionStaffTable} className="flex min-w-0 flex-1 gap-2">
                 <input type="hidden" name="tableId" value={table.id} />
                 <input type="hidden" name="status" value={status} />
@@ -300,6 +311,7 @@ function TableCard({
                   <input
                     name="partySize"
                     type="number"
+                    required
                     min={1}
                     max={table.capacity}
                     defaultValue={Math.min(2, table.capacity)}
@@ -456,7 +468,9 @@ function ReservationCard({
   canViewContacts: boolean;
 }) {
   const seatedLabels = reservation.seatingAssignments[0]?.tables.map((item) => item.diningTable.label).join(" + ");
-  const timeLabel = reservationTimeLabel(reservation.scheduledAt, now);
+  const timeLabel = pastReservationStatuses.has(reservation.status)
+    ? null
+    : reservationTimeLabel(reservation.scheduledAt, now);
   const needsAttention = reservation.status === "PENDING_APPROVAL" || reservation.status === "ARRIVED";
   return (
     <article className={`rounded-2xl border bg-white p-4 shadow-sm ${needsAttention ? "border-amber-200" : "border-stone-200"}`}>
@@ -468,7 +482,7 @@ function ReservationCard({
             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${reservationStatusStyle[reservation.status]}`}>{reservationStatusLabel(reservation.status)}</span>
           </div>
           <p className="mt-1 text-xs font-semibold text-stone-600">
-            {formatRestaurantDateTime(reservation.scheduledAt, timeZone)} · {timeLabel}
+            {formatRestaurantDateTime(reservation.scheduledAt, timeZone)}{timeLabel && " · " + timeLabel}
           </p>
           <p className="mt-1 text-xs text-stone-500">{reservation.partySize} guests · {seatedLabels || reservation.assignedTable?.label || "Table not assigned"}</p>
           {(canViewContacts && reservation.contact) || reservation.notes ? (
@@ -477,6 +491,7 @@ function ReservationCard({
               {reservation.notes && <p className="flex items-center gap-1.5"><Coffee size={13} /> {reservation.notes}</p>}
             </div>
           ) : null}
+          {reservation.customerNote && <p className="mt-2 text-xs text-stone-600">Note to customer · {reservation.customerNote}</p>}
         </div>
       </div>
 
@@ -527,7 +542,7 @@ function ReservationCard({
             <span className="inline-flex items-center gap-1.5"><Edit3 size={13} /> Edit or resolve</span>
             <ChevronDown size={14} className="transition group-open:rotate-180" />
           </summary>
-          <form action={editStaffReservation} className="mt-3 grid gap-2 sm:grid-cols-2">
+          <StaffReservationForm saveAction={editStaffReservation} className="mt-3 grid gap-2 sm:grid-cols-2">
             <input type="hidden" name="reservationId" value={reservation.id} />
             <input type="hidden" name="expectedRevision" value={reservation.revision} />
             <input name="partyName" required maxLength={120} defaultValue={reservation.partyName} aria-label="Party name" className={compactInputClass} />
@@ -538,9 +553,13 @@ function ReservationCard({
               {tables.filter((table) => table.capacity >= reservation.partySize).map((table) => <option key={table.id} value={table.id}>{table.label} · {table.capacity}</option>)}
             </select>
             {canViewContacts && <input name="contact" maxLength={160} defaultValue={reservation.contact ?? ""} placeholder="Contact" aria-label="Contact" className={compactInputClass} />}
-            <input name="notes" maxLength={2000} defaultValue={reservation.notes ?? ""} placeholder="Occasion, accessibility, seating notes…" aria-label="Notes" className={compactInputClass + (canViewContacts ? "" : " sm:col-span-2")} />
+            <input name="notes" maxLength={2000} defaultValue={reservation.notes ?? ""} placeholder="Occasion, accessibility, seating notes…" aria-label="Internal notes" className={compactInputClass + (canViewContacts ? "" : " sm:col-span-2")} />
+            {reservation.customerProfileId && <label className="text-xs font-bold text-stone-600 sm:col-span-2">
+              Note to customer
+              <input name="customerNote" maxLength={500} defaultValue={reservation.customerNote ?? ""} className={compactInputClass + " mt-1"} />
+            </label>}
             <button className={primaryButtonClass + " sm:col-span-2"}>Save reservation</button>
-          </form>
+          </StaffReservationForm>
           <div className="mt-2 flex flex-wrap gap-2">
             {(reservation.status === "PENDING_APPROVAL" ? (["CANCELLED"] as const) : (["CANCELLED", "NO_SHOW"] as const)).map((status) => (
               <form key={status} action={updateStaffReservationStatus}>
@@ -557,7 +576,9 @@ function ReservationCard({
   );
 }
 
-export default async function StaffOperationsPage() {
+export default async function StaffOperationsPage({ searchParams }: {
+  searchParams: Promise<{ reservationDate?: string | string[] }>;
+}) {
   const context = await getCurrentWorkContext();
   if (!context) redirect("/work");
 
@@ -570,13 +591,15 @@ export default async function StaffOperationsPage() {
   const canManageGuests = permissions.includes("MANAGE_QUEUE");
   const canSeat = permissions.includes("SEAT_PARTIES");
   const now = new Date();
-  const reservationWindowStart = startOfRestaurantDay(now, context.restaurantTimezone);
-  const reservationWindowEnd = new Date(reservationWindowStart.getTime() + 48 * 60 * 60_000);
-  // Bookings this close to now may still hold, or are about to claim, a table.
-  const reservationWindowMs = context.reservationDurationMinutes * 60_000;
-
+  const today = restaurantDateKey(now, context.restaurantTimezone);
+  const requestedDate = (await searchParams).reservationDate;
+  const requestedDay = typeof requestedDate === "string"
+    ? restaurantDayRange(requestedDate, context.restaurantTimezone)
+    : null;
+  const selectedDate = requestedDay && typeof requestedDate === "string" ? requestedDate : today;
+  const reservationDay = requestedDay ?? restaurantDayRange(today, context.restaurantTimezone)!;
   const needsTableData = canViewFloor || canManageGuests || canSeat;
-  const [error, message, tableResult, queueResult, reservationResult, seatingBookings] = await Promise.all([
+  const [error, message, tableResult, queueResult, reservationResult, seatingBookings, publishedFloors] = await Promise.all([
     readFlash("error"),
     readFlash("message"),
     needsTableData
@@ -636,11 +659,14 @@ export default async function StaffOperationsPage() {
           where: {
             restaurantId: context.restaurantId,
             OR: [
-              { status: { in: ["ARRIVED", "SEATED"] } },
-              {
-                status: { in: ["PENDING_APPROVAL", "CONFIRMED"] },
-                scheduledAt: { gte: reservationWindowStart, lt: reservationWindowEnd },
-              },
+              { scheduledAt: reservationDay },
+              // Keep overnight parties in today's view as they move into history.
+              ...(selectedDate === today ? [
+                { status: { in: ["ARRIVED", "SEATED"] as ReservationStatus[] } },
+                { scheduledAt: { lt: reservationDay.gte }, completedAt: reservationDay },
+                { scheduledAt: { lt: reservationDay.gte }, cancelledAt: reservationDay },
+                { scheduledAt: { lt: reservationDay.gte }, noShowAt: reservationDay },
+              ] : []),
             ],
           },
           orderBy: [{ scheduledAt: "asc" }, { partyName: "asc" }],
@@ -656,8 +682,10 @@ export default async function StaffOperationsPage() {
             contact: canViewContacts,
             notes: true,
             assignedTable: { select: { label: true } },
+            customerNote: true,
+            customerProfileId: true,
             seatingAssignments: {
-              where: { status: { in: ["ACTIVE", "CLEARING"] } },
+              where: { status: { in: ["ACTIVE", "CLEARING", "COMPLETED"] } },
               orderBy: { seatedAt: "desc" },
               take: 1,
               select: { tables: { select: { diningTable: { select: { label: true } } } } },
@@ -665,28 +693,33 @@ export default async function StaffOperationsPage() {
           },
         })
       : Promise.resolve([]),
-    canSeat ? prisma.reservation.findMany({
+    canSeat || canViewFloor ? prisma.reservation.findMany({
       where: {
         restaurantId: context.restaurantId,
-        status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
+        status: { in: [...TABLE_HOLD_RESERVATION_STATUSES] },
         assignedTableId: { not: null },
-        scheduledAt: { gte: new Date(now.getTime() - reservationWindowMs), lte: new Date(now.getTime() + reservationWindowMs) },
+        scheduledAt: overlappingReservationStarts(now, context.reservationDurationMinutes),
       },
       select: { id: true, assignedTableId: true, scheduledAt: true, status: true },
     }) : Promise.resolve([]),
+    canViewFloor || canSeat ? loadPublishedFloors(prisma, context.restaurantId) : Promise.resolve([]),
   ]);
 
   const tables = tableResult as FloorTable[];
   const queue = queueResult.map((entry) => ({ ...entry, contact: "contact" in entry ? entry.contact : null })) as QueueParty[];
-  const reservationPriority: Record<ReservationStatus, number> = { PENDING_APPROVAL: 0, ARRIVED: 1, CONFIRMED: 2, SEATED: 3 };
+  const reservationPriority: Record<ReservationStatus, number> = {
+    PENDING_APPROVAL: 0, ARRIVED: 1, CONFIRMED: 2, SEATED: 3, COMPLETED: 4, CANCELLED: 4, NO_SHOW: 4,
+  };
   const reservations = (reservationResult.map((entry) => ({ ...entry, contact: "contact" in entry ? entry.contact : null })) as ShiftReservation[]).sort(
     (left, right) => reservationPriority[left.status] - reservationPriority[right.status] || left.scheduledAt.getTime() - right.scheduledAt.getTime(),
   );
-  const availableTables = tables.filter((table) => table.currentStatus === "AVAILABLE");
+  const currentReservations = reservations.filter((reservation) => !pastReservationStatuses.has(reservation.status));
+  const reservationHistory = reservations.filter((reservation) => pastReservationStatuses.has(reservation.status));
+  const floorIds = new Map(publishedFloors.flatMap((floor) => floor.tableIds.map((tableId) => [tableId, floor.id] as const)));
   const seatingState: SeatingRecommendationState = {
     restaurant: { reservationDurationMinutes: context.reservationDurationMinutes },
     tables: tables.map((table) => ({
-      id: table.id, label: table.label, capacity: table.capacity, zone: table.zone,
+      id: table.id, label: table.label, capacity: table.capacity, zone: table.zone, floorId: floorIds.get(table.id),
       active: true, status: table.currentStatus, statusChangedAt: table.updatedAt.toISOString(),
     })),
     reservations: seatingBookings.map((reservation) => ({
@@ -694,11 +727,27 @@ export default async function StaffOperationsPage() {
       status: reservation.status, scheduledAt: reservation.scheduledAt.toISOString(),
     })),
   };
-  const groupedTables = Map.groupBy(tables, (table) => table.zone || "Main");
+  const reservedTableIds = reservationsHoldingTables(seatingState.reservations, now, context.reservationDurationMinutes);
+  const availableTables = tables.filter((table) => table.currentStatus === "AVAILABLE" && !reservedTableIds.has(table.id));
+  const unassignedFloorId = "unassigned";
+  const tablesByFloor = Map.groupBy(tables, (table) => floorIds.get(table.id) ?? unassignedFloorId);
+  const floorSections = [
+    ...publishedFloors,
+    ...(tablesByFloor.has(unassignedFloorId) ? [{ id: unassignedFloorId, name: "Other tables" }] : []),
+  ].map(({ id, name }) => ({
+    id,
+    name,
+    content: Array.from(Map.groupBy(tablesByFloor.get(id) ?? [], (table) => table.zone || "Main")).map(([zone, zoneTables]) => (
+      <div key={zone}>
+        <div className="mb-3 flex items-center gap-2 text-sm font-bold text-stone-700"><MapPin size={15} className="text-emerald-700" /> {zone}<span className="text-xs font-normal text-stone-400">{zoneTables.length} tables</span></div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{zoneTables.map((table) => <TableCard key={table.id} table={table} now={now} timeZone={context.restaurantTimezone} canChange={canChangeTables} canCorrect={canCorrect} reservedForBooking={table.currentStatus === "AVAILABLE" && reservedTableIds.has(table.id)} />)}</div>
+      </div>
+    )),
+  }));
   const occupiedTables = tables.filter((table) => table.currentStatus === "OCCUPIED").length;
   const availableSeats = availableTables.reduce((sum, table) => sum + table.capacity, 0);
   const waitingGuests = queue.reduce((sum, entry) => sum + entry.partySize, 0);
-  const attentionReservations = reservations.filter((reservation) => {
+  const attentionReservations = currentReservations.filter((reservation) => {
     const difference = reservation.scheduledAt.getTime() - now.getTime();
     return reservation.status === "PENDING_APPROVAL" || reservation.status === "ARRIVED" || (difference >= -30 * 60_000 && difference <= 90 * 60_000);
   }).length;
@@ -728,7 +777,7 @@ export default async function StaffOperationsPage() {
         <nav className="flex-1 space-y-1 p-3" aria-label="Staff operations">
           <p className="px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300/70">This shift</p>
           {navigation.map(({ href, label, icon: Icon }) => (
-            <Link key={href} href={href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-white/10 hover:text-white"><Icon size={18} /> {label}</Link>
+            <a key={href} href={href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-white/10 hover:text-white"><Icon size={18} /> {label}</a>
           ))}
           <Link href="/work" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-white/10 hover:text-white"><CircleUserRound size={18} /> Shift access</Link>
         </nav>
@@ -762,7 +811,7 @@ export default async function StaffOperationsPage() {
             </div>
           </div>
           <nav className="flex gap-1 overflow-x-auto border-t border-stone-100 px-4 py-2 lg:hidden" aria-label="Staff workspace sections">
-            {navigation.map(({ href, label, icon: Icon }) => <Link key={href} href={href} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-bold text-stone-600 hover:bg-stone-100"><Icon size={14} /> {label}</Link>)}
+            {navigation.map(({ href, label, icon: Icon }) => <a key={href} href={href} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-bold text-stone-600 hover:bg-stone-100"><Icon size={14} /> {label}</a>)}
           </nav>
         </header>
 
@@ -799,22 +848,16 @@ export default async function StaffOperationsPage() {
           {canViewFloor && (
             <section id="floor" className="scroll-mt-32 pt-9">
               <SectionHeading eyebrow="Floor" title="Live table status" description={`${availableSeats} seats are currently available. Status changes update the manager workspace and every authorized staff device.`} />
-              <div className="mt-5 space-y-6">
-                {Array.from(groupedTables.entries()).map(([zone, zoneTables]) => (
-                  <div key={zone}>
-                    <div className="mb-3 flex items-center gap-2 text-sm font-bold text-stone-700"><MapPin size={15} className="text-emerald-700" /> {zone}<span className="text-xs font-normal text-stone-400">{zoneTables.length} tables</span></div>
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{zoneTables.map((table) => <TableCard key={table.id} table={table} now={now} timeZone={context.restaurantTimezone} canChange={canChangeTables} canCorrect={canCorrect} />)}</div>
-                  </div>
-                ))}
-                {tables.length === 0 && <EmptyState icon={Utensils} title="No published tables" detail="A manager needs to publish an active floor plan before table operations appear here." />}
-              </div>
+              {tables.length > 0 ? <StaffFloorTabs floors={floorSections} /> : (
+                <div className="mt-5"><EmptyState icon={Utensils} title="No published tables" detail="A manager needs to publish an active floor plan before table operations appear here." /></div>
+              )}
             </section>
           )}
 
           {canViewQueue && (
             <div className="grid gap-8 pt-10 xl:grid-cols-2">
               <section id="queue" className="scroll-mt-32">
-                <SectionHeading eyebrow="Front desk" title="Waitlist" description="Oldest parties stay at the top. Calling a party changes their shared status; it does not send a text message." />
+                <SectionHeading eyebrow="Front desk" title="Waitlist" description="Parties appear in queue order. Calling a party updates their waitlist status." />
                 {canManageGuests && (
                   <details className="group mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 shadow-sm" open={queue.length === 0}>
                     <summary className="flex min-h-13 cursor-pointer list-none items-center justify-between px-4 text-sm font-bold text-emerald-900"><span className="inline-flex items-center gap-2"><Plus size={16} /> Add a walk-in</span><ChevronDown size={16} className="transition group-open:rotate-180" /></summary>
@@ -833,11 +876,19 @@ export default async function StaffOperationsPage() {
               </section>
 
               <section id="reservations" className="scroll-mt-32">
-                <SectionHeading eyebrow="Bookings" title="Today & next shift" description="Today and tomorrow in restaurant time. Approvals and arrivals rise to the top of shift attention." />
+                <SectionHeading eyebrow="Bookings" title="Reservations" description="Browse by restaurant date. Today's view also shows parties still in service." />
+                <form action="/ops#reservations" method="get" className="mt-4 flex flex-wrap items-end gap-2">
+                  <label className="text-xs font-bold text-stone-600">
+                    Reservation date
+                    <input name="reservationDate" type="date" required defaultValue={selectedDate} key={selectedDate} className={inputClass + " mt-1"} />
+                  </label>
+                  <button className={secondaryButtonClass + " min-h-11"}>Show date</button>
+                  {selectedDate !== today && <Link href="/ops#reservations" prefetch={false} className={secondaryButtonClass + " min-h-11"}>Today</Link>}
+                </form>
                 {canManageGuests && (
                   <details className="group mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 shadow-sm">
                     <summary className="flex min-h-13 cursor-pointer list-none items-center justify-between px-4 text-sm font-bold text-violet-900"><span className="inline-flex items-center gap-2"><Plus size={16} /> Create a reservation</span><ChevronDown size={16} className="transition group-open:rotate-180" /></summary>
-                    <form action={addStaffReservation} className="grid gap-3 border-t border-violet-200 p-4 sm:grid-cols-2">
+                    <StaffReservationForm saveAction={addStaffReservation} className="grid gap-3 border-t border-violet-200 p-4 sm:grid-cols-2">
                       <label className="text-xs font-bold text-stone-600">Party name<input name="partyName" required maxLength={120} placeholder="Guest name" className={inputClass + " mt-1"} /></label>
                       <label className="text-xs font-bold text-stone-600">Party size<input name="partySize" type="number" required min={1} max={100} defaultValue={2} className={inputClass + " mt-1"} /></label>
                       <label className="text-xs font-bold text-stone-600">Date and time<input name="scheduledAt" type="datetime-local" required defaultValue={defaultReservationTime} className={inputClass + " mt-1"} /></label>
@@ -845,10 +896,16 @@ export default async function StaffOperationsPage() {
                       {canViewContacts && <label className="text-xs font-bold text-stone-600">Contact<input name="contact" maxLength={160} placeholder="Phone or email" className={inputClass + " mt-1"} /></label>}
                       <label className={`text-xs font-bold text-stone-600 ${canViewContacts ? "" : "sm:col-span-2"}`}>Reservation notes<input name="notes" maxLength={2000} placeholder="Occasion, accessibility, seating notes…" className={inputClass + " mt-1"} /></label>
                       <button className={primaryButtonClass + " sm:col-span-2 min-h-11"}><CalendarDays size={15} /> Create reservation</button>
-                    </form>
+                    </StaffReservationForm>
                   </details>
                 )}
-                <div className="mt-4 space-y-3">{reservations.map((reservation) => <ReservationCard key={reservation.id} reservation={reservation} now={now} timeZone={context.restaurantTimezone} tables={tables} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} />)}{reservations.length === 0 && <EmptyState icon={CalendarDays} title="No active bookings in this window" detail="Confirmed reservations and new customer requests will appear here." />}</div>
+                <div className="mt-4 space-y-3">{currentReservations.map((reservation) => <ReservationCard key={reservation.id} reservation={reservation} now={now} timeZone={context.restaurantTimezone} tables={tables} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} />)}{currentReservations.length === 0 && <EmptyState icon={CalendarDays} title="No active bookings for this date" detail="Confirmed reservations and new customer requests will appear here." />}</div>
+                {reservationHistory.length > 0 && (
+                  <section aria-label="Reservation history" className="mt-5 space-y-3">
+                    <h3 className="text-sm font-bold text-stone-800">Reservation history</h3>
+                    {reservationHistory.map((reservation) => <ReservationCard key={reservation.id} reservation={reservation} now={now} timeZone={context.restaurantTimezone} tables={tables} canManage={false} canSeat={false} canViewContacts={canViewContacts} />)}
+                  </section>
+                )}
               </section>
             </div>
           )}

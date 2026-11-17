@@ -12,6 +12,7 @@ import {
   readOperatingSchedule,
   readReservationAvailability,
   readReservationDurationMinutes,
+  readReservationLeadMinutes,
   readReservationNotes,
   readReservationWindows,
   restaurantServiceStatus,
@@ -95,6 +96,7 @@ export default async function BookReservationPage({
           defaultPartyName={profile.displayName}
           schedule={schedule}
           reservationDurationMinutes={readReservationDurationMinutes(asRecord(restaurant.operatingSettings))}
+          reservationLeadMinutes={readReservationLeadMinutes(asRecord(restaurant.operatingSettings))}
           blockedDates={availability.blockedDates}
           reservationWindows={readReservationWindows(asRecord(restaurant.operatingSettings))}
           timeZone={restaurant.timezone}

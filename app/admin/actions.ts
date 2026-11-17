@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import {
@@ -15,6 +16,8 @@ import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import { deleteAccountAsAdmin } from "@/lib/repositories/prisma/admin-accounts";
 import { createRestaurantAsAdmin, setRestaurantArchivedAsAdmin } from "@/lib/repositories/prisma/admin-restaurants";
+import { reviewRestaurantApplication } from "@/lib/repositories/prisma/restaurant-applications";
+import { OperationsRepositoryError } from "@/lib/repositories/operations";
 import { reportDataError } from "@/lib/server/data-error";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -73,6 +76,33 @@ export async function unlockAdminPanel(formData: FormData) {
   }
 
   await unlockAdminSession(user.id);
+  redirect("/admin");
+}
+
+export async function reviewRestaurantApplicationByAdmin(formData: FormData) {
+  const admin = await requireAdminUser();
+  if (!(await isAdminUnlocked(admin.id))) redirect("/admin");
+  const applicantId = formText(formData.get("applicantId"));
+  const decision = formData.get("decision");
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(applicantId) ||
+      (decision !== "APPROVED" && decision !== "DECLINED")) {
+    await setFlash("error", "Choose a pending restaurant application and a decision.");
+    redirect("/admin");
+  }
+  try {
+    await reviewRestaurantApplication(prisma, { applicantId, reviewedById: admin.id, decision });
+    revalidatePath("/admin");
+    revalidatePath("/onboarding/restaurant");
+    revalidatePath("/");
+    await setFlash("message", decision === "APPROVED" ? "Application approved." : "Application declined.");
+  } catch (error) {
+    if (error instanceof OperationsRepositoryError) {
+      await setFlash("error", error.message);
+    } else {
+      const reference = reportDataError("admin-restaurant-application", error);
+      await setFlash("error", "The decision could not be saved. Support reference: " + reference);
+    }
+  }
   redirect("/admin");
 }
 

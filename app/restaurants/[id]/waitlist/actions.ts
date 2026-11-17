@@ -76,6 +76,7 @@ export async function joinCustomerWaitlist(
         partySize,
         contact: contact || null,
         notes: notes || null,
+        customerSeatingNote: notes || null,
         promisedWaitMinutes,
         createdById: profile.id,
         source: "CUSTOMER",

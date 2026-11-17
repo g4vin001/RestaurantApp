@@ -52,9 +52,9 @@ export function LiveRestaurantDetail({ restaurant, slug }: { restaurant: PublicR
         <div><dt className="text-stone-600">Largest ready table</dt><dd className="mt-1 text-xl font-bold">{restaurant.largestAvailableTable ? `${restaurant.largestAvailableTable} seats` : "None"}</dd></div>
         <div><dt className="text-stone-600">Tables being prepared</dt><dd className="mt-1 text-xl font-bold">{restaurant.preparingTables}</dd></div>
       </dl>
-      {restaurant.reservedTables > 0 && <p className="mt-4 text-sm text-stone-600">{restaurant.reservedTables} {restaurant.reservedTables === 1 ? "table has" : "tables have"} upcoming reservations.</p>}
+      {restaurant.reservedTables > 0 && <p className="mt-4 text-sm text-stone-600">{restaurant.reservedTables} {restaurant.reservedTables === 1 ? "table reserved" : "tables reserved"} during the current seating window.</p>}
     </details>
-    {restaurant.publicFloors.length ? <PublicFloorTabs floors={restaurant.publicFloors} /> : <PageCard className="mt-6">
+    {restaurant.publicFloors.length ? <PublicFloorTabs floors={restaurant.publicFloors} timeZone={restaurant.timezone} /> : <PageCard className="mt-6">
       <h2 className="font-semibold text-stone-800">Dining layout not published yet</h2>
       <p className="mt-1 text-sm leading-6 text-stone-600">Wait and table totals are available. The restaurant has not published a floor layout yet.</p>
     </PageCard>}

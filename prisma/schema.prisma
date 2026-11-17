@@ -157,6 +157,32 @@ model Profile {
   adminAuditLogs         AdminAuditLog[]
   adminAuthAttempts      AdminAuthAttempt[]
   importBatches          SyntheticImportBatch[]
+  restaurantApplication RestaurantApplication?  @relation("RestaurantApplicationApplicant")
+  reviewedApplications  RestaurantApplication[] @relation("RestaurantApplicationReviewer")
+}
+
+enum RestaurantApplicationStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+model RestaurantApplication {
+  applicantId       String                      @id @db.Uuid
+  name              String
+  location          String
+  mapsUrl           String
+  status            RestaurantApplicationStatus @default(PENDING)
+  submittedAt       DateTime                    @default(now())
+  reviewedAt        DateTime?
+  reviewedById      String?                     @db.Uuid
+  restaurantId      String?                     @unique @db.Uuid
+  applicant         Profile                     @relation("RestaurantApplicationApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewedBy        Profile?                    @relation("RestaurantApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  restaurant        Restaurant?                 @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+
+  @@index([status, submittedAt])
+  @@index([reviewedById])
 }
 
 model Restaurant {
@@ -194,6 +220,7 @@ model Restaurant {
   importBatches           SyntheticImportBatch[]
   adminAuditLogs          AdminAuditLog[]
   coverImage              RestaurantCoverImage?
+  application             RestaurantApplication?
 
   @@index([environment, archivedAt])
 }
@@ -531,6 +558,7 @@ model QueueEntry {
   partySize           Int
   contact             String?
   notes               String?
+  customerSeatingNote String?
   preferredZone       String?
   status              QueueStatus           @default(WAITING)
   promisedWaitMinutes Int
@@ -571,6 +599,7 @@ model Reservation {
   partySize          Int
   contact            String?
   notes              String?
+  customerNote       String?
   scheduledAt        DateTime
   status             ReservationStatus     @default(CONFIRMED)
   assignedTableId    String?               @db.Uuid

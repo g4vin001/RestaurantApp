@@ -1,7 +1,7 @@
 import type { TableStatus } from "@/lib/domain/types";
 
 export const TABLE_TRANSITIONS: Record<TableStatus, readonly TableStatus[]> = {
-  AVAILABLE: ["HELD", "RESERVED", "OCCUPIED", "OUT_OF_SERVICE"],
+  AVAILABLE: ["HELD", "OCCUPIED", "OUT_OF_SERVICE"],
   HELD: ["OCCUPIED", "AVAILABLE"],
   RESERVED: ["OCCUPIED", "AVAILABLE", "OUT_OF_SERVICE"],
   OCCUPIED: ["CLEANING"],

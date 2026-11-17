@@ -101,6 +101,7 @@ export function FloorMapCanvas({
   selectedIds = [],
   disabledTableIds = [],
   recommendedTableIds = [],
+  reservedTableIds,
   onSelectTable,
   emptyState,
 }: {
@@ -109,6 +110,7 @@ export function FloorMapCanvas({
   selectedIds?: string[];
   disabledTableIds?: string[];
   recommendedTableIds?: string[];
+  reservedTableIds?: ReadonlySet<string>;
   onSelectTable: (tableId: string) => void;
   emptyState?: ReactNode;
 }) {
@@ -117,13 +119,12 @@ export function FloorMapCanvas({
   // Follow the table being acted on (a ?table= link, a selection or a seating
   // recommendation) to whichever floor it's on.
   const focusTableId = selectedIds[0] ?? recommendedTableIds[0];
+  const focusFloorId = floors.find((floor) =>
+    floor.version.elements.some((element) => element.tableId === focusTableId && focusTableId),
+  )?.id;
   useEffect(() => {
-    if (!focusTableId) return;
-    const owner = getLiveFloors(state).find((floor) =>
-      floor.version.elements.some((element) => element.tableId === focusTableId),
-    );
-    if (owner) setFloorId(owner.id);
-  }, [focusTableId, state]);
+    if (focusFloorId) setFloorId(focusFloorId);
+  }, [focusTableId, focusFloorId]);
   const current = floors.find((floor) => floor.id === floorId) ?? floors[0];
   const version = current?.version;
   if (!version) {
@@ -176,7 +177,9 @@ export function FloorMapCanvas({
               <PublishedTable
                 key={element.id}
                 element={element}
-                table={table}
+                table={table.status === "AVAILABLE" && reservedTableIds?.has(table.id)
+                  ? { ...table, status: "RESERVED" }
+                  : table}
                 selected={selectedIds.includes(table.id)}
                 disabled={disabledTableIds.includes(table.id)}
                 recommended={recommendedTableIds.includes(table.id)}

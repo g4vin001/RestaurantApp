@@ -12,7 +12,7 @@ import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
 import { reportDataError } from "@/lib/server/data-error";
 import { getCurrentWorkContext, type WorkContext } from "@/lib/staff/access";
 import { staffSeatingTableIds } from "@/lib/staff/seating";
-import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
+import { restaurantDateKey, restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
 
 async function requireStaff() {
   const context = await getCurrentWorkContext();
@@ -56,6 +56,7 @@ async function runStaffCommand(
       revision: command.commandId,
     }).catch((error) => console.error("[halina:ops-broadcast]", error));
     await setFlash("message", success);
+    return { context, command };
   } catch (error) {
     if (error instanceof OperationsRepositoryError) {
       await setFlash("error", error.message);
@@ -211,11 +212,12 @@ async function reservationInput(
       ? String(formData.get("contact") ?? "") || undefined
       : existingContact?.contact ?? undefined,
     notes: String(formData.get("notes") ?? "") || undefined,
+    customerNote: formData.get("customerNote")?.toString(),
   };
 }
 
 export async function addStaffReservation(formData: FormData) {
-  await runStaffCommand(
+  const result = await runStaffCommand(
     async (context) => ({
       type: "ADD_RESERVATION",
       commandId: randomUUID(),
@@ -223,10 +225,13 @@ export async function addStaffReservation(formData: FormData) {
     }),
     "Reservation created.",
   );
+  return result?.command.type === "ADD_RESERVATION"
+    ? restaurantDateKey(result.command.input.scheduledAt, result.context.restaurantTimezone)
+    : null;
 }
 
 export async function editStaffReservation(formData: FormData) {
-  await runStaffCommand(
+  const result = await runStaffCommand(
     async (context) => {
       const reservationId = String(formData.get("reservationId") ?? "");
       return {
@@ -239,6 +244,9 @@ export async function editStaffReservation(formData: FormData) {
     },
     "Reservation updated.",
   );
+  return result?.command.type === "UPDATE_RESERVATION"
+    ? restaurantDateKey(result.command.input.scheduledAt, result.context.restaurantTimezone)
+    : null;
 }
 
 export async function updateStaffReservationStatus(formData: FormData) {

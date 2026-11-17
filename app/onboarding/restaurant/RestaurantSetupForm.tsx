@@ -2,15 +2,15 @@
 
 import { useActionState } from "react";
 import {
-  createRestaurantForOwner,
+  applyToListRestaurant,
   type RestaurantSetupState,
 } from "./actions";
 
 const initialState: RestaurantSetupState = {};
 
-export function RestaurantSetupForm() {
+export function RestaurantSetupForm({ defaults }: { defaults?: { name: string; location: string; mapsUrl: string } }) {
   const [state, action, pending] = useActionState(
-    createRestaurantForOwner,
+    applyToListRestaurant,
     initialState,
   );
 
@@ -24,6 +24,7 @@ export function RestaurantSetupForm() {
           minLength={2}
           maxLength={80}
           autoComplete="organization"
+          defaultValue={defaults?.name}
           className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2.5 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
         />
       </label>
@@ -32,9 +33,24 @@ export function RestaurantSetupForm() {
         City or location
         <input
           name="location"
+          required
+          defaultValue={defaults?.location}
           maxLength={120}
           autoComplete="address-level2"
           placeholder="e.g. Quezon City"
+          className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2.5 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+        />
+      </label>
+
+      <label className="block text-sm font-medium text-stone-700">
+        Google Maps location link
+        <input
+          name="mapsUrl"
+          type="url"
+          required
+          maxLength={2000}
+          defaultValue={defaults?.mapsUrl}
+          placeholder="https://maps.app.goo.gl/…"
           className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2.5 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
         />
       </label>
@@ -53,7 +69,7 @@ export function RestaurantSetupForm() {
         disabled={pending}
         className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-wait disabled:opacity-60"
       >
-        {pending ? "Creating restaurant…" : "Create restaurant"}
+        {pending ? "Submitting…" : "Submit application"}
       </button>
     </form>
   );

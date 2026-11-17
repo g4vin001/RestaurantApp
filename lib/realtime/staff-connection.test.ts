@@ -13,7 +13,7 @@ describe("staff live connection feedback", () => {
   });
   it("a successful manual refresh cannot disguise a failed live subscription", () => {
     const state = scenario({ type: "CHANNEL_ERROR" }, { type: "REFRESH_STARTED", changedElsewhere: false }, { type: "SNAPSHOT_RECEIVED" });
-    expect(status(state)).toBe("reconnecting");
+    expect(status(state)).toBe("periodic");
   });
   it("does not let a late refresh response erase offline or closed status", () => {
     expect(status(scenario({ type: "SUBSCRIBED" }, { type: "OFFLINE" }, { type: "SNAPSHOT_RECEIVED" }))).toBe("offline");

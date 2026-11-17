@@ -23,6 +23,7 @@ export default async function MyWaitlistPage() {
       partySize: true,
       status: true,
       promisedWaitMinutes: true,
+      customerSeatingNote: true,
       joinedAt: true,
       onTheWayAt: true,
       updatedAt: true,
@@ -96,6 +97,10 @@ export default async function MyWaitlistPage() {
               ? <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-sm font-semibold text-emerald-800">Thanks, the host knows you&apos;re on your way (sent {formatRestaurantTime(entry.onTheWayAt.toISOString(), entry.restaurant.timezone)}).</p>
               : <OnMyWayButton queueId={entry.id} />)}
           </section>
+          {entry.customerSeatingNote && <div className="mt-4 rounded-xl bg-stone-50 p-4 text-sm text-stone-700">
+            <p className="font-semibold text-stone-900">Your seating notes</p>
+            <p className="mt-1 whitespace-pre-wrap break-words">{entry.customerSeatingNote}</p>
+          </div>}
           {active && <div className="mt-5 rounded-xl bg-stone-50 p-4">
             <p className="text-2xl font-bold">~{entry.promisedWaitMinutes} min</p>
             <p className="mt-1 text-xs leading-5 text-stone-600">Estimate when you joined, not a countdown. Party size and table fit can change your wait. Ask the host for an updated estimate.</p>
