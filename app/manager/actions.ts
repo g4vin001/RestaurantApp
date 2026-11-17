@@ -44,10 +44,11 @@ export async function runManagerCommand(
     const state = await repository.execute(command);
 
     revalidatePath("/manager", "layout");
+    revalidatePath("/ops");
     revalidatePath(`/restaurants/${membership.restaurant.slug}`);
     revalidatePath("/");
 
-    broadcastRestaurantInvalidation(prisma, {
+    await broadcastRestaurantInvalidation(prisma, {
       restaurantId: membership.restaurantId,
       restaurantSlug: membership.restaurant.slug,
       environment: state.restaurant.environment ?? "LIVE",

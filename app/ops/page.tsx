@@ -777,7 +777,7 @@ export default async function StaffOperationsPage({ searchParams }: {
         <nav className="flex-1 space-y-1 p-3" aria-label="Staff operations">
           <p className="px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300/70">This shift</p>
           {navigation.map(({ href, label, icon: Icon }) => (
-            <Link key={href} href={href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-white/10 hover:text-white"><Icon size={18} /> {label}</Link>
+            <a key={href} href={href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-white/10 hover:text-white"><Icon size={18} /> {label}</a>
           ))}
           <Link href="/work" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-white/10 hover:text-white"><CircleUserRound size={18} /> Shift access</Link>
         </nav>
@@ -811,7 +811,7 @@ export default async function StaffOperationsPage({ searchParams }: {
             </div>
           </div>
           <nav className="flex gap-1 overflow-x-auto border-t border-stone-100 px-4 py-2 lg:hidden" aria-label="Staff workspace sections">
-            {navigation.map(({ href, label, icon: Icon }) => <Link key={href} href={href} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-bold text-stone-600 hover:bg-stone-100"><Icon size={14} /> {label}</Link>)}
+            {navigation.map(({ href, label, icon: Icon }) => <a key={href} href={href} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-bold text-stone-600 hover:bg-stone-100"><Icon size={14} /> {label}</a>)}
           </nav>
         </header>
 
@@ -883,7 +883,7 @@ export default async function StaffOperationsPage({ searchParams }: {
                     <input name="reservationDate" type="date" required defaultValue={selectedDate} key={selectedDate} className={inputClass + " mt-1"} />
                   </label>
                   <button className={secondaryButtonClass + " min-h-11"}>Show date</button>
-                  {selectedDate !== today && <Link href="/ops#reservations" className={secondaryButtonClass + " min-h-11"}>Today</Link>}
+                  {selectedDate !== today && <Link href="/ops#reservations" prefetch={false} className={secondaryButtonClass + " min-h-11"}>Today</Link>}
                 </form>
                 {canManageGuests && (
                   <details className="group mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 shadow-sm">

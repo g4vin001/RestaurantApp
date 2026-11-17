@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useTransition, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { initialStaffConnection, staffConnectionReducer, type StaffConnectionState } from "@/lib/realtime/staff-connection";
 import type { SeatingRecommendationState } from "@/lib/domain/operations";
@@ -19,7 +19,6 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
   children: ReactNode;
 }) {
   const router = useRouter();
-  const [, startTransition] = useTransition();
   const [state, dispatch] = useReducer(staffConnectionReducer, initialStaffConnection);
   const [attempt, setAttempt] = useState(0);
   const inFlight = useRef(false);
@@ -37,7 +36,7 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
       queued.current = false;
       dispatch({ type: "REFRESH_FAILED" });
     }, 20_000);
-    startTransition(() => router.refresh());
+    router.refresh();
     // router.refresh() returns void. Only a new server snapshot confirms success.
   }, [router]);
 
