@@ -167,6 +167,7 @@ describe("public floor projection", () => {
         { assignedTableId: "table-1", scheduledAt: new Date("2026-09-04T14:00:00Z") },
         { assignedTableId: "table-1", scheduledAt: new Date("2026-09-04T12:00:00Z") },
       ],
+      new Map([["table-1", "RESERVED"]]),
     );
 
     const booked = floor?.elements.find((element) => element.tableId === "table-1");
@@ -213,7 +214,7 @@ describe("public floor projection", () => {
     expect(floor?.elements[0].upcomingReservations).toBeUndefined();
   });
 
-  it("publishes only the table and time of approved upcoming bookings", async () => {
+  it("reads only table, time and status for the public availability projection", async () => {
     const findFirst = vi.fn().mockResolvedValue(null);
     const client = {
       restaurant: { findMany: vi.fn().mockResolvedValue([]), findFirst },
@@ -226,11 +227,12 @@ describe("public floor projection", () => {
     expect(reservations.select).toEqual({
       assignedTableId: true,
       scheduledAt: true,
+      status: true,
     });
-    expect(reservations.where.status).toEqual({ in: ["CONFIRMED", "ARRIVED"] });
+    expect(reservations.where.status).toEqual({ in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] });
     expect(reservations.where.assignedTableId).toEqual({ not: null });
     expect(reservations.where.scheduledAt).toEqual({
-      gte: now,
+      gt: new Date("2026-09-03T22:00:00Z"),
       lte: new Date("2026-09-04T22:00:00Z"),
     });
   });
@@ -261,7 +263,11 @@ describe("public floor projection", () => {
     );
 
     const listSelect = findMany.mock.calls[0][0].select;
-    expect(listSelect).not.toHaveProperty("reservations");
+    expect(listSelect.reservations.select).toEqual({
+      assignedTableId: true,
+      scheduledAt: true,
+      status: true,
+    });
     expect(listSelect).not.toHaveProperty("staffMembers");
     expect(listSelect).not.toHaveProperty("tableStatusEvents");
     expect(listSelect.queueEntries.select).toEqual({

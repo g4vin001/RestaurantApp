@@ -97,6 +97,7 @@ export interface RestaurantIdentity {
   isOpen: boolean;
   cleaningTargetMinutes: number;
   reservationDurationMinutes: number;
+  reservationLeadMinutes?: number;
   acceptsReservations: boolean;
   reservationBlockedDates: string[];
   reservationNotes: string;
@@ -186,6 +187,8 @@ export interface Reservation {
   tableIds?: string[];
   contact?: string;
   notes?: string;
+  customerNote?: string;
+  hasCustomerAccount?: boolean;
   arrivedAt?: string;
   seatedAt?: string;
   completedAt?: string;

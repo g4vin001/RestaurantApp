@@ -1,4 +1,5 @@
 import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
+import { DEFAULT_RESERVATION_LEAD_MINUTES } from "@/lib/domain/restaurant-schedule";
 
 export type ReservationBookingInput = {
   partyName: string;
@@ -12,8 +13,21 @@ type ValidationResult =
   | { ok: true; input: ReservationBookingInput }
   | { ok: false; error: string };
 
-const MIN_LEAD_MS = 30 * 60_000;
 const MAX_LEAD_MS = 90 * 24 * 60 * 60_000;
+
+export function reservationNoticeError(scheduledAt: Date, now: Date, leadMinutes: number) {
+  if (scheduledAt.getTime() < now.getTime() + leadMinutes * 60_000) {
+    return leadMinutes === 0
+      ? "Choose a reservation time in the future."
+      : leadMinutes === 1
+        ? "Reservations need at least one minute of notice."
+        : "Reservations need at least " + leadMinutes + " minutes' notice.";
+  }
+  if (scheduledAt.getTime() > now.getTime() + MAX_LEAD_MS) {
+    return "Reservations can only be made up to 90 days ahead.";
+  }
+  return null;
+}
 
 function formText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -23,6 +37,7 @@ export function validateReservationBooking(
   formData: FormData,
   now = new Date(),
   timeZone = "Asia/Manila",
+  leadMinutes = DEFAULT_RESERVATION_LEAD_MINUTES,
 ): ValidationResult {
   const partyName = formText(formData.get("partyName"));
   const partySizeRaw = formText(formData.get("partySize"));
@@ -43,12 +58,8 @@ export function validateReservationBooking(
   if (!scheduledAt) {
     return { ok: false, error: "Choose a valid reservation date and time." };
   }
-  if (scheduledAt.getTime() < now.getTime() + MIN_LEAD_MS) {
-    return { ok: false, error: "Reservations need at least 30 minutes' notice." };
-  }
-  if (scheduledAt.getTime() > now.getTime() + MAX_LEAD_MS) {
-    return { ok: false, error: "Reservations can only be made up to 90 days ahead." };
-  }
+  const noticeError = reservationNoticeError(scheduledAt, now, leadMinutes);
+  if (noticeError) return { ok: false, error: noticeError };
 
   if (contact.length > 120) {
     return { ok: false, error: "Contact must be 120 characters or fewer." };

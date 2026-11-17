@@ -35,7 +35,12 @@ export default async function MyReservationsPage() {
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-emerald-800">Your reservations</h1>
       </div>
-      <div className="mt-4"><CustomerRefresh snapshotId={randomUUID()} checkedAt={new Date().toISOString()} intervalMs={15_000} /></div>
+      <div className="mt-4"><CustomerRefresh
+        snapshotId={randomUUID()}
+        checkedAt={new Date().toISOString()}
+        slug={reservations.every((item) => item.restaurantSlug === reservations[0]?.restaurantSlug) ? reservations[0]?.restaurantSlug : undefined}
+        intervalMs={10_000}
+      /></div>
       {reservations.length === 0 ? (
         <p className="mt-4 text-sm text-stone-500">
           You haven&apos;t booked a table yet.
@@ -73,6 +78,12 @@ export default async function MyReservationsPage() {
                 <p className="mt-2 rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-700">
                   {reservation.cancellationReason}
                 </p>
+              )}
+              {reservation.customerNote && (
+                <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+                  <p className="text-xs font-semibold text-sky-900">Note about your reservation</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words">{reservation.customerNote}</p>
+                </div>
               )}
               {["PENDING_APPROVAL", "CONFIRMED"].includes(reservation.status) && reservation.restaurantNotes && (
                 <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">

@@ -108,6 +108,41 @@ describeWithDatabase("customer reservation booking", () => {
     expect(reservation.status).toBe("PENDING_APPROVAL");
   });
 
+  it("rejects a party that exceeds one table or a pair even with enough total seats", async () => {
+    await client.diningTable.updateMany({ where: { restaurantId }, data: { capacity: 4, maxPartySize: 4 } });
+    await client.diningTable.create({
+      data: { restaurantId, label: "T3", capacity: 4, maxPartySize: 4, shape: "ROUND" },
+    });
+    await expect(createCustomerReservation(client, {
+      restaurantId, customerProfileId: customerAId, partyName: "Nine guests", partySize: 9, scheduledAt,
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await client.reservation.count({ where: { restaurantId } })).toBe(0);
+  });
+
+  it("permits the next request at the exact end of a reservation", async () => {
+    const request = { restaurantId, customerProfileId: customerAId, partyName: "Full party", partySize: TOTAL_CAPACITY, scheduledAt };
+    await createCustomerReservation(client, request);
+    await expect(createCustomerReservation(client, {
+      ...request, scheduledAt: new Date(scheduledAt.getTime() + 89 * 60_000),
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(createCustomerReservation(client, {
+      ...request, scheduledAt: new Date(scheduledAt.getTime() + 90 * 60_000),
+    })).resolves.toHaveProperty("reservationId");
+  });
+
+  it("enforces the manager's notice setting within the booking transaction", async () => {
+    await client.restaurant.update({ where: { id: restaurantId }, data: {
+      operatingSettings: { opensAtHour: 0, closesAtHour: 24, reservationLeadMinutes: 120 },
+    } });
+    const request = { restaurantId, customerProfileId: customerAId, partyName: "Advance notice", partySize: 2, scheduledAt };
+    await expect(createCustomerReservation(client, {
+      ...request, requestedAt: new Date(scheduledAt.getTime() - 119 * 60_000),
+    })).rejects.toThrow("120 minutes");
+    await expect(createCustomerReservation(client, {
+      ...request, requestedAt: new Date(scheduledAt.getTime() - 120 * 60_000),
+    })).resolves.toHaveProperty("reservationId");
+  });
+
   it("rejects a booking that would exceed total capacity in the overlap window", async () => {
     await createCustomerReservation(client, {
       restaurantId,

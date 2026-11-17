@@ -48,7 +48,7 @@ export function CustomerRefresh({ snapshotId, checkedAt, slug, intervalMs = 10_0
   useEffect(() => {
     if (previousSnapshot.current === snapshotId) return;
     previousSnapshot.current = snapshotId;
-    if (!inFlight.current || !navigator.onLine) return;
+    if (!navigator.onLine) return;
     if (timeout.current) clearTimeout(timeout.current);
     inFlight.current = false;
     const timestamp = Date.parse(checkedAt);

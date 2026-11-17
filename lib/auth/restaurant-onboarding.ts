@@ -43,3 +43,20 @@ export function createRestaurantSlug(name: string, suffix: string) {
 
   return `${base || "restaurant"}-${suffix.toLowerCase()}`;
 }
+
+export function validateRestaurantApplication(formData: FormData) {
+  const restaurant = validateRestaurantSetup(formData);
+  if (!restaurant.ok) return restaurant;
+  const mapsUrl = formText(formData.get("mapsUrl"));
+  const url = URL.canParse(mapsUrl) ? new URL(mapsUrl) : null;
+  const isMapsLink = url && (
+    (["www.google.com", "google.com", "goo.gl"].includes(url.hostname) && /^\/maps(?:\/|$)/.test(url.pathname)) ||
+    (url.hostname === "maps.app.goo.gl" && url.pathname.length > 1) ||
+    (url.hostname === "maps.google.com" && (url.search.length > 1 || url.pathname.length > 1))
+  );
+  if (!restaurant.input.location) return { ok: false as const, error: "Enter the restaurant's address or city." };
+  if (!isMapsLink || url.protocol !== "https:" || url.username || url.password || url.port || mapsUrl.length > 2_000) {
+    return { ok: false as const, error: "Enter an HTTPS Google Maps link for the restaurant." };
+  }
+  return { ok: true as const, input: { ...restaurant.input, mapsUrl: url.href } };
+}

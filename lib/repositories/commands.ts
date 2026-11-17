@@ -38,6 +38,7 @@ export type ReservationCommandInput = {
   tableId?: string;
   contact?: string;
   notes?: string;
+  customerNote?: string;
 };
 
 export type StaffCommandInput = {
@@ -158,6 +159,7 @@ export type DatabaseOperationsCommand =
         | "isOpen"
         | "cleaningTargetMinutes"
         | "reservationDurationMinutes"
+        | "reservationLeadMinutes"
         | "acceptsReservations"
         | "reservationBlockedDates"
         | "reservationNotes"

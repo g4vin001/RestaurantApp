@@ -184,6 +184,17 @@ export const DEFAULT_RESERVATION_MINUTES = 90;
 export const MIN_RESERVATION_MINUTES = 30;
 export const MAX_RESERVATION_MINUTES = 720;
 export const RESERVATION_MINUTE_STEP = 30;
+export const DEFAULT_RESERVATION_LEAD_MINUTES = 30;
+export const MAX_RESERVATION_LEAD_MINUTES = 7 * 24 * 60;
+
+export function isReservationLeadMinutes(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_RESERVATION_LEAD_MINUTES;
+}
+
+export function readReservationLeadMinutes(settings?: { reservationLeadMinutes?: unknown } | null) {
+  const value = settings?.reservationLeadMinutes;
+  return isReservationLeadMinutes(value) ? value : DEFAULT_RESERVATION_LEAD_MINUTES;
+}
 
 export function readReservationDurationMinutes(settings: { reservationDurationMinutes?: unknown } | null | undefined) {
   const value = settings?.reservationDurationMinutes;

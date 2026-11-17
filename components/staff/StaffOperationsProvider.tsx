@@ -68,6 +68,11 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
     window.addEventListener("offline", offline);
     window.addEventListener("online", online);
     document.addEventListener("visibilitychange", visible);
+    const poll = window.setInterval(() => {
+      if (navigator.onLine && document.visibilityState === "visible" && !inFlight.current) {
+        requestRefresh();
+      }
+    }, 15_000);
     const supabase = createClient();
     dispatch({ type: navigator.onLine ? "CONNECTING" : "OFFLINE" });
     const channel = supabase
@@ -89,6 +94,7 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
       document.removeEventListener("visibilitychange", visible);
+      window.clearInterval(poll);
       void supabase.removeChannel(channel);
     };
   }, [restaurantId, attempt, requestRefresh]);

@@ -120,11 +120,22 @@ export function validateFloor(
 }
 
 /** Every floor with a published layout, in floor order. All of them are live. */
-export function getLiveFloors(state: DemoState) {
+export function getLiveFloors(state: Pick<DemoState, "floorPlans">) {
   return state.floorPlans.flatMap((plan) => {
     const version = plan.versions.find((item) => item.id === plan.activeVersionId);
     return version ? [{ id: plan.id, name: plan.name, version }] : [];
   });
+}
+
+export function publishedFloorIdsByTable(state?: Pick<DemoState, "floorPlans">) {
+  const assignments = new Map<string, string>();
+  if (!state) return assignments;
+  for (const floor of getLiveFloors(state)) {
+    for (const element of floor.version.elements) {
+      if (element.tableId) assignments.set(element.tableId, floor.id);
+    }
+  }
+  return assignments;
 }
 
 export function getActiveFloorVersion(state: DemoState) {

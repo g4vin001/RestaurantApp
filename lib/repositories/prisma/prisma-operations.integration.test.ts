@@ -3,11 +3,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma/client";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
-import { executeOperationsCommand } from "./operations-commands";
+import { executeOperationsCommand, type OperationsCommandScope } from "./operations-commands";
 import { PrismaOperationsRepository } from "./prisma-operations";
 import { legacyOperatingSchedule } from "@/lib/domain/restaurant-schedule";
 import { randomUUID } from "node:crypto";
-import { fetchPublicRestaurantBySlug } from "./public-restaurant-view";
+import { fetchPublicRestaurantBySlug, fetchPublicRestaurants } from "./public-restaurant-view";
+import { createCustomerReservation, fetchCustomerReservations } from "./customer-reservations";
 import { staffSeatingOptions } from "@/lib/staff/seating";
 import { deriveAnalytics } from "@/lib/domain/analytics";
 
@@ -40,6 +41,33 @@ describeWithDatabase("Prisma operations repository", () => {
       profileId: ownerId, restaurantId,
       membershipId: membership.id, membershipRole: membership.role,
     });
+  }
+
+  async function operationsScope(role: "OWNER" | "STAFF"): Promise<OperationsCommandScope> {
+    const profileId = role === "OWNER" ? ownerId : hostId;
+    const membership = await client.restaurantMembership.findUniqueOrThrow({
+      where: { restaurantId_profileId: { restaurantId, profileId } },
+    });
+    return {
+      profileId, restaurantId, membershipId: membership.id, membershipRole: role,
+      permissions: ["MANAGE_QUEUE", "CHANGE_TABLE_STATUS", "SEAT_PARTIES", "CORRECT_RECENT_ACTION"],
+    };
+  }
+
+  async function publishedFloor(name: string, tableIds: string[]) {
+    const plan = await client.floorPlan.create({ data: { restaurantId, name } });
+    const version = await client.floorPlanVersion.create({
+      data: {
+        floorPlanId: plan.id, name, version: 1, logicalWidth: 1600, logicalHeight: 1000,
+        elements: {
+          create: tableIds.map((diningTableId, index) => ({
+            diningTableId, stableElementId: randomUUID(), type: "TABLE",
+            x: 180 * (index + 1), y: 140, width: 120, height: 120,
+          })),
+        },
+      },
+    });
+    await client.floorPlan.update({ where: { id: plan.id }, data: { activeVersionId: version.id } });
   }
 
   beforeEach(async () => {
@@ -427,6 +455,105 @@ describeWithDatabase("Prisma operations repository", () => {
         commandId: "66666666-6666-4666-8666-666666666666",
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it.each(["OWNER", "STAFF"] as const)("keeps the %s floor clear in sync with customer booking status", async (role) => {
+    const scope = await operationsScope(role);
+    const manager = await writableManagerRepository();
+    const tables = await client.diningTable.findMany({ where: { restaurantId }, orderBy: { label: "asc" } });
+    await publishedFloor("Main", tables.map((table) => table.id));
+    const booking = await client.reservation.create({ data: {
+      restaurantId, partyName: "Booked party", customerProfileId: viewerId,
+      scheduledAt: new Date(), status: "CONFIRMED", partySize: 5,
+      customerNote: "Show this to the guest", notes: "Internal handoff only",
+    } });
+    const commandId = randomUUID();
+    await executeOperationsCommand(client, scope, {
+      type: "SEAT_RESERVATION", commandId, reservationId: booking.id, expectedRevision: booking.revision,
+      tableIds: tables.map((table) => table.id),
+    });
+
+    async function tableTransition(status: "CLEANING" | "AVAILABLE") {
+      const table = await client.diningTable.findUniqueOrThrow({ where: { id: tables[0].id } });
+      await executeOperationsCommand(client, scope, {
+        type: "TRANSITION_TABLE", commandId: randomUUID(), tableId: table.id,
+        expectedRevision: table.statusRevision, status,
+      });
+    }
+    const initial = await fetchPublicRestaurantBySlug(client, "repository-test");
+    expect(initial?.publicFloors[0].elements.map((table) => table.status)).toEqual(["IN_USE", "IN_USE"]);
+    await expect(createCustomerReservation(client, {
+      restaurantId, customerProfileId: otherOwnerId, partyName: "Another diner", partySize: 1,
+      scheduledAt: booking.scheduledAt,
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await tableTransition("CLEANING");
+    const cleaning = await fetchPublicRestaurantBySlug(client, "repository-test");
+    expect(cleaning?.publicFloors[0].elements.map((table) => table.status)).toEqual(["PREPARING", "PREPARING"]);
+    expect((await manager.loadSnapshot()).reservations.find((item) => item.id === booking.id)?.status).toBe("COMPLETED");
+    const [customer] = await fetchCustomerReservations(client, viewerId);
+    expect(customer).toMatchObject({ status: "COMPLETED", customerNote: "Show this to the guest" });
+    expect(customer).not.toHaveProperty("notes");
+
+    await tableTransition("AVAILABLE");
+    const ready = await fetchPublicRestaurantBySlug(client, "repository-test");
+    expect(ready?.publicFloors[0].elements.map((table) => table.status)).toEqual(["AVAILABLE", "AVAILABLE"]);
+    expect(ready?.availableTables).toBe(2);
+    expect(await client.diningSession.count({ where: { reservationId: booking.id, status: "COMPLETED" } })).toBe(2);
+  });
+
+  it.each(["OWNER", "STAFF"] as const)("blocks the %s from flagging a table reserved without a booking", async (role) => {
+    const scope = await operationsScope(role);
+    const table = await client.diningTable.findFirstOrThrow({ where: { restaurantId } });
+    await expect(executeOperationsCommand(client, scope, {
+      type: "TRANSITION_TABLE", commandId: randomUUID(), tableId: table.id,
+      expectedRevision: table.statusRevision, status: "RESERVED",
+    })).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(await client.reservation.count({ where: { restaurantId } })).toBe(0);
+    expect(await client.diningTable.findUniqueOrThrow({ where: { id: table.id } })).toMatchObject({ currentStatus: "AVAILABLE" });
+  });
+
+  it("prevents both staff and managers from combining matching zones across two floors", async () => {
+    const staff = await operationsScope("STAFF");
+    const manager = await operationsScope("OWNER");
+    const tables = await client.diningTable.findMany({ where: { restaurantId }, orderBy: { label: "asc" } });
+    await publishedFloor("Ground", [tables[0].id]);
+    await publishedFloor("Upstairs", [tables[1].id]);
+    const snapshot = await (await writableManagerRepository()).loadSnapshot();
+    const party = snapshot.queue[0];
+    expect(staffSeatingOptions(snapshot, party, new Date())).toEqual([]);
+    for (const scope of [staff, manager]) {
+      await expect(executeOperationsCommand(client, scope, {
+        type: "SEAT_QUEUE", commandId: randomUUID(), entryId: party.id,
+        expectedRevision: party.revision ?? 0, tableIds: tables.map((table) => table.id),
+      })).rejects.toThrow("same floor and in the same zone");
+    }
+    const publicView = await fetchPublicRestaurantBySlug(client, "repository-test");
+    expect(publicView?.publicFloors.map(({ name }) => name)).toEqual(["Ground", "Upstairs"]);
+    expect(publicView?.availableTables).toBe(2);
+  });
+
+  it("counts a near-term approved booking consistently across directory, map, and staff seating", async () => {
+    const tables = await client.diningTable.findMany({ where: { restaurantId }, orderBy: { label: "asc" } });
+    await publishedFloor("Main", tables.map((table) => table.id));
+    const now = new Date();
+    await client.reservation.createMany({ data: [
+      { restaurantId, partyName: "Near", partySize: 4, scheduledAt: new Date(now.getTime() + 15 * 60_000), assignedTableId: tables[0].id, status: "CONFIRMED" },
+      { restaurantId, partyName: "Later", partySize: 2, scheduledAt: new Date(now.getTime() + 3 * 3_600_000), assignedTableId: tables[1].id, status: "CONFIRMED" },
+    ] });
+    const snapshot = await (await writableManagerRepository()).loadSnapshot();
+    expect(staffSeatingOptions(snapshot, { partySize: 2 }, now).map((option) => option.label)).toEqual(["T2"]);
+    const detail = await fetchPublicRestaurantBySlug(client, "repository-test", now);
+    const directory = (await fetchPublicRestaurants(client, now)).find((item) => item.restaurantId === restaurantId);
+    expect(detail).toMatchObject({ availableTables: 1, availableSeatCapacity: 2, reservedTables: 1 });
+    expect(directory).toMatchObject({ availableTables: 1, availableSeatCapacity: 2, reservedTables: 1 });
+    expect(detail?.publicFloors[0].elements.map((table) => [table.label, table.status, table.upcomingReservations?.length])).toEqual([
+      ["T1", "RESERVED", 1],
+      ["T2", "AVAILABLE", 1],
+    ]);
+    await client.diningTable.update({ where: { id: tables[1].id }, data: { currentStatus: "RESERVED" } });
+    const withLegacyHold = await fetchPublicRestaurantBySlug(client, "repository-test", now);
+    expect(withLegacyHold?.publicFloors[0].elements[1]).toMatchObject({ label: "T2", status: "UNAVAILABLE" });
+    expect(withLegacyHold).toMatchObject({ availableTables: 0, reservedTables: 1 });
   });
 
   it("completes a seated reservation by moving its whole table group to cleaning", async () => {

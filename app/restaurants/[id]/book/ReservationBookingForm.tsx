@@ -16,6 +16,7 @@ import {
   type ReservationWindows,
 } from "@/lib/domain/restaurant-schedule";
 import { restaurantWallTimeToUtc } from "@/lib/time/restaurant-time";
+import { reservationNoticeError } from "@/lib/customer/reservation-booking";
 
 const initialState: ReservationBookingState = {};
 
@@ -28,6 +29,7 @@ export function ReservationBookingForm({
   defaultPartyName,
   schedule,
   reservationDurationMinutes,
+  reservationLeadMinutes,
   blockedDates,
   reservationWindows,
   timeZone,
@@ -36,6 +38,7 @@ export function ReservationBookingForm({
   defaultPartyName: string;
   schedule: OperatingSchedule;
   reservationDurationMinutes: number;
+  reservationLeadMinutes: number;
   blockedDates: string[];
   reservationWindows: ReservationWindows | null;
   timeZone: string;
@@ -52,7 +55,8 @@ export function ReservationBookingForm({
   // Only reported when the restaurant is open, so "closed" stays the clearer message.
   const outsideWindow = !!selectedTime && !closedAtTime && !isWithinReservationWindows(reservationWindows, selectedTime, timeZone);
   const windowLabels = selectedTime && reservationWindows ? reservationWindowLabels(reservationWindows, scheduledAt.slice(0, 10)) : [];
-  const problem = dateBlocked || outsideHours || outsideWindow;
+  const noticeError = selectedTime && reservationNoticeError(selectedTime, new Date(), reservationLeadMinutes);
+  const problem = dateBlocked || outsideHours || outsideWindow || Boolean(noticeError);
 
   if (state.success) {
     return (
@@ -93,6 +97,7 @@ export function ReservationBookingForm({
         <input name="scheduledAt" type="datetime-local" required value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-describedby="booking-hours" className={inputClass} />
       </label>
       <p id="booking-hours" role={problem ? "alert" : "status"} className={`text-sm leading-6 ${problem ? "text-rose-700" : "text-stone-600"}`}>
+        {noticeError && noticeError + " "}
         {dateBlocked ? "The restaurant isn't taking reservations on this date. Choose another day. " : ""}
         {!dateBlocked && outsideHours
           ? closedAtTime
@@ -130,7 +135,7 @@ export function ReservationBookingForm({
 
       <button
         type="submit"
-        disabled={pending || outsideHours || outsideWindow}
+        disabled={pending || problem}
         className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-wait disabled:opacity-60"
       >
         {pending ? "Sending request…" : "Request reservation"}

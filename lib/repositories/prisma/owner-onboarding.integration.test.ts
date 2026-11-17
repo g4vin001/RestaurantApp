@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { PrismaClient } from "@/lib/generated/prisma/client";
 import { createOwnedRestaurant } from "./owner-onboarding";
+import { reviewRestaurantApplication, submitRestaurantApplication } from "./restaurant-applications";
 
 const connectionString = process.env.HALINA_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -85,5 +86,36 @@ describeWithDatabase("owner onboarding repository", () => {
         where: { memberships: { some: { profileId: ownerId } } },
       }),
     ).toBe(1);
+  });
+
+  it("only grants manager access after approval and allows a declined applicant to reapply", async () => {
+    const reviewerId = "99999999-9999-4999-8999-999999999999";
+    await client.profile.upsert({
+      where: { id: reviewerId },
+      create: { id: reviewerId, email: "onboarding-reviewer@example.com", displayName: "Reviewer" },
+      update: {},
+    });
+    try {
+      const details = { name: "Application Kitchen", location: "Quezon City", mapsUrl: "https://www.google.com/maps/place/Quezon+City" };
+      await expect(submitRestaurantApplication(client, ownerId, details)).resolves.toMatchObject({ status: "PENDING" });
+      expect(await client.restaurantMembership.count({ where: { profileId: ownerId } })).toBe(0);
+      await expect(reviewRestaurantApplication(client, {
+        applicantId: ownerId, reviewedById: reviewerId, decision: "DECLINED",
+      })).resolves.toMatchObject({ status: "DECLINED", restaurantId: null });
+      expect(await client.restaurantMembership.count({ where: { profileId: ownerId } })).toBe(0);
+      await submitRestaurantApplication(client, ownerId, details);
+      const approval = await reviewRestaurantApplication(client, {
+        applicantId: ownerId, reviewedById: reviewerId, decision: "APPROVED",
+      });
+      expect(approval).toMatchObject({ status: "APPROVED", reviewedById: reviewerId });
+      expect(await client.restaurantMembership.findFirst({ where: { profileId: ownerId } })).toMatchObject({
+        role: "OWNER", restaurantId: approval.restaurantId, active: true,
+      });
+      await expect(reviewRestaurantApplication(client, {
+        applicantId: ownerId, reviewedById: reviewerId, decision: "APPROVED",
+      })).rejects.toMatchObject({ code: "CONFLICT" });
+    } finally {
+      await client.profile.deleteMany({ where: { id: reviewerId } });
+    }
   });
 });

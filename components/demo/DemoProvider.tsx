@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -158,7 +159,7 @@ interface DemoContextValue {
   // When the server rendered this page. Live clocks start here so the first
   // client render matches the server HTML.
   renderedAt?: string;
-  connectionStatus: "live" | "reconnecting" | "offline" | "stale";
+  connectionStatus: "live" | "periodic" | "reconnecting" | "offline" | "stale";
   changedOnAnotherDevice: boolean;
   transitionTable: (
     tableId: string,
@@ -227,6 +228,7 @@ interface DemoContextValue {
       | "isOpen"
       | "cleaningTargetMinutes"
       | "reservationDurationMinutes"
+      | "reservationLeadMinutes"
       | "acceptsReservations"
       | "reservationBlockedDates"
       | "reservationNotes"
@@ -258,8 +260,11 @@ export function OperationsProvider({
     initialState ?? createDemoState(),
   );
   const [hydrated, setHydrated] = useState(repositoryMode === "database");
-  const [connectionStatus, setConnectionStatus] = useState<DemoContextValue["connectionStatus"]>("live");
+  const [connectionStatus, setConnectionStatus] = useState<DemoContextValue["connectionStatus"]>(
+    repositoryMode === "demo" ? "live" : "reconnecting",
+  );
   const [changedOnAnotherDevice, setChangedOnAnotherDevice] = useState(false);
+  const liveUpdates = useRef(false);
 
   useEffect(() => {
     if (repositoryMode !== "demo") return;
@@ -306,41 +311,55 @@ export function OperationsProvider({
       setConnectionStatus("offline");
       return;
     }
-    setConnectionStatus("reconnecting");
-    const result = await loadManagerSnapshotAction();
-    if (!result.ok) {
+    const result = await loadManagerSnapshotAction().catch(() => null);
+    if (!navigator.onLine) {
+      setConnectionStatus("offline");
+      return;
+    }
+    if (!result?.ok) {
       setConnectionStatus("stale");
       return;
     }
     dispatch({ type: "REPLACE", state: result.state });
     setChangedOnAnotherDevice(remoteChange);
-    setConnectionStatus("live");
+    setConnectionStatus(liveUpdates.current ? "live" : "periodic");
   }, [repositoryMode]);
 
   useEffect(() => {
     if (repositoryMode !== "database") return;
+    let disposed = false;
     const offline = () => setConnectionStatus("offline");
     const online = () => void refreshDatabaseSnapshot(false);
+    const refreshIfVisible = () => {
+      if (!liveUpdates.current && navigator.onLine && document.visibilityState === "visible") {
+        void refreshDatabaseSnapshot();
+      }
+    };
     window.addEventListener("offline", offline);
     window.addEventListener("online", online);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    const poll = window.setInterval(refreshIfVisible, 15_000);
 
     const supabase = createBrowserSupabaseClient();
     const channel = supabase
       .channel(`restaurant:${state.restaurant.id}`, { config: { private: true } })
       .on("broadcast", { event: "invalidated" }, () => {
-        void refreshDatabaseSnapshot(true);
+        if (!disposed) void refreshDatabaseSnapshot(true);
       })
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") setConnectionStatus("live");
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
-        }
-        if (status === "CLOSED" && navigator.onLine) setConnectionStatus("stale");
+        if (disposed) return;
+        liveUpdates.current = status === "SUBSCRIBED";
+        if (liveUpdates.current) void refreshDatabaseSnapshot();
+        else setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
       });
 
     return () => {
+      disposed = true;
+      liveUpdates.current = false;
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.clearInterval(poll);
       void supabase.removeChannel(channel);
     };
   }, [refreshDatabaseSnapshot, repositoryMode, state.restaurant.id]);
@@ -810,6 +829,7 @@ export function OperationsProvider({
         | "isOpen"
         | "cleaningTargetMinutes"
         | "reservationDurationMinutes"
+        | "reservationLeadMinutes"
         | "acceptsReservations"
         | "reservationBlockedDates"
         | "reservationNotes"

@@ -24,7 +24,7 @@ export function staffConnectionReducer(state: StaffConnectionState, event: Staff
     case "CHANNEL_ERROR": return { ...state, channel: "error", fresh: false };
     case "CLOSED": return { ...state, channel: "closed", fresh: false };
     case "REFRESH_STARTED": return { ...state, refreshing: true, failed: false, changedElsewhere: event.changedElsewhere };
-    case "SNAPSHOT_RECEIVED": return { ...state, refreshing: false, fresh: state.online, failed: false };
+    case "SNAPSHOT_RECEIVED": return { ...state, refreshing: false, fresh: state.online && (state.channel !== "closed" || state.refreshing), failed: false };
     case "REFRESH_FAILED": return { ...state, refreshing: false, fresh: false, failed: true };
   }
 }
@@ -34,6 +34,7 @@ export function staffConnectionStatus(state: StaffConnectionState) {
   if (state.failed) return "stale";
   if (state.refreshing) return "refreshing";
   if (state.channel === "subscribed" && state.fresh) return "live";
+  if (state.fresh && state.channel !== "connecting") return "periodic";
   if (state.channel === "closed") return "stale";
   return "reconnecting";
 }

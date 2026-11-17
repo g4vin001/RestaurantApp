@@ -4,14 +4,18 @@ import type { DemoState } from "@/lib/domain/types";
 import { selectPublicRestaurantState } from "@/lib/domain/analytics";
 import {
   buildPublicFloor,
+  toPublicTableStatus,
+  type PublicTableStatus,
   type PublicFloorSource,
   type PublicReservationSource,
 } from "@/lib/customer/public-floor";
 import { asRecord, finiteNumber } from "@/lib/repositories/prisma/json-settings";
+import { APPROVED_RESERVATION_STATUSES, TABLE_HOLD_RESERVATION_STATUSES, isReservationInSeatingWindow } from "@/lib/domain/booking-conflicts";
 import {
   readOperatingSchedule,
   readReservationAvailability,
   readReservationDurationMinutes,
+  MAX_RESERVATION_MINUTES,
 } from "@/lib/domain/restaurant-schedule";
 import { publicCoverImageUrl } from "@/lib/customer/cover-image";
 
@@ -28,18 +32,32 @@ type PublicRestaurantRow = {
   updatedAt: Date;
   coverImage?: { updatedAt: Date } | null;
   diningTables: {
+    id: string;
     capacity: number;
     maxPartySize: number;
     currentStatus: string;
   }[];
   queueEntries: { partySize: number; status: string; joinedAt: Date }[];
   floorPlans?: PublicFloorSource[];
-  reservations?: PublicReservationSource[];
+  reservations?: Array<PublicReservationSource & { status: string }>;
 };
 
-// How far ahead the public floor looks when marking a table as booked. Covers a
-// full evening service including bookings that land after midnight.
+// The table detail can show later bookings beyond the current seating window.
 const PUBLIC_RESERVATION_LOOKAHEAD_MS = 12 * 60 * 60_000;
+
+function publicBookingSelect(now: Date) {
+  return {
+    where: {
+      status: { in: [...TABLE_HOLD_RESERVATION_STATUSES] },
+      assignedTableId: { not: null },
+      scheduledAt: {
+        gt: new Date(now.getTime() - MAX_RESERVATION_MINUTES * 60_000),
+        lte: new Date(now.getTime() + PUBLIC_RESERVATION_LOOKAHEAD_MS),
+      },
+    },
+    select: { assignedTableId: true, scheduledAt: true, status: true },
+  };
+}
 
 // The public projection intentionally contains only safe aggregates plus the
 // explicitly published floor geometry. Raw queue entries, reservation details,
@@ -49,6 +67,25 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
   const settings = asRecord(restaurant.operatingSettings);
   const availability = readReservationAvailability(settings);
   const nowIso = now.toISOString();
+  const duration = readReservationDurationMinutes(settings);
+  const bookings = restaurant.reservations ?? [];
+  const approvedBookings = bookings.filter(({ status }) => APPROVED_RESERVATION_STATUSES.some((value) => value === status));
+  const confirmedTableIds = new Set(approvedBookings
+    .filter((booking) => isReservationInSeatingWindow(booking.scheduledAt, now, duration))
+    .map((booking) => booking.assignedTableId));
+  const heldTableIds = new Set(bookings
+    .filter((booking) => isReservationInSeatingWindow(booking.scheduledAt, now, duration))
+    .map((booking) => booking.assignedTableId));
+  const liveStatuses = new Map<string, PublicTableStatus>();
+  for (const table of restaurant.diningTables) {
+    let status = toPublicTableStatus(table.currentStatus);
+    if (status === "RESERVED" || (status === "AVAILABLE" && heldTableIds.has(table.id))) {
+      // Legacy manual reserves still hold the table. Only approved bookings
+      // with a seating window justify a public reservation label.
+      status = confirmedTableIds.has(table.id) ? "RESERVED" : "UNAVAILABLE";
+    }
+    liveStatuses.set(table.id, status);
+  }
   const assembled: DemoState = {
     version: 2,
     restaurant: {
@@ -58,7 +95,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
       timezone: restaurant.timezone || "Asia/Manila",
       isOpen: restaurant.walkInAvailability !== "PAUSED",
       cleaningTargetMinutes: finiteNumber(settings?.cleaningTargetMinutes, 12),
-      reservationDurationMinutes: readReservationDurationMinutes(settings),
+      reservationDurationMinutes: duration,
       acceptsReservations: availability.acceptsReservations,
       reservationBlockedDates: availability.blockedDates,
       reservationNotes: "",
@@ -67,13 +104,15 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
       closesAtHour: finiteNumber(settings?.closesAtHour, 22),
       schedule: readOperatingSchedule(settings ?? {}),
     },
-    tables: restaurant.diningTables.map((table, index) => ({
-      id: `t-${index}`,
+    tables: restaurant.diningTables.map((table) => ({
+      id: table.id,
       label: "",
       capacity: table.capacity,
       maxPartySize: table.maxPartySize,
       zone: "",
-      status: table.currentStatus as DemoState["tables"][number]["status"],
+      status: table.currentStatus === "AVAILABLE" && heldTableIds.has(table.id)
+        ? "RESERVED"
+        : table.currentStatus as DemoState["tables"][number]["status"],
       statusChangedAt: nowIso,
       x: 0,
       y: 0,
@@ -102,13 +141,14 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
   };
 
   const base = selectPublicRestaurantState(assembled, now);
+  const upcomingBookings = approvedBookings.filter((booking) => booking.scheduledAt >= now);
   // Every published floor is live; customers switch between them.
   const publicFloors = (restaurant.floorPlans ?? []).flatMap((plan) => {
-    const floor = buildPublicFloor(plan, restaurant.reservations ?? []);
+    const floor = buildPublicFloor(plan, upcomingBookings, liveStatuses);
     return floor ? [floor] : [];
   });
   const available = restaurant.diningTables.filter(
-    (table) => table.currentStatus === "AVAILABLE",
+    (table) => liveStatuses.get(table.id) === "AVAILABLE",
   );
   const floorPublishedAt = publicFloors
     .map((floor) => floor.publishedAt)
@@ -142,15 +182,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     preparingTables: restaurant.diningTables.filter(
       (table) => table.currentStatus === "CLEANING",
     ).length,
-    // Mirrors what the map actually shows when a floor is published, so the
-    // count and the blue tables can't disagree.
-    reservedTables: publicFloors.length
-      ? publicFloors.flatMap((floor) => floor.elements).filter(
-        (element) => element.type === "TABLE" && element.status === "RESERVED",
-      ).length
-      : restaurant.diningTables.filter(
-        (table) => table.currentStatus === "RESERVED",
-      ).length,
+    reservedTables: Array.from(liveStatuses.values()).filter((status) => status === "RESERVED").length,
   };
 }
 
@@ -176,6 +208,7 @@ export async function fetchPublicRestaurantBySlug(
       diningTables: {
         where: { active: true, archivedAt: null },
         select: {
+          id: true,
           capacity: true,
           maxPartySize: true,
           currentStatus: true,
@@ -185,22 +218,9 @@ export async function fetchPublicRestaurantBySlug(
         where: { status: { in: ["WAITING", "CALLED"] } },
         select: { partySize: true, status: true, joinedAt: true },
       },
-      // Approved bookings already tied to a specific table, for the rest of the
-      // service. PENDING_APPROVAL is excluded: an unreviewed request is not yet
-      // a commitment the restaurant has made. Only the table and the time are
-      // selected — party names, sizes, contacts and notes stay private.
-      reservations: {
-        where: {
-          status: { in: ["CONFIRMED", "ARRIVED"] },
-          assignedTableId: { not: null },
-          scheduledAt: {
-            gte: now,
-            lte: new Date(now.getTime() + PUBLIC_RESERVATION_LOOKAHEAD_MS),
-          },
-        },
-        select: { assignedTableId: true, scheduledAt: true },
-        orderBy: { scheduledAt: "asc" },
-      },
+      // An assigned pending request can hold a table internally. Only approved
+      // booking times appear in customer responses.
+      reservations: publicBookingSelect(now),
       floorPlans: {
         where: {
           archivedAt: null,
@@ -279,6 +299,7 @@ export async function fetchPublicRestaurants(
       diningTables: {
         where: { active: true, archivedAt: null },
         select: {
+          id: true,
           capacity: true,
           maxPartySize: true,
           currentStatus: true,
@@ -288,6 +309,7 @@ export async function fetchPublicRestaurants(
         where: { status: { in: ["WAITING", "CALLED"] } },
         select: { partySize: true, status: true, joinedAt: true },
       },
+      reservations: publicBookingSelect(now),
     },
     orderBy: { name: "asc" },
   });

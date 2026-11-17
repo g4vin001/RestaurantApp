@@ -116,6 +116,15 @@ export function startOfRestaurantDay(
   ) as Date;
 }
 
+export function restaurantDayRange(dateKey: string, timeZone?: string | null) {
+  const start = restaurantWallTimeToUtc(dateKey + "T00:00", timeZone);
+  if (!start) return null;
+  const nextDay = new Date(dateKey + "T00:00:00Z");
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const end = restaurantWallTimeToUtc(nextDay.toISOString().slice(0, 10) + "T00:00", timeZone);
+  return end ? { gte: start, lt: end } : null;
+}
+
 export function isTimestampStale(
   lastUpdatedAt: Date | string,
   now: Date,

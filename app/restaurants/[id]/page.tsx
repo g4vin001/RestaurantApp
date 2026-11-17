@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { CustomerDataUnavailable } from "@/components/customer/CustomerDataUnavailable";
 import { LiveRestaurantDetail } from "@/components/customer/LiveRestaurantDetail";
-import { getCachedPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-restaurant-cache";
+import { prisma } from "@/lib/prisma";
+import { fetchPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-restaurant-view";
 import { reportDataError } from "@/lib/server/data-error";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +14,9 @@ export default async function RestaurantPage({
 }) {
   const { id: slug } = await params;
 
-  let view: Awaited<ReturnType<typeof getCachedPublicRestaurantBySlug>>;
+  let view: Awaited<ReturnType<typeof fetchPublicRestaurantBySlug>>;
   try {
-    view = await getCachedPublicRestaurantBySlug(slug);
+    view = await fetchPublicRestaurantBySlug(prisma, slug);
   } catch (error) {
     const reference = reportDataError("public-restaurant-view", error);
     return <CustomerDataUnavailable reference={reference} />;

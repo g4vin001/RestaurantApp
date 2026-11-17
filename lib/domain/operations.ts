@@ -1,3 +1,5 @@
+import { publishedFloorIdsByTable } from "@/lib/domain/floor-plan";
+import { isReservationInSeatingWindow, reservationHoldsTable, reservationsHoldingTables } from "@/lib/domain/booking-conflicts";
 import { canTransitionTable } from "@/lib/domain/transitions";
 import {
   DEFAULT_RESERVATION_MINUTES,
@@ -46,18 +48,20 @@ function reservationClash(
   occurredAt: string,
   excludeReservationId?: string,
 ) {
-  const from = Date.parse(occurredAt);
+  const now = new Date(occurredAt);
   return (
     state.reservations.find((reservation) => {
       if (reservation.id === excludeReservationId) return false;
-      if (!["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status))
-        return false;
+      if (!reservationHoldsTable(reservation.status)) return false;
       const claimed =
         reservation.tableIds ??
         (reservation.tableId ? [reservation.tableId] : []);
       if (!claimed.some((id) => tableIds.includes(id))) return false;
-      const scheduled = Date.parse(reservation.scheduledAt);
-      return scheduled >= from && scheduled <= from + reservationWindowMs(state.restaurant);
+      return isReservationInSeatingWindow(
+        reservation.scheduledAt,
+        now,
+        state.restaurant.reservationDurationMinutes ?? DEFAULT_RESERVATION_MINUTES,
+      );
     }) ?? null
   );
 }
@@ -122,8 +126,13 @@ export function transitionTable(
     };
   }
 
-  const linkedQueue = latestLinkedQueue(state, tableId);
-  const linkedReservation = latestLinkedReservation(state, tableId);
+  const openSession = state.sessions
+    .filter((session) => session.tableId === tableId && !session.readyAt)
+    .sort((left, right) => Date.parse(right.seatedAt) - Date.parse(left.seatedAt))[0];
+  const queue = latestLinkedQueue(state, tableId);
+  const reservation = latestLinkedReservation(state, tableId);
+  const linkedQueue = openSession?.seatedAt === queue?.seatedAt ? queue : undefined;
+  const linkedReservation = openSession?.seatedAt === reservation?.seatedAt ? reservation : undefined;
   const linkedIds =
     linkedQueue?.assignedTableIds ??
     linkedReservation?.tableIds ??
@@ -204,6 +213,11 @@ export function transitionTable(
             : item,
         ),
         sessions,
+        reservations: table.status === "OCCUPIED" && status === "CLEANING" && linkedReservation?.status === "SEATED"
+          ? state.reservations.map((item) => item.id === linkedReservation.id
+            ? { ...item, status: "COMPLETED", completedAt: occurredAt, updatedAt: occurredAt }
+            : item)
+          : state.reservations,
         events: [
           ...affectedIds.map((affectedId) => ({
             id: `event-${occurredAt}-${affectedId}`,
@@ -553,26 +567,12 @@ export function reorderedQueuePositions(
 }
 
 export type SeatingRecommendationState = {
-  tables: Array<Pick<DemoState["tables"][number], "id" | "label" | "capacity" | "zone" | "active" | "status" | "statusChangedAt">>;
+  tables: Array<Pick<DemoState["tables"][number], "id" | "label" | "capacity" | "zone" | "active" | "status" | "statusChangedAt"> & { floorId?: string }>;
   reservations: Array<Pick<DemoState["reservations"][number], "id" | "tableId" | "tableIds" | "status" | "scheduledAt">>;
+  floorPlans?: DemoState["floorPlans"];
   // Optional so callers without settings fall back to the default length.
   restaurant?: Pick<DemoState["restaurant"], "reservationDurationMinutes">;
 };
-
-function reservationConflictsWithTable(
-  state: SeatingRecommendationState,
-  tableId: string,
-  now: Date,
-) {
-  return state.reservations.some(
-    (reservation) =>
-      (reservation.tableId === tableId ||
-        reservation.tableIds?.includes(tableId)) &&
-      ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"].includes(reservation.status) &&
-      Math.abs(Date.parse(reservation.scheduledAt) - now.getTime()) <
-        reservationWindowMs(state.restaurant),
-  );
-}
 
 export function recommendTables(
   state: SeatingRecommendationState,
@@ -582,6 +582,10 @@ export function recommendTables(
   const available = state.tables.filter(
     (table) => table.active && table.status === "AVAILABLE",
   );
+  const floorIds = publishedFloorIdsByTable(state.floorPlans ? { floorPlans: state.floorPlans } : undefined);
+  const reservedTableIds = reservationsHoldingTables(
+    state.reservations, now, state.restaurant?.reservationDurationMinutes ?? DEFAULT_RESERVATION_MINUTES,
+  );
   const singleRecommendations = available
     .filter((table) => table.capacity >= entry.partySize)
     .map<TableRecommendation>((table) => {
@@ -589,7 +593,7 @@ export function recommendTables(
       const zoneMatch = Boolean(
         entry.preferredZone && table.zone === entry.preferredZone,
       );
-      const conflict = reservationConflictsWithTable(state, table.id, now);
+      const conflict = reservedTableIds.has(table.id);
       const idleMinutes = Math.max(
         0,
         Math.floor(
@@ -622,13 +626,13 @@ export function recommendTables(
   for (let first = 0; first < available.length; first += 1) {
     for (let second = first + 1; second < available.length; second += 1) {
       const tables = [available[first], available[second]];
-      if (tables[0].zone !== tables[1].zone) continue;
+      const firstFloor = tables[0].floorId ?? floorIds.get(tables[0].id);
+      const secondFloor = tables[1].floorId ?? floorIds.get(tables[1].id);
+      if (firstFloor !== secondFloor || tables[0].zone !== tables[1].zone) continue;
       const capacity = tables[0].capacity + tables[1].capacity;
       if (capacity < entry.partySize || entry.partySize < 3) continue;
       if (
-        tables.some((table) =>
-          reservationConflictsWithTable(state, table.id, now),
-        )
+        tables.some((table) => reservedTableIds.has(table.id))
       )
         continue;
       const capacityWaste = capacity - entry.partySize;
@@ -776,13 +780,16 @@ function seatTables(
     return { ok: false, error: "One or more selected tables were not found." };
   if (tables.some((table) => table.status !== "AVAILABLE"))
     return { ok: false, error: "Every selected table must be available." };
+  const floorIds = publishedFloorIdsByTable(state);
   if (
     tables.length > 1 &&
-    !tables.every((table) => table.zone === tables[0].zone)
+    !tables.every((table) =>
+      table.zone === tables[0].zone && floorIds.get(table.id) === floorIds.get(tables[0].id),
+    )
   )
     return {
       ok: false,
-      error: "Combined tables must be in the same floor zone.",
+      error: "Combined tables must be on the same floor and in the same zone.",
     };
   if (tables.reduce((sum, table) => sum + table.capacity, 0) < partySize)
     return { ok: false, error: "The selected table capacity is too small." };
@@ -882,7 +889,7 @@ export type ReservationInput = Pick<
   Reservation,
   "partyName" | "partySize" | "scheduledAt"
 > &
-  Partial<Pick<Reservation, "contact" | "notes" | "tableId">>;
+  Partial<Pick<Reservation, "contact" | "notes" | "tableId" | "customerNote">>;
 
 export function reservationConflict(
   state: DemoState,
@@ -1069,6 +1076,7 @@ export function updateReservation(
                 partyName: input.partyName.trim(),
                 contact: input.contact?.trim() || undefined,
                 notes: input.notes?.trim() || undefined,
+                customerNote: input.customerNote === undefined ? item.customerNote : input.customerNote.trim() || undefined,
                 tableId: input.tableId || undefined,
                 updatedAt: occurredAt,
               }
@@ -1237,13 +1245,16 @@ export function moveReservationTable(
     return { ok: false, error: "One or more selected tables were not found." };
   if (destinationTables.some((table) => table.status !== "AVAILABLE"))
     return { ok: false, error: "Every selected table must be available." };
+  const floorIds = publishedFloorIdsByTable(state);
   if (
     destinationTables.length > 1 &&
-    !destinationTables.every((table) => table.zone === destinationTables[0].zone)
+    !destinationTables.every((table) =>
+      table.zone === destinationTables[0].zone && floorIds.get(table.id) === floorIds.get(destinationTables[0].id),
+    )
   )
     return {
       ok: false,
-      error: "Combined tables must be in the same floor zone.",
+      error: "Combined tables must be on the same floor and in the same zone.",
     };
   if (
     destinationTables.reduce((sum, table) => sum + table.capacity, 0) <

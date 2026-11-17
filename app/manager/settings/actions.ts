@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath, revalidateTag } from "next/cache";
+import { revalidatePath } from "next/cache";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import {
   COVER_IMAGE_MAX_BYTES,
@@ -9,7 +9,6 @@ import {
 } from "@/lib/customer/cover-image";
 import { prisma } from "@/lib/prisma";
 import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
-import { PUBLIC_RESTAURANTS_CACHE_TAG } from "@/lib/repositories/prisma/public-restaurant-cache";
 import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,7 +24,6 @@ async function managerRestaurant() {
 }
 
 function afterCoverChange(membership: NonNullable<Awaited<ReturnType<typeof managerRestaurant>>>) {
-  revalidateTag(PUBLIC_RESTAURANTS_CACHE_TAG);
   revalidatePath("/manager", "layout");
   revalidatePath(`/restaurants/${membership.restaurant.slug}`);
   revalidatePath("/");

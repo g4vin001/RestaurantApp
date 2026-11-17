@@ -10,6 +10,7 @@ import type {
   TableStatus,
 } from "@/lib/generated/prisma/client";
 import { reorderedQueuePositions, reservationsCancelledByAvailabilityChange } from "@/lib/domain/operations";
+import { overlappingReservationStarts, TABLE_HOLD_RESERVATION_STATUSES } from "@/lib/domain/booking-conflicts";
 import { canTransitionTable } from "@/lib/domain/transitions";
 import { tableCorrectionEligibility } from "@/lib/domain/table-correction";
 import {
@@ -17,6 +18,7 @@ import {
   formatDurationMinutes,
   isWithinServiceHours,
   MAX_RESERVATION_NOTES_LENGTH,
+  MAX_RESERVATION_LEAD_MINUTES,
   readOperatingSchedule,
   readReservationAvailability,
   readReservationDurationMinutes,
@@ -26,6 +28,7 @@ import {
   validateReservationWindows,
 } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
+import { loadPublishedFloors } from "@/lib/repositories/prisma/published-floors";
 import type { DatabaseOperationsCommand } from "@/lib/repositories/commands";
 import { OperationsRepositoryError } from "@/lib/repositories/operations";
 
@@ -113,6 +116,9 @@ function validateReservationInput(
     assignedTableId: input.tableId || null,
     contact: text(input.contact, "Contact", 160),
     notes: text(input.notes, "Notes", 2_000),
+    customerNote: typeof input.customerNote === "string"
+      ? text(input.customerNote, "Note to customer", 500) ?? null
+      : undefined,
   };
 }
 
@@ -172,14 +178,7 @@ async function assertReservationTable(
       status: {
         in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED", "SEATED"],
       },
-      scheduledAt: {
-        gt: new Date(
-          input.scheduledAt.getTime() - minutes * 60_000,
-        ),
-        lt: new Date(
-          input.scheduledAt.getTime() + minutes * 60_000,
-        ),
-      },
+      scheduledAt: overlappingReservationStarts(input.scheduledAt, minutes),
     },
     select: { id: true },
   });
@@ -284,11 +283,8 @@ async function assertNoReservationClash(
         : {}),
       // Bookings still waiting for their table. SEATED parties already hold one,
       // and a table they hold is not AVAILABLE for these commands anyway.
-      status: { in: ["PENDING_APPROVAL", "CONFIRMED", "ARRIVED"] },
-      scheduledAt: {
-        gte: now,
-        lte: new Date(now.getTime() + minutes * 60_000),
-      },
+      status: { in: [...TABLE_HOLD_RESERVATION_STATUSES] },
+      scheduledAt: overlappingReservationStarts(now, minutes),
     },
     orderBy: { scheduledAt: "asc" },
     select: {
@@ -423,10 +419,10 @@ async function beginReservationGroupClearing(
     where: {
       restaurantId: scope.restaurantId,
       reservationId,
-      status: "ACTIVE",
+      status: { in: ["ACTIVE", "CLEARING", "COMPLETED"] },
     },
     orderBy: { seatedAt: "desc" },
-    include: { tables: true },
+    include: { tables: true, sessions: { select: { clearedAt: true } } },
   });
   if (!assignment) {
     fail(
@@ -440,6 +436,13 @@ async function beginReservationGroupClearing(
       "PERSISTENCE",
       "This seated reservation has an empty seating group. No table was changed.",
     );
+  }
+  // An older floor action could clear the tables without completing the booking.
+  // Use the recorded clear time and leave any newer seating on those tables alone.
+  if (assignment.status !== "ACTIVE") {
+    const clearedAt = assignment.sessions[0]?.clearedAt;
+    if (clearedAt && assignment.sessions.every((session) => session.clearedAt)) return clearedAt;
+    fail("PERSISTENCE", "The linked seating group has no recorded clear time.");
   }
   const now = await changeTables(
     tx,
@@ -529,6 +532,12 @@ async function transitionTable(
     });
     if (assignment) {
       await tx.seatingAssignment.update({ where: { id: assignment.id }, data: { status: "CLEARING" } });
+      if (assignment.reservationId) {
+        await tx.reservation.updateMany({
+          where: { id: assignment.reservationId, restaurantId: scope.restaurantId, status: "SEATED" },
+          data: { status: "COMPLETED", completedAt: now, revision: { increment: 1 } },
+        });
+      }
     }
   } else if (table.currentStatus === "CLEANING" && command.status === "AVAILABLE") {
     await tx.diningSession.updateMany({
@@ -686,6 +695,20 @@ async function correctTable(
   }
 }
 
+async function assertSameSeatingArea(
+  tx: Prisma.TransactionClient,
+  scope: OperationsCommandScope,
+  tables: Array<{ id: string; zone: string }>,
+) {
+  if (tables.length < 2) return;
+  const floors = await loadPublishedFloors(tx, scope.restaurantId);
+  const first = floors.find((floor) => floor.tableIds.includes(tables[0].id));
+  const second = floors.find((floor) => floor.tableIds.includes(tables[1].id));
+  if (first?.id !== second?.id || tables[0].zone !== tables[1].zone) {
+    fail("VALIDATION", "Combined tables must be on the same floor and in the same zone.");
+  }
+}
+
 async function seatSource(
   tx: Prisma.TransactionClient,
   scope: OperationsCommandScope,
@@ -706,9 +729,7 @@ async function seatSource(
   if (tables.some((table) => table.currentStatus !== "AVAILABLE")) {
     fail("CONFLICT", "One of these tables was changed on another device.");
   }
-  if (new Set(tables.map((table) => table.zone)).size > 1) {
-    fail("VALIDATION", "Combined tables must be in the same zone.");
-  }
+  await assertSameSeatingArea(tx, scope, tables);
   await assertNoReservationClash(tx, scope, tableIds, {
     acknowledged: acknowledgeReservationClash,
     // A reservation never clashes with its own booking.
@@ -814,9 +835,7 @@ async function moveReservationTable(
   if (destinationTables.some((table) => table.currentStatus !== "AVAILABLE")) {
     fail("CONFLICT", "One of these tables was changed on another device.");
   }
-  if (new Set(destinationTables.map((table) => table.zone)).size > 1) {
-    fail("VALIDATION", "Combined tables must be in the same zone.");
-  }
+  await assertSameSeatingArea(tx, scope, destinationTables);
   if (destinationTables.reduce((sum, table) => sum + table.capacity, 0) < reservation.partySize) {
     fail("VALIDATION", "The selected table capacity is too small for this party.");
   }
@@ -1206,6 +1225,9 @@ async function executeInTransaction(
         schedule?.ok ? schedule.schedule : readOperatingSchedule(current),
       );
       if (!duration.ok) fail("VALIDATION", duration.error);
+      const leadMinutes = input.reservationLeadMinutes === undefined
+        ? undefined
+        : integer(input.reservationLeadMinutes, "Minimum reservation notice", 0, MAX_RESERVATION_LEAD_MINUTES);
       if (typeof input.acceptsReservations !== "boolean") fail("VALIDATION", "Choose whether online reservations are accepted.");
       const blockedDates = validateBlockedDates(input.reservationBlockedDates);
       if (!blockedDates.ok) fail("VALIDATION", blockedDates.error);
@@ -1233,6 +1255,7 @@ async function executeInTransaction(
           operatingSettings: {
             ...current, cleaningTargetMinutes, opensAtHour, closesAtHour,
             reservationDurationMinutes: duration.minutes,
+            ...(leadMinutes !== undefined ? { reservationLeadMinutes: leadMinutes } : {}),
             acceptsReservations: input.acceptsReservations,
             reservationBlockedDates: blockedDates.dates,
             reservationNotes,

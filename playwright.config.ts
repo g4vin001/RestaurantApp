@@ -5,7 +5,7 @@ const authenticated = process.env.HALINA_AUTH_E2E === "true";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: authenticated ? "staff-auth.spec.ts" : "manager-demo.spec.ts",
+  testMatch: authenticated ? ["staff-auth.spec.ts", "reservation-consistency.spec.ts"] : "manager-demo.spec.ts",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,

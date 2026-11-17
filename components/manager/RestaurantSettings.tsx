@@ -10,10 +10,13 @@ import { Modal } from "@/components/ui/Modal";
 import { reservationsCancelledByAvailabilityChange } from "@/lib/domain/operations";
 import {
   formatDurationMinutes,
+  isReservationLeadMinutes,
+  MAX_RESERVATION_LEAD_MINUTES,
   MAX_RESERVATION_MINUTES,
   MAX_RESERVATION_NOTES_LENGTH,
   MIN_RESERVATION_MINUTES,
   readOperatingSchedule,
+  readReservationLeadMinutes,
   RESERVATION_MINUTE_STEP,
   shortestServicePeriod,
   validateOperatingSchedule,
@@ -36,9 +39,10 @@ export function RestaurantSettings() {
   const [cleaningTargetMinutes, setCleaningTargetMinutes] = useState(
     state.restaurant.cleaningTargetMinutes,
   );
-  const [reservationDurationMinutes, setReservationDurationMinutes] = useState(
-    state.restaurant.reservationDurationMinutes,
+  const [reservationDuration, setReservationDuration] = useState(
+    String(state.restaurant.reservationDurationMinutes),
   );
+  const [reservationLead, setReservationLead] = useState(String(readReservationLeadMinutes(state.restaurant)));
   const [acceptsReservations, setAcceptsReservations] = useState(state.restaurant.acceptsReservations);
   const [blockedDates, setBlockedDates] = useState(state.restaurant.reservationBlockedDates);
   const [reservationNotes, setReservationNotes] = useState(state.restaurant.reservationNotes);
@@ -59,7 +63,8 @@ export function RestaurantSettings() {
     setLocation(state.restaurant.location);
     setIsOpen(state.restaurant.isOpen);
     setCleaningTargetMinutes(state.restaurant.cleaningTargetMinutes);
-    setReservationDurationMinutes(state.restaurant.reservationDurationMinutes);
+    setReservationDuration(String(state.restaurant.reservationDurationMinutes));
+    setReservationLead(String(readReservationLeadMinutes(state.restaurant)));
     setAcceptsReservations(state.restaurant.acceptsReservations);
     setBlockedDates(state.restaurant.reservationBlockedDates);
     setReservationNotes(state.restaurant.reservationNotes);
@@ -77,6 +82,8 @@ export function RestaurantSettings() {
     MIN_RESERVATION_MINUTES,
     Math.floor(durationCap / RESERVATION_MINUTE_STEP) * RESERVATION_MINUTE_STEP,
   );
+  const reservationDurationMinutes = reservationDuration === "" ? NaN : Number(reservationDuration);
+  const reservationLeadMinutes = reservationLead === "" ? NaN : Number(reservationLead);
   const durationCheck = validateReservationDuration(reservationDurationMinutes, schedule);
 
   // Past blocked dates no longer matter; they are hidden and dropped on save.
@@ -104,6 +111,11 @@ export function RestaurantSettings() {
     if (!duration.ok) {
       setFailed(true);
       setMessage(duration.error);
+      return;
+    }
+    if (!isReservationLeadMinutes(reservationLeadMinutes)) {
+      setFailed(true);
+      setMessage("Minimum reservation notice must be a whole number between 0 and 10,080 minutes.");
       return;
     }
     const windowsCheck = validateReservationWindows(reservationWindows);
@@ -141,6 +153,7 @@ export function RestaurantSettings() {
         isOpen,
         cleaningTargetMinutes,
         reservationDurationMinutes,
+        reservationLeadMinutes,
         acceptsReservations,
         reservationBlockedDates: upcomingBlockedDates,
         reservationNotes,
@@ -280,10 +293,12 @@ export function RestaurantSettings() {
                 min={MIN_RESERVATION_MINUTES}
                 max={durationMax}
                 step={RESERVATION_MINUTE_STEP}
-                value={reservationDurationMinutes}
-                onChange={(event) =>
-                  setReservationDurationMinutes(Number(event.target.value))
-                }
+                value={reservationDuration}
+                required
+                onChange={(event) => {
+                  setReservationDuration(event.target.value);
+                  setDirty(true);
+                }}
                 aria-invalid={!durationCheck.ok}
                 aria-describedby="reservation-length-help"
                 className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 px-3"
@@ -295,6 +310,25 @@ export function RestaurantSettings() {
                 {durationCheck.ok
                   ? `${formatDurationMinutes(reservationDurationMinutes)}. Bookings must finish by closing time, so the last bookable slot is ${formatDurationMinutes(reservationDurationMinutes)} before close.${shortestPeriod ? ` Up to ${formatDurationMinutes(durationMax)}, set by your shortest service period.` : ""}`
                   : durationCheck.error}
+              </span>
+            </label>
+            <label className="text-sm font-medium text-stone-700">
+              Minimum online reservation notice (minutes)
+              <input
+                type="number"
+                required
+                min={0}
+                max={MAX_RESERVATION_LEAD_MINUTES}
+                value={reservationLead}
+                aria-describedby="booking-notice-help"
+                onChange={(event) => {
+                  setReservationLead(event.target.value);
+                  setDirty(true);
+                }}
+                className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 px-3"
+              />
+              <span id="booking-notice-help" className="mt-2 block text-xs text-stone-500">
+                How far ahead a guest must submit an online request.
               </span>
             </label>
           </div>

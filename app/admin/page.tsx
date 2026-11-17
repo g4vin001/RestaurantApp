@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import {
   assignManagerByAdmin,
   createRestaurantByAdmin,
+  reviewRestaurantApplicationByAdmin,
   unlockAdminPanel,
   updateRestaurantByAdmin,
 } from "./actions";
@@ -50,7 +51,16 @@ export default async function AdminPage() {
     );
   }
 
-  const restaurants = await prisma.restaurant.findMany({
+  const [applications, restaurants, accounts] = await Promise.all([
+    prisma.restaurantApplication.findMany({
+      where: { status: "PENDING" },
+      orderBy: { submittedAt: "asc" },
+      select: {
+        applicantId: true, name: true, location: true, mapsUrl: true,
+        applicant: { select: { email: true } },
+      },
+    }),
+    prisma.restaurant.findMany({
     select: {
       id: true,
       name: true,
@@ -65,9 +75,8 @@ export default async function AdminPage() {
       },
     },
     orderBy: { createdAt: "desc" },
-  });
-
-  const accounts = await prisma.profile.findMany({
+    }),
+    prisma.profile.findMany({
     where: { id: { not: user.id } },
     select: {
       id: true,
@@ -79,7 +88,8 @@ export default async function AdminPage() {
       },
     },
     orderBy: { createdAt: "desc" },
-  });
+    }),
+  ]);
 
   return (
     <main className="mx-auto max-w-3xl px-5 py-16">
@@ -93,6 +103,27 @@ export default async function AdminPage() {
       <ClearFlash />
       {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
+
+      <PageCard className="mt-6">
+        <h2 className="font-semibold">Pending restaurant applications</h2>
+        {!applications.length && <p className="mt-2 text-sm text-stone-500">No applications awaiting review.</p>}
+        <ul className="mt-3 space-y-4">
+          {applications.map((application) => (
+            <li key={application.applicantId} className="rounded-lg border border-stone-200 p-4">
+              <p className="font-semibold">{application.name}</p>
+              <p className="text-sm text-stone-600">{application.location} · {application.applicant.email}</p>
+              <a href={application.mapsUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-emerald-800 underline">
+                Open location in Google Maps
+              </a>
+              <form action={reviewRestaurantApplicationByAdmin} className="mt-3 flex gap-2">
+                <input type="hidden" name="applicantId" value={application.applicantId} />
+                <button name="decision" value="APPROVED" className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-semibold text-white">Approve</button>
+                <button name="decision" value="DECLINED" className="min-h-10 rounded-lg border border-stone-300 px-4 text-sm font-semibold text-stone-700">Decline</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      </PageCard>
 
       <PageCard className="mt-6">
         <h2 className="font-semibold">Create restaurant</h2>
