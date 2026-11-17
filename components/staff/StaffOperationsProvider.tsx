@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useTransition, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { initialStaffConnection, staffConnectionReducer, type StaffConnectionState } from "@/lib/realtime/staff-connection";
 import type { SeatingRecommendationState } from "@/lib/domain/operations";
@@ -19,24 +19,36 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
   children: ReactNode;
 }) {
   const router = useRouter();
+  const [, startTransition] = useTransition();
   const [state, dispatch] = useReducer(staffConnectionReducer, initialStaffConnection);
   const [attempt, setAttempt] = useState(0);
   const inFlight = useRef(false);
   const queued = useRef(false);
+  const waitingForChange = useRef(false);
+  const editedForms = useRef(new WeakSet<HTMLFormElement>());
+  const lastSubmitAt = useRef(-Infinity);
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSnapshot = useRef(snapshotId);
 
   const requestRefresh = useCallback((changedElsewhere = false) => {
     if (!navigator.onLine) { dispatch({ type: "OFFLINE" }); return; }
+    if (changedElsewhere) waitingForChange.current = true;
     if (inFlight.current) { queued.current = true; return; }
     inFlight.current = true;
     dispatch({ type: "REFRESH_STARTED", changedElsewhere });
     timeout.current = setTimeout(() => {
       inFlight.current = false;
       queued.current = false;
+      // Recover if a broadcast arrived but the router never applied its new
+      // snapshot. Let staff finish any open edits before a full page reload.
+      const hasDraft = Array.from(document.forms).some((form) => editedForms.current.has(form));
+      if (waitingForChange.current && !hasDraft && navigator.onLine && performance.now() - lastSubmitAt.current > 2_000) {
+        window.location.reload();
+        return;
+      }
       dispatch({ type: "REFRESH_FAILED" });
-    }, 20_000);
-    router.refresh();
+    }, 5_000);
+    startTransition(() => router.refresh());
     // router.refresh() returns void. Only a new server snapshot confirms success.
   }, [router]);
 
@@ -45,6 +57,7 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
     lastSnapshot.current = snapshotId;
     if (timeout.current) clearTimeout(timeout.current);
     inFlight.current = false;
+    waitingForChange.current = false;
     dispatch({ type: "SNAPSHOT_RECEIVED" });
     if (queued.current) {
       queued.current = false;
@@ -58,15 +71,31 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
       if (timeout.current) clearTimeout(timeout.current);
       inFlight.current = false;
       queued.current = false;
+      waitingForChange.current = false;
       dispatch({ type: "OFFLINE" });
     };
-    const online = () => setAttempt((value) => value + 1);
+    const online = () => {
+      waitingForChange.current = true;
+      setAttempt((value) => value + 1);
+    };
     const visible = () => {
       if (document.visibilityState === "visible") requestRefresh();
     };
     window.addEventListener("offline", offline);
     window.addEventListener("online", online);
     document.addEventListener("visibilitychange", visible);
+    const trackEdit = (event: Event) => {
+      if (!(event.target instanceof HTMLElement)) return;
+      const form = event.target.closest("form");
+      if (form) editedForms.current.add(form);
+    };
+    const trackSubmit = (event: Event) => {
+      if (!(event.target instanceof HTMLFormElement)) return;
+      editedForms.current.delete(event.target);
+      lastSubmitAt.current = performance.now();
+    };
+    document.addEventListener("input", trackEdit, true);
+    document.addEventListener("submit", trackSubmit, true);
     const poll = window.setInterval(() => {
       if (navigator.onLine && document.visibilityState === "visible" && !inFlight.current) {
         requestRefresh();
@@ -93,6 +122,8 @@ export function StaffOperationsProvider({ restaurantId, snapshotId, seating, chi
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
       document.removeEventListener("visibilitychange", visible);
+      document.removeEventListener("input", trackEdit, true);
+      document.removeEventListener("submit", trackSubmit, true);
       window.clearInterval(poll);
       void supabase.removeChannel(channel);
     };
