@@ -61,6 +61,7 @@ import {
   updateStaffQueueStatus,
   updateStaffReservationStatus,
 } from "./actions";
+import { StaffReservationForm } from "@/components/staff/StaffReservationForm";
 
 export const dynamic = "force-dynamic";
 
@@ -541,7 +542,7 @@ function ReservationCard({
             <span className="inline-flex items-center gap-1.5"><Edit3 size={13} /> Edit or resolve</span>
             <ChevronDown size={14} className="transition group-open:rotate-180" />
           </summary>
-          <form action={editStaffReservation} className="mt-3 grid gap-2 sm:grid-cols-2">
+          <StaffReservationForm saveAction={editStaffReservation} className="mt-3 grid gap-2 sm:grid-cols-2">
             <input type="hidden" name="reservationId" value={reservation.id} />
             <input type="hidden" name="expectedRevision" value={reservation.revision} />
             <input name="partyName" required maxLength={120} defaultValue={reservation.partyName} aria-label="Party name" className={compactInputClass} />
@@ -558,7 +559,7 @@ function ReservationCard({
               <input name="customerNote" maxLength={500} defaultValue={reservation.customerNote ?? ""} className={compactInputClass + " mt-1"} />
             </label>}
             <button className={primaryButtonClass + " sm:col-span-2"}>Save reservation</button>
-          </form>
+          </StaffReservationForm>
           <div className="mt-2 flex flex-wrap gap-2">
             {(reservation.status === "PENDING_APPROVAL" ? (["CANCELLED"] as const) : (["CANCELLED", "NO_SHOW"] as const)).map((status) => (
               <form key={status} action={updateStaffReservationStatus}>
@@ -887,7 +888,7 @@ export default async function StaffOperationsPage({ searchParams }: {
                 {canManageGuests && (
                   <details className="group mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 shadow-sm">
                     <summary className="flex min-h-13 cursor-pointer list-none items-center justify-between px-4 text-sm font-bold text-violet-900"><span className="inline-flex items-center gap-2"><Plus size={16} /> Create a reservation</span><ChevronDown size={16} className="transition group-open:rotate-180" /></summary>
-                    <form action={addStaffReservation} className="grid gap-3 border-t border-violet-200 p-4 sm:grid-cols-2">
+                    <StaffReservationForm saveAction={addStaffReservation} className="grid gap-3 border-t border-violet-200 p-4 sm:grid-cols-2">
                       <label className="text-xs font-bold text-stone-600">Party name<input name="partyName" required maxLength={120} placeholder="Guest name" className={inputClass + " mt-1"} /></label>
                       <label className="text-xs font-bold text-stone-600">Party size<input name="partySize" type="number" required min={1} max={100} defaultValue={2} className={inputClass + " mt-1"} /></label>
                       <label className="text-xs font-bold text-stone-600">Date and time<input name="scheduledAt" type="datetime-local" required defaultValue={defaultReservationTime} className={inputClass + " mt-1"} /></label>
@@ -895,7 +896,7 @@ export default async function StaffOperationsPage({ searchParams }: {
                       {canViewContacts && <label className="text-xs font-bold text-stone-600">Contact<input name="contact" maxLength={160} placeholder="Phone or email" className={inputClass + " mt-1"} /></label>}
                       <label className={`text-xs font-bold text-stone-600 ${canViewContacts ? "" : "sm:col-span-2"}`}>Reservation notes<input name="notes" maxLength={2000} placeholder="Occasion, accessibility, seating notes…" className={inputClass + " mt-1"} /></label>
                       <button className={primaryButtonClass + " sm:col-span-2 min-h-11"}><CalendarDays size={15} /> Create reservation</button>
-                    </form>
+                    </StaffReservationForm>
                   </details>
                 )}
                 <div className="mt-4 space-y-3">{currentReservations.map((reservation) => <ReservationCard key={reservation.id} reservation={reservation} now={now} timeZone={context.restaurantTimezone} tables={tables} canManage={canManageGuests} canSeat={canSeat} canViewContacts={canViewContacts} />)}{currentReservations.length === 0 && <EmptyState icon={CalendarDays} title="No active bookings for this date" detail="Confirmed reservations and new customer requests will appear here." />}</div>

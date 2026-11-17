@@ -28,6 +28,7 @@ test("employee clearing and future bookings agree with manager and customer view
   const scheduledAt = new Date(now + 40 * 60_000);
   const bookingDate = restaurantDateKey(scheduledAt, timeZone);
   const futureDate = restaurantDateKey(new Date(now + 7 * 24 * 3_600_000), timeZone);
+  const rescheduledDate = restaurantDateKey(new Date(now + 8 * 24 * 3_600_000), timeZone);
   const future = restaurantWallTimeToUtc(futureDate + "T12:00", timeZone)!;
   const userIds: string[] = [];
   const staff = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -106,6 +107,12 @@ test("employee clearing and future bookings agree with manager and customer view
     await newBooking.getByRole("button", { name: "Create reservation", exact: true }).click();
     await expect(staff).toHaveURL((url) => url.searchParams.get("reservationDate") === futureDate);
     await expect(reservations.getByRole("heading", { name: "Next week party" })).toBeVisible();
+    const nextWeek = reservations.locator("article").filter({ has: staff.getByRole("heading", { name: "Next week party" }) });
+    await nextWeek.getByText("Edit or resolve", { exact: true }).click();
+    await nextWeek.getByLabel("Reservation date and time").fill(rescheduledDate + "T12:00");
+    await nextWeek.getByRole("button", { name: "Save reservation", exact: true }).click();
+    await expect(staff).toHaveURL((url) => url.searchParams.get("reservationDate") === rescheduledDate);
+    await expect(nextWeek).toBeVisible();
 
     await reservations.getByLabel("Reservation date", { exact: true }).fill(bookingDate);
     await reservations.getByRole("button", { name: "Show date" }).click();
