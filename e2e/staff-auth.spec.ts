@@ -139,10 +139,12 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await customer.getByLabel("Party name", { exact: true }).fill("Customer private party");
     await customer.getByLabel("Party size", { exact: true }).fill("5");
     await customer.getByLabel("Contact", { exact: false }).fill("09171234567");
+    await customer.getByLabel("Notes", { exact: false }).fill("Window seat requested");
     await customer.getByRole("button", { name: "Join waitlist", exact: true }).click();
     await expect(customer).toHaveURL(/\/my\/waitlist$/);
     // The earlier walk-in was seated, so this customer is the only party waiting.
     await expect(customer.getByRole("heading", { name: "You're 1st in line", exact: true })).toBeVisible();
+    await expect(customer.getByText("Window seat requested", { exact: true })).toBeVisible();
     await expect(customer.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(customer.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
     const customerParty = staff.locator("#queue article").filter({ hasText: "Customer private party" });
@@ -153,6 +155,7 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
     await expect(publicPage.getByText("Live updates connected", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(publicPage.getByText("Customer private party", { exact: false })).toHaveCount(0);
     await expect(publicPage.getByText("09171234567", { exact: false })).toHaveCount(0);
+    await expect(publicPage.getByText("Window seat requested", { exact: true })).toHaveCount(0);
     await expect(publicPage.getByRole("link", { name: "Request a reservation", exact: true })).toBeVisible();
     await expect(publicPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).resolves.toBe(true);
     const ownWaitlist = await otherContext.newPage();

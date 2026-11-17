@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = 3100;
 const authenticated = process.env.HALINA_AUTH_E2E === "true";
+const useProductionBuild = authenticated && Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,14 +18,14 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${port}`,
+    command: `${useProductionBuild ? "npm run build && npm run start" : "npm run dev"} -- --hostname 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}/manager`,
     env: {
       ...process.env,
       NEXT_PUBLIC_HALINA_DEMO_MODE: authenticated ? "false" : "true",
     },
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: useProductionBuild ? 180_000 : 120_000,
   },
   projects: [
     {
