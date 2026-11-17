@@ -216,7 +216,7 @@ async function reservationInput(
   };
 }
 
-export async function addStaffReservation(_previousDate: string | null, formData: FormData) {
+export async function addStaffReservation(formData: FormData) {
   const result = await runStaffCommand(
     async (context) => ({
       type: "ADD_RESERVATION",
@@ -230,7 +230,7 @@ export async function addStaffReservation(_previousDate: string | null, formData
     : null;
 }
 
-export async function editStaffReservation(_previousDate: string | null, formData: FormData) {
+export async function editStaffReservation(formData: FormData) {
   const result = await runStaffCommand(
     async (context) => {
       const reservationId = String(formData.get("reservationId") ?? "");

@@ -1,21 +1,21 @@
 "use client";
 
-import { useActionState, useEffect, type ReactNode } from "react";
+import { useActionState, type ReactNode } from "react";
 
 export function StaffReservationForm({ saveAction, className, children }: {
-  saveAction: (previousDate: string | null, formData: FormData) => Promise<string | null>;
+  saveAction: (formData: FormData) => Promise<string | null>;
   className: string;
   children: ReactNode;
 }) {
-  const [savedDate, submit, pending] = useActionState(saveAction, null);
-
-  useEffect(() => {
-    if (!savedDate) return;
+  const [savedDate, submit, pending] = useActionState(async (_previousDate: string | null, formData: FormData) => {
+    const date = await saveAction(formData);
+    if (!date) return null;
     // Load a fresh shift view for the saved date, including its reservation list.
-    const query = "?reservationDate=" + savedDate;
+    const query = "?reservationDate=" + date;
     if (window.location.search === query) window.location.reload();
     else window.location.assign("/ops" + query + "#reservations");
-  }, [savedDate]);
+    return date;
+  }, null);
 
   return (
     <form action={submit} aria-busy={pending}>
