@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type { ReviewFormState } from "@/components/review/ReviewForms";
 import { getCurrentAuthUser } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
@@ -33,5 +34,6 @@ export async function saveRestaurantSetup(_state: ReviewFormState, form: FormDat
   revalidatePath("/manager/setup");
   revalidatePath("/admin/restaurants");
   revalidatePath("/onboarding/restaurant");
-  return { message: action === "PUBLICATION_REQUESTED" ? "Publication request submitted for review." : "Settings saved." };
+  if (action === "PUBLICATION_REQUESTED") redirect("/manager/setup");
+  return { message: "Settings saved." };
 }

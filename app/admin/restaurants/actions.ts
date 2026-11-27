@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requirePlatformAdmin } from "@/lib/admin/auth";
 import type { ReviewFormState } from "@/components/review/ReviewForms";
 import { prisma } from "@/lib/prisma";
@@ -37,8 +38,9 @@ export async function decideApplication(id: string, _state: ReviewFormState, for
   revalidatePath("/onboarding/restaurant");
   const message = action === "NOTE_ADDED" ? "Internal note saved."
     : `Decision saved. ${await notifyRestaurantReview(result, "/onboarding/restaurant")}`;
-  await setReviewNotice(`/admin/restaurants/applications/${id}`, message);
-  return {};
+  const detailPath = `/admin/restaurants/applications/${id}`;
+  await setReviewNotice(detailPath, message);
+  redirect(detailPath);
 }
 
 export async function decidePublication(id: string, _state: ReviewFormState, form: FormData): Promise<ReviewFormState> {
@@ -65,6 +67,7 @@ export async function decidePublication(id: string, _state: ReviewFormState, for
   revalidatePath("/admin/restaurants");
   revalidatePath(`/admin/restaurants/listings/${id}`);
   const message = `Decision saved. ${await notifyRestaurantReview(result, "/manager/setup")}`;
-  await setReviewNotice(`/admin/restaurants/listings/${id}`, message);
-  return {};
+  const listingPath = `/admin/restaurants/listings/${id}`;
+  await setReviewNotice(listingPath, message);
+  redirect(listingPath);
 }
