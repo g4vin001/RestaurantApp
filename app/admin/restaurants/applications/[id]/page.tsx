@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
-import { ReviewForm } from "@/components/review/ReviewForms";
+import { ReviewForm, ReviewNotice } from "@/components/review/ReviewForms";
 import { ReviewHistory } from "@/components/review/ReviewHistory";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { requirePlatformAdmin } from "@/lib/admin/auth";
@@ -11,7 +11,6 @@ import { prisma } from "@/lib/prisma";
 import { findPossibleRestaurantDuplicates } from "@/lib/repositories/prisma/restaurant-applications";
 import { applicationLabels, approvalChecks, lifecycleLabels, reviewUuid } from "@/lib/restaurants/review";
 import { reportDataError } from "@/lib/server/data-error";
-import { readReviewNotice } from "@/lib/restaurants/review-notice";
 import { decideApplication } from "../../actions";
 
 async function loadApplication(id: string) {
@@ -30,7 +29,6 @@ export default async function ApplicationReviewPage({ params }: { params: Promis
   await requirePlatformAdmin();
   const { id } = await params;
   if (!reviewUuid(id)) notFound();
-  const notice = await readReviewNotice();
   let data: Awaited<ReturnType<typeof loadApplication>>;
   try {
     data = await loadApplication(id);
@@ -64,7 +62,7 @@ export default async function ApplicationReviewPage({ params }: { params: Promis
         <span className="review-badge">{applicationLabels[application.status]}</span>
       </div>
       <p className="mt-2 text-sm text-stone-600">Submitted {formatScheduledAt(application.submittedAt.toISOString())} · Updated {formatScheduledAt(application.updatedAt.toISOString())}</p>
-      {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
+      <ReviewNotice />
       {application.restaurant && <Link href={`/admin/restaurants/listings/${application.restaurant.id}`} className="review-secondary mt-4">Restaurant listing · {lifecycleLabels[application.restaurant.lifecycle]}</Link>}
       <div className="mt-5 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
         <div className="min-w-0">

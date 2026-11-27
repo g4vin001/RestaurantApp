@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import type { ReviewFormState } from "@/components/review/ReviewForms";
 import { getCurrentAuthUser } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
@@ -22,7 +20,6 @@ export async function saveRestaurantSetup(_state: ReviewFormState, form: FormDat
       await updateOwnerSetup(prisma, actor, membership.restaurantId, {
         action, reservations: form.has("configureReservations") ? form.get("reservations") === "on" : undefined, waitlist: form.get("waitlist") === "on",
       });
-      revalidatePath(`/restaurants/${membership.restaurant.slug}`);
     } else if (action === "PUBLICATION_REQUESTED") {
       await updateOwnerSetup(prisma, actor, membership.restaurantId, { action });
     } else {
@@ -31,9 +28,5 @@ export async function saveRestaurantSetup(_state: ReviewFormState, form: FormDat
   } catch (error) {
     return { error: reviewError("restaurant-owner-setup", error, "We could not save your changes. Try again.") };
   }
-  revalidatePath("/manager/setup");
-  revalidatePath("/admin/restaurants");
-  revalidatePath("/onboarding/restaurant");
-  if (action === "PUBLICATION_REQUESTED") redirect("/manager/setup");
-  return { message: "Settings saved." };
+  return { refresh: true, message: action === "SERVICES" ? "Customer preferences saved." : undefined };
 }

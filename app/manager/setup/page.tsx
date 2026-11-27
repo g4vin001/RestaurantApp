@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { PageCard } from "@/components/PageCard";
-import { ReviewForm } from "@/components/review/ReviewForms";
+import { ReviewForm, ReviewNotice } from "@/components/review/ReviewForms";
 import { ReviewHistory } from "@/components/review/ReviewHistory";
 import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
@@ -47,6 +47,7 @@ export default async function RestaurantSetupPage() {
           : restaurant.lifecycle === "PUBLISHED" ? "Customers can find your restaurant and use the services you enable."
             : "The public listing and new customer requests are paused. You can still manage existing reservations and waitlist entries."}
       </p>
+      <ReviewNotice />
       {setup && <PageCard className="mt-5">
         <h2 className="text-lg font-semibold text-stone-950">Setup checklist</h2>
         <ul className="mt-3 divide-y divide-stone-200">

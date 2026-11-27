@@ -3,8 +3,28 @@
 import { startTransition, useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_EVIDENCE_BYTES } from "@/lib/auth/restaurant-onboarding";
 
-export type ReviewFormState = { error?: string; message?: string };
+export type ReviewFormState = { error?: string; message?: string; refresh?: boolean };
 type ReviewAction = (state: ReviewFormState, data: FormData) => Promise<ReviewFormState>;
+
+function noticeKey() {
+  return `halina:review-notice:${window.location.pathname}`;
+}
+
+export function ReviewNotice() {
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const stored = window.sessionStorage.getItem(noticeKey());
+      if (stored) {
+        window.sessionStorage.removeItem(noticeKey());
+        setMessage(stored);
+      }
+    } catch {
+      // The saved decision is still visible in the review history.
+    }
+  }, []);
+  return message && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">{message}</p>;
+}
 
 export function EvidenceInput({ required }: { required: boolean }) {
   return <input name="evidence" type="file" accept=".pdf,.png,.jpg,.jpeg" required={required} aria-describedby="evidence-help"
@@ -24,6 +44,17 @@ export function ReviewForm({ action, children, submit, confirmation }: {
   const [state, formAction, pending] = useActionState(action, {});
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
+  useEffect(() => {
+    if (!state.refresh || pending) return;
+    if (state.message) {
+      try {
+        window.sessionStorage.setItem(noticeKey(), state.message);
+      } catch {
+        // The page still reloads to show the saved result.
+      }
+    }
+    window.location.reload();
+  }, [pending, state]);
   const form = useRef<HTMLFormElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   function submitReview(element: HTMLFormElement) {

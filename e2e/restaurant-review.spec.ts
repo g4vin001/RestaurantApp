@@ -137,9 +137,9 @@ test("verified applicant, administrator and customer complete the publication an
     await expect(owner.getByText("Your application is awaiting review.")).toBeVisible();
 
     await reviewer.reload();
-    const checklist = await reviewer.getByRole("checkbox").all();
-    expect(checklist).toHaveLength(6);
-    for (const check of checklist) {
+    const checklist = reviewer.getByRole("checkbox");
+    await expect(checklist).toHaveCount(6);
+    for (const check of await checklist.all()) {
       await check.check();
       await expect(check).toBeChecked();
     }

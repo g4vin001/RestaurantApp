@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { PageCard } from "@/components/PageCard";
-import { ReviewForm } from "@/components/review/ReviewForms";
+import { ReviewForm, ReviewNotice } from "@/components/review/ReviewForms";
 import { ReviewHistory } from "@/components/review/ReviewHistory";
 import { requirePlatformAdmin } from "@/lib/admin/auth";
 import { formatScheduledAt } from "@/lib/helpers";
@@ -10,7 +10,6 @@ import { prisma } from "@/lib/prisma";
 import { getPublicationSetup } from "@/lib/repositories/prisma/restaurant-publication";
 import { lifecycleLabels, reviewUuid } from "@/lib/restaurants/review";
 import { reportDataError } from "@/lib/server/data-error";
-import { readReviewNotice } from "@/lib/restaurants/review-notice";
 import { decidePublication } from "../../actions";
 
 async function listingView(id: string) {
@@ -26,7 +25,6 @@ export default async function ListingReviewPage({ params }: { params: Promise<{ 
   await requirePlatformAdmin();
   const { id } = await params;
   if (!reviewUuid(id)) notFound();
-  const notice = await readReviewNotice();
   let data: Awaited<ReturnType<typeof listingView>>;
   try {
     data = await listingView(id);
@@ -56,7 +54,7 @@ export default async function ListingReviewPage({ params }: { params: Promise<{ 
         <span className="rounded-full bg-stone-200 px-3 py-1 text-xs font-semibold text-stone-800">{restaurant.environment}</span>
       </div>
       <p className="mt-2 break-words text-sm text-stone-600">{restaurant.location || "No business address recorded"}</p>
-      {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
+      <ReviewNotice />
       {restaurant.application && <Link href={`/admin/restaurants/applications/${restaurant.application.id}`} className="review-secondary mt-4">View approved application</Link>}
       {restaurant.publicationRequestedAt && <p className="mt-3 text-sm text-stone-700">Publication requested {formatScheduledAt(restaurant.publicationRequestedAt.toISOString())}</p>}
       {restaurant.environment === "LIVE" && <div className="mt-5 grid grid-cols-1 items-start gap-5 lg:grid-cols-2">

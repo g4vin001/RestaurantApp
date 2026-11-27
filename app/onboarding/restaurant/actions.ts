@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ReviewFormState } from "@/components/review/ReviewForms";
 import { getCurrentAuthUser } from "@/lib/auth/current-identity";
@@ -33,7 +32,5 @@ export async function submitRestaurantApplicationAction(_state: ReviewFormState,
   } catch (error) {
     return { error: reviewError("restaurant-application-submit", error, "We could not submit your application. Please try again.") };
   }
-  revalidatePath("/onboarding/restaurant");
-  revalidatePath("/admin/restaurants");
-  return { message: "Application submitted for review." };
+  return { refresh: true };
 }

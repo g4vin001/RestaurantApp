@@ -156,6 +156,6 @@ export async function reviewRestaurantPublication(client: PrismaClient, actor: R
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { profile: { select: { email: true } } },
     });
-    return { slug: restaurant.slug, eventId: event.id, applicantEmail: owner?.profile.email ?? null };
+    return { eventId: event.id, applicantEmail: owner?.profile.email ?? null };
   });
 }

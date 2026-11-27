@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requirePlatformAdmin } from "@/lib/admin/auth";
 import type { ReviewFormState } from "@/components/review/ReviewForms";
 import { prisma } from "@/lib/prisma";
@@ -10,7 +8,6 @@ import { reviewRestaurantPublication } from "@/lib/repositories/prisma/restauran
 import { approvalChecks, formMessage, formRevision, RestaurantReviewError, reviewUuid } from "@/lib/restaurants/review";
 import { notifyRestaurantReview } from "@/lib/restaurants/review-email";
 import { reviewError } from "@/lib/restaurants/review-errors";
-import { setReviewNotice } from "@/lib/restaurants/review-notice";
 
 export async function decideApplication(id: string, _state: ReviewFormState, form: FormData): Promise<ReviewFormState> {
   const actor = await requirePlatformAdmin();
@@ -33,14 +30,9 @@ export async function decideApplication(id: string, _state: ReviewFormState, for
   } catch (error) {
     return { error: reviewError("restaurant-application-decision", error, "We could not save this decision. Try again.") };
   }
-  revalidatePath("/admin/restaurants");
-  revalidatePath(`/admin/restaurants/applications/${id}`);
-  revalidatePath("/onboarding/restaurant");
   const message = action === "NOTE_ADDED" ? "Internal note saved."
     : `Decision saved. ${await notifyRestaurantReview(result, "/onboarding/restaurant")}`;
-  const detailPath = `/admin/restaurants/applications/${id}`;
-  await setReviewNotice(detailPath, message);
-  redirect(detailPath);
+  return { message, refresh: true };
 }
 
 export async function decidePublication(id: string, _state: ReviewFormState, form: FormData): Promise<ReviewFormState> {
@@ -60,14 +52,6 @@ export async function decidePublication(id: string, _state: ReviewFormState, for
   } catch (error) {
     return { error: reviewError("restaurant-publication-decision", error, "We could not save this decision. Try again.") };
   }
-  revalidatePath("/");
-  revalidatePath(`/restaurants/${result.slug}`);
-  revalidatePath("/onboarding/restaurant");
-  revalidatePath("/manager/setup");
-  revalidatePath("/admin/restaurants");
-  revalidatePath(`/admin/restaurants/listings/${id}`);
   const message = `Decision saved. ${await notifyRestaurantReview(result, "/manager/setup")}`;
-  const listingPath = `/admin/restaurants/listings/${id}`;
-  await setReviewNotice(listingPath, message);
-  redirect(listingPath);
+  return { message, refresh: true };
 }
