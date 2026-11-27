@@ -105,12 +105,23 @@ test("verified applicant, administrator and customer complete the publication an
     await reviewer.getByRole("link", { name: restaurantName }).click();
     await expect(reviewer.getByText("Supabase confirmed the account email", { exact: false })).toBeVisible();
     expect(await reviewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-    const download = await reviewerContext.request.get(docPath);
-    expect(download.ok()).toBe(true);
-    expect(download.headers()["cache-control"]).toContain("no-store");
-    expect(download.headers()["content-disposition"]).toContain("attachment");
-    expect(await download.body()).toEqual(pdf);
-    expect((await reviewerContext.request.get(docPath.replace(application.id, randomUUID()))).status()).toBe(404);
+    // Chromium sends Secure cookies on the loopback origin used by the app.
+    // The standalone API client applies stricter HTTP cookie matching.
+    const download = await reviewer.evaluate(async (path) => {
+      const response = await fetch(path, { redirect: "error" });
+      return {
+        status: response.status,
+        cache: response.headers.get("cache-control"),
+        disposition: response.headers.get("content-disposition"),
+        content: Array.from(new Uint8Array(await response.arrayBuffer())),
+      };
+    }, docPath);
+    expect(download.status).toBe(200);
+    expect(download.cache).toContain("no-store");
+    expect(download.disposition).toContain("attachment");
+    expect(Buffer.from(download.content)).toEqual(pdf);
+    const wrongApplication = await reviewer.evaluate(async (path) => (await fetch(path, { redirect: "error" })).status, docPath.replace(application.id, randomUUID()));
+    expect(wrongApplication).toBe(404);
 
     await reviewer.getByLabel("Note", { exact: true }).fill("Internal review only");
     await reviewer.getByRole("button", { name: "Save internal note" }).click();
