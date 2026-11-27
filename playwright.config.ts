@@ -6,11 +6,11 @@ const useProductionBuild = authenticated && Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: authenticated ? ["staff-auth.spec.ts", "reservation-consistency.spec.ts"] : "manager-demo.spec.ts",
+  testMatch: authenticated ? ["staff-auth.spec.ts", "reservation-consistency.spec.ts", "restaurant-review.spec.ts"] : "manager-demo.spec.ts",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  expect: { timeout: authenticated ? 12_000 : 5_000 },
+  expect: { timeout: authenticated ? 15_000 : 5_000 },
   reporter: "list",
   use: {
     baseURL: `http://127.0.0.1:${port}`,

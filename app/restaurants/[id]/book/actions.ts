@@ -12,6 +12,7 @@ import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
 import { reportDataError } from "@/lib/server/data-error";
 import { createClient } from "@/lib/supabase/server";
+import { publicRestaurantScope } from "@/lib/restaurants/customer-access";
 
 export type ReservationBookingState = {
   error?: string;
@@ -34,7 +35,7 @@ export async function bookReservation(
 
   try {
     const restaurant = await prisma.restaurant.findFirst({
-      where: { id: restaurantId, environment: "LIVE", archivedAt: null },
+      where: { id: restaurantId, ...publicRestaurantScope },
       select: { timezone: true, slug: true, operatingSettings: true },
     });
     if (!restaurant) return { error: "This restaurant is no longer available." };

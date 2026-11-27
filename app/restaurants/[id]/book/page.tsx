@@ -18,6 +18,7 @@ import {
   restaurantServiceStatus,
 } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
+import { customerServices, publicRestaurantScope } from "@/lib/restaurants/customer-access";
 
 export default async function BookReservationPage({
   params,
@@ -40,7 +41,7 @@ export default async function BookReservationPage({
   try {
     profile = await ensureProfile(user);
     restaurant = await prisma.restaurant.findFirst({
-      where: { slug, environment: "LIVE", archivedAt: null },
+      where: { slug, ...publicRestaurantScope },
       select: { id: true, name: true, timezone: true, operatingSettings: true },
     });
   } catch (error) {
@@ -61,7 +62,8 @@ export default async function BookReservationPage({
         <PageCard className="mt-6">
           <h2 className="font-semibold text-stone-900">Online reservations are closed</h2>
           <p className="mt-1 text-sm leading-6 text-stone-600">
-            This restaurant isn&apos;t taking online reservations right now. You can still join the walk-in waitlist during opening hours.
+            This restaurant isn&apos;t taking online reservations right now.
+            {customerServices(restaurant.operatingSettings).waitlist && " You can still join the walk-in waitlist during opening hours."}
           </p>
           <Link href={`/restaurants/${slug}`} className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-emerald-800">← Back to {restaurant.name}</Link>
         </PageCard>

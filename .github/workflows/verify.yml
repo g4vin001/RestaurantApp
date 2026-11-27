@@ -81,12 +81,13 @@ jobs:
           retention-days: 7
 
   authenticated:
-    name: Authenticated manager and staff
+    name: Authenticated restaurant review, manager and staff
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       HALINA_AUTH_E2E: "true"
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3100
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -98,6 +99,8 @@ jobs:
         with:
           version: 2.117.0
       - run: supabase init --workdir test
+      - name: Require email confirmation for applicant signup
+        run: sed -i '0,/enable_confirmations = false/s//enable_confirmations = true/' test/supabase/config.toml
       - name: Start isolated Supabase services
         run: supabase start --workdir test > /dev/null
       - name: Configure local service connections

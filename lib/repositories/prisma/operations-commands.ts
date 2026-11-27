@@ -1204,11 +1204,14 @@ async function executeInTransaction(
       const input = command.input;
       const settings = await tx.restaurant.findFirst({
         where: { id: scope.restaurantId, archivedAt: null },
-        select: { operatingSettings: true, revision: true, timezone: true },
+        select: { name: true, location: true, operatingSettings: true, revision: true, timezone: true, application: { select: { emailVerifiedAt: true } } },
       });
       if (!settings || settings.revision !== command.expectedRevision) fail("CONFLICT", "Restaurant settings changed on another device.");
       const name = text(input.name, "Restaurant name", 80, true) as string;
-      const location = text(input.location, "Location", 160, true) as string;
+      const location = text(input.location, "Location", 300, true) as string;
+      if (settings.application?.emailVerifiedAt && (name !== settings.name || location !== settings.location)) {
+        fail("FORBIDDEN", "Contact Halina to change your verified restaurant name or address.");
+      }
       const cleaningTargetMinutes = integer(input.cleaningTargetMinutes, "Cleaning target", 1, 120);
       const opensAtHour = integer(input.opensAtHour, "Opening hour", 0, 23);
       const closesAtHour = integer(input.closesAtHour, "Closing hour", 1, 24);

@@ -45,6 +45,7 @@ describeWithDatabase("customer reservation booking", () => {
         id: restaurantId,
         slug: "reservation-test-restaurant",
         name: "Reservation Test Restaurant",
+        lifecycle: "PUBLISHED",
         operatingSettings: { opensAtHour: 0, closesAtHour: 24 },
         diningTables: {
           create: [

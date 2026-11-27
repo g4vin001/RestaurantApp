@@ -32,3 +32,10 @@ CREATE TABLE realtime.messages (
   extension text NOT NULL
 );
 ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY;
+
+CREATE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean)
+RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO realtime.messages (extension) VALUES ('broadcast');
+END;
+$$;

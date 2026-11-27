@@ -67,7 +67,7 @@ test("manager, staff and customer devices share live seating, waitlist outcomes 
       [otherRestaurantId, `auth-other-${suffix}`, "Other Tenant Kitchen", otherOwner.id],
     ]) {
       // LIVE is needed for public routes, only inside this guarded loopback stack.
-      await pool.query('INSERT INTO "Restaurant" (id, slug, name, environment, "operatingSettings", "staffPinHash", "updatedAt") VALUES ($1,$2,$3,$6::"RestaurantEnvironment",$4::jsonb,$5,now())', [id, slug, name, JSON.stringify({ opensAtHour: 0, closesAtHour: 24 }), hashStaffPin("4817"), id === restaurantId ? "LIVE" : "TEST"]);
+      await pool.query('INSERT INTO "Restaurant" (id, slug, name, environment, lifecycle, "operatingSettings", "staffPinHash", "updatedAt") VALUES ($1,$2,$3,$6::"RestaurantEnvironment",\'PUBLISHED\',$4::jsonb,$5,now())', [id, slug, name, JSON.stringify({ opensAtHour: 0, closesAtHour: 24 }), hashStaffPin("4817"), id === restaurantId ? "LIVE" : "TEST"]);
       await pool.query('INSERT INTO "RestaurantMembership" (id, "restaurantId", "profileId", role, "updatedAt") VALUES ($1,$2,$3,\'OWNER\',now())', [randomUUID(), id, profileId]);
       await pool.query('INSERT INTO "FloorPlan" (id, "restaurantId", name, "draftSnapshot", "updatedAt") VALUES ($1,$2,\'Main\',\'{"elements":[]}\'::jsonb,now())', [randomUUID(), id]);
     }

@@ -17,15 +17,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.9.1",
-    "@prisma/client": "^7.9.0",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.8",
     "exceljs": "4.4.0",
     "lucide-react": "^0.468.0",
-    "next": "^15.5.22",
+    "next": "^15.5.29",
     "pg": "^8.22.0",
-    "prisma": "^7.9.0",
+    "prisma": "^7.10.1",
     "qrcode.react": "4.2.0",
     "react": "^19.1.7",
     "react-dom": "^19.1.7",
@@ -40,21 +40,22 @@
     "@types/react-dom": "19.1.7",
     "dotenv": "^17.4.2",
     "eslint": "9.34.0",
-    "eslint-config-next": "^15.5.22",
+    "eslint-config-next": "^15.5.29",
     "tailwindcss": "4.1.13",
     "typescript": "5.8.3",
     "vitest": "^3.2.7"
   },
   "overrides": {
+    "@prisma/config": { "effect": "3.22.1" },
     "deepmerge-ts": "8.0.2",
     "postcss": "8.5.26",
     "uuid": "11.1.1"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
-    "prisma@7.10.0": true,
+    "prisma@7.10.1": true,
     "unrs-resolver@1.12.2": true,
-    "@prisma/engines@7.10.0": true,
+    "@prisma/engines@7.10.1": true,
     "@tailwindcss/oxide@4.1.13": true
   }
 }

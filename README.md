@@ -98,14 +98,17 @@ npm run build
 the manager shell, queue persistence, cross-tab synchronization, and mobile
 operation without requiring database credentials. The PostgreSQL integration
 suite covers authenticated tenant and database command behavior. The
-authenticated GitHub Actions browser suite provisions local Supabase services
-and creates disposable manager, staff, and customer accounts.
+authenticated GitHub Actions browser suite provisions local Supabase and
+Mailpit, verifies an applicant through a signup email, and exercises restaurant
+review, publication, and the existing manager, staff, and customer workflows.
+Set `HALINA_TEST_DATABASE_URL` to an isolated migrated PostgreSQL database to
+include the database integration tests in `npm test`.
 
 ## Available routes
 
 - `/` — customer restaurant feed
 - `/login` — log in or create a customer account; staff access is not publicly self-service
-- /onboarding/restaurant is the authenticated restaurant application. An admin reviews the submitted location and approves or declines the request.
+- `/onboarding/restaurant` — verified restaurant application, reviewer feedback, and application status
 - `/restaurants/salu-salo` — sample restaurant detail
 - `/manager` — live manager overview (manager account, or explicit demo mode)
 - `/manager/floor` — interactive live floor and table transitions
@@ -114,18 +117,63 @@ and creates disposable manager, staff, and customer accounts.
 - `/manager/analytics` — period, zone, and table analytics derived from shared operational events
 - `/manager/team` — staff records, email work access, restricted roles, and restaurant PIN
 - `/manager/settings` — restaurant identity, walk-in availability, hours, and cleaning target
+- `/manager/setup` — publication checklist, customer preferences, and publication status
 - `/work` — verified personal-account staff clock-in, resume work, and clock-out
 - `/ops` — restricted staff Live Floor, Queue, and Reservations workspace
 - `/admin/data-lab` — allowlisted, secondary-password TEST data import and statistics lab
+- `/admin/restaurants` — application review, publication requests, and listing access
 
 There is intentionally no `/employee` route. Staff use normal Supabase-authenticated
 Halina accounts. Managers whitelist the exact verified email and configure the
 restaurant's four-digit PIN; staff then clock in through `/work`.
 
+## Restaurant review and publication
+
+1. Enable **Confirm email** in Supabase Auth and configure the application
+   callback URL. Verify the existing platform administrator's account and
+   copy its UUID from Authentication → Users.
+2. Set server environment variables `ADMIN_USER_ID`, `ADMIN_EMAIL`,
+   `ADMIN_PANEL_PASSWORD`, and `HALINA_RATE_LIMIT_SECRET`. The verified email
+   and UUID must identify the same account. Use an independent secret for the
+   administrator unlock. The usual Supabase Auth and database variables are
+   still required. The existing administrator account-deletion tool also uses
+   `SUPABASE_SERVICE_ROLE_KEY`.
+3. Sign in as the platform administrator and unlock `/admin`. Open
+   **Restaurant applications and publication** to search, filter, review
+   evidence, request information, decline with a reason, or approve. Only
+   administrators can view evidence and internal notes. Check the business,
+   the location, the applicant's authority, and contact details independently.
+   Supabase confirms the account email and Halina validates the Maps link format.
+4. Approval gives the applicant an owner membership and a private workspace
+   with a floor draft, operating settings, and default staff roles. The owner
+   completes the checklist at `/manager/setup` and requests publication.
+   Review that request under **Restaurant listings → Publication requested**.
+5. **Suspend restaurant** hides a published listing and stops new public
+   requests. Managers and authorized staff can handle existing reservations
+   and waitlist entries. **Restore restaurant** resumes public access.
+
+The two restaurant review migrations extend the existing application table
+and import earlier decisions into history. Ask for fresh information and
+evidence before approving an earlier pending application. Existing LIVE
+listings retain public visibility, archive flags are preserved, and TEST
+restaurants stay private. New restaurants start in SETUP.
+
+Review history is append-only. Evidence uses server-only PostgreSQL storage
+with RLS and revoked browser grants. It is served as a private attachment.
+PDF, PNG, and JPEG files are capped at 2 MB and checked by size and signature.
+The review system retains earlier evidence and does not run malware scans.
+
+For optional email updates, set `HALINA_RESEND_API_KEY`,
+`HALINA_REVIEW_FROM_EMAIL` (a sender on a verified Resend domain), and
+`HALINA_REVIEW_SITE_URL` (the public HTTPS origin). Decisions always appear in
+the in-app timeline. The administrator sees whether the provider accepted
+the email request. Bounce tracking and automatic retries are unavailable.
+
 ## Manager and staff quick start
 
 1. Sign in with the restaurant owner's or manager's account and open `/manager`.
-   A first-time owner applies at `/onboarding/restaurant`. Approval creates the restaurant and grants the applicant owner access.
+   First-time applicants verify their email and apply at `/onboarding/restaurant`.
+   Approval grants owner access and opens private setup.
 2. In **Restaurant settings**, check the timezone, weekly service periods,
    holiday exceptions and walk-in switch. Save before taking bookings. Existing
    bookings remain actionable if you later change the hours; review affected
@@ -139,6 +187,8 @@ restaurant's four-digit PIN; staff then clock in through `/work`.
    (`/work`), chooses **Clock in** for the restaurant and enters its PIN. **Enter work mode**
    opens `/ops`. Sessions expire after at most 16 hours; use **Shift access**
    to resume or clock out. This is workspace access, not payroll/timekeeping.
+6. Open **Restaurant publication**, save the service preferences, and request
+   publication after the checklist is complete.
 
 During service, add walk-ins to Queue, call the party, then open **Seat** and
 choose a fitting table or same-zone pair. Check that a proposed pair can actually

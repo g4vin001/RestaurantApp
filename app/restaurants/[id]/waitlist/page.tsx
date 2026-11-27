@@ -7,6 +7,7 @@ import { WaitlistJoinForm } from "./WaitlistJoinForm";
 import { OpeningHours } from "@/components/customer/OpeningHours";
 import { restaurantServiceStatus } from "@/lib/domain/restaurant-schedule";
 import { asRecord } from "@/lib/repositories/prisma/json-settings";
+import { customerServices, publicRestaurantScope } from "@/lib/restaurants/customer-access";
 
 export default async function WaitlistPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: slug } = await params;
@@ -14,7 +15,7 @@ export default async function WaitlistPage({ params }: { params: Promise<{ id: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirectTo=${encodeURIComponent(`/restaurants/${slug}/waitlist`)}`);
   const profile = await ensureProfile(user);
-  const restaurant = await prisma.restaurant.findFirst({ where: { slug, environment: "LIVE", archivedAt: null }, select: { id: true, name: true, walkInAvailability: true, timezone: true, operatingSettings: true } });
+  const restaurant = await prisma.restaurant.findFirst({ where: { slug, ...publicRestaurantScope }, select: { id: true, name: true, walkInAvailability: true, timezone: true, operatingSettings: true } });
   if (!restaurant) notFound();
 
   const existing = await prisma.queueEntry.findFirst({
@@ -30,7 +31,12 @@ export default async function WaitlistPage({ params }: { params: Promise<{ id: s
       <h1 className="mt-2 text-3xl font-bold">{restaurant.name}</h1>
       <p className="mt-2 text-sm text-stone-600">Join remotely, then keep this page/account available for status updates. This first version requires a Halina account.</p>
       <div className="mt-6"><OpeningHours service={service} timeZone={restaurant.timezone} /></div>
-      <PageCard className="mt-6">{service.openNow && restaurant.walkInAvailability !== "PAUSED" ? <WaitlistJoinForm slug={slug} defaultPartyName={profile.displayName} /> : <p className="text-sm text-stone-600">{service.openNow ? "Walk-ins are paused right now." : "The waitlist opens during service hours."}</p>}</PageCard>
+      <PageCard className="mt-6">{!customerServices(restaurant.operatingSettings).waitlist
+        ? <p className="text-sm text-stone-700">This restaurant has turned off online waitlist requests.</p>
+        : service.openNow && restaurant.walkInAvailability !== "PAUSED"
+          ? <WaitlistJoinForm slug={slug} defaultPartyName={profile.displayName} />
+          : <p className="text-sm text-stone-600">{service.openNow ? "Walk-ins are paused right now." : "The waitlist opens during service hours."}</p>}
+      </PageCard>
     </main>
   );
 }

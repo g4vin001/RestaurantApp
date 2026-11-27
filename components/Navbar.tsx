@@ -55,6 +55,7 @@ export async function Navbar() {
             <>
               <Link href="/reservations">My reservations</Link>
               {showManager ? <Link href="/manager">Manager</Link> : <Link href="/onboarding/restaurant">List a restaurant</Link>}
+              {showManager && <Link href="/onboarding/restaurant">Restaurant application</Link>}
               {showWork && (
                 <Link href="/work" className="font-medium text-emerald-700">
                   Work

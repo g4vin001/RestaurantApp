@@ -68,7 +68,7 @@ test("employee clearing and future bookings agree with manager and customer view
     const owner = await account("manager");
     const employee = await account("employee");
     const diner = await account("customer");
-    await pool.query('INSERT INTO "Restaurant" (id,slug,name,"operatingSettings","staffPinHash","updatedAt") VALUES ($1,$2,$3,$4::jsonb,$5,now())', [restaurantId, slug, "Reservation Test Kitchen", JSON.stringify({ opensAtHour: 0, closesAtHour: 24 }), hashStaffPin("4817")]);
+    await pool.query('INSERT INTO "Restaurant" (id,slug,name,lifecycle,"operatingSettings","staffPinHash","updatedAt") VALUES ($1,$2,$3,\'PUBLISHED\',$4::jsonb,$5,now())', [restaurantId, slug, "Reservation Test Kitchen", JSON.stringify({ opensAtHour: 0, closesAtHour: 24 }), hashStaffPin("4817")]);
     await pool.query('INSERT INTO "RestaurantMembership" (id,"restaurantId","profileId",role,"updatedAt") VALUES ($1,$2,$3,$4,now())', [randomUUID(), restaurantId, owner.id, "OWNER"]);
     await pool.query('INSERT INTO "StaffMember" (id,"restaurantId",name,"jobTitle",email,"emailNormalized","permissionPreset","workAccessEnabled","updatedAt") VALUES ($1,$2,$3,$4,$5,$5,$6,true,now())', [randomUUID(), restaurantId, "Test employee", "Shift lead", employee.email, "MANAGER"]);
     const groundTable = await publishedTable("Ground floor", "G1");

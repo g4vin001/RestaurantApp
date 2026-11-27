@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       "error",
       "The email confirmation link is missing its authentication code. Please try signing in or request a new confirmation email.",
     );
-    return NextResponse.redirect(new URL("/login", request.url));
+    return callbackRedirect("/login");
   }
 
   const supabase = await createClient();
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
   // A failed password-reset link should lead straight to requesting a new one.
   if (error && next === "/reset-password") {
-    return NextResponse.redirect(new URL("/forgot-password?expired=1", request.url));
+    return callbackRedirect("/forgot-password?expired=1");
   }
 
   if (error) {
@@ -31,8 +31,14 @@ export async function GET(request: NextRequest) {
       "error",
       "Halina could not finish confirming this email. The link may have expired; try signing in or register again.",
     );
-    return NextResponse.redirect(new URL("/login", request.url));
+    return callbackRedirect("/login");
   }
 
-  return NextResponse.redirect(new URL(next, request.url));
+  return callbackRedirect(next);
+}
+
+function callbackRedirect(path: string) {
+  // Keep the confirmation and the destination on the same browser origin,
+  // even when Next.js resolves its internal request URL to a different host.
+  return new NextResponse(null, { status: 303, headers: { Location: path } });
 }

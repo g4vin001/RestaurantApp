@@ -1,15 +1,12 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
-import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
-import { getCurrentAuthIdentity } from "@/lib/auth/current-identity";
+import { isAdminUnlocked, requirePlatformAdmin } from "@/lib/admin/auth";
 import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import {
   assignManagerByAdmin,
   createRestaurantByAdmin,
-  reviewRestaurantApplicationByAdmin,
   unlockAdminPanel,
   updateRestaurantByAdmin,
 } from "./actions";
@@ -21,11 +18,7 @@ const inputClass =
 const labelClass = "text-sm font-medium text-stone-700";
 
 export default async function AdminPage() {
-  const user = await getCurrentAuthIdentity();
-
-  // Indistinguishable from a real 404 for anyone but the allowlisted admin
-  // account — no redirect-to-login that would reveal this route exists.
-  if (!user || !isAdminEmail(user.email)) notFound();
+  const user = await requirePlatformAdmin(false);
 
   const [error, message] = await Promise.all([readFlash("error"), readFlash("message")]);
   const unlocked = await isAdminUnlocked(user.id);
@@ -51,15 +44,7 @@ export default async function AdminPage() {
     );
   }
 
-  const [applications, restaurants, accounts] = await Promise.all([
-    prisma.restaurantApplication.findMany({
-      where: { status: "PENDING" },
-      orderBy: { submittedAt: "asc" },
-      select: {
-        applicantId: true, name: true, location: true, mapsUrl: true,
-        applicant: { select: { email: true } },
-      },
-    }),
+  const [restaurants, accounts] = await Promise.all([
     prisma.restaurant.findMany({
     select: {
       id: true,
@@ -93,42 +78,24 @@ export default async function AdminPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-5 py-16">
-      <h1 className="text-2xl font-bold text-emerald-800">Admin panel</h1>
+      <h1 className="text-3xl font-bold text-stone-950">Platform administration</h1>
       <p className="mt-1 text-sm text-stone-600">
         Manage restaurant access and isolated test data. Every archive, restore,
         and Data Lab change is audited.
       </p>
-      <Link href="/admin/data-lab" className="mt-4 inline-flex rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800">Open Operations Data Lab</Link>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <Link href="/admin/restaurants" className="review-primary">Restaurant applications and publication</Link>
+        <Link href="/admin/data-lab" className="review-secondary">Operations Data Lab</Link>
+      </div>
 
       <ClearFlash />
       {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {message && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
 
       <PageCard className="mt-6">
-        <h2 className="font-semibold">Pending restaurant applications</h2>
-        {!applications.length && <p className="mt-2 text-sm text-stone-500">No applications awaiting review.</p>}
-        <ul className="mt-3 space-y-4">
-          {applications.map((application) => (
-            <li key={application.applicantId} className="rounded-lg border border-stone-200 p-4">
-              <p className="font-semibold">{application.name}</p>
-              <p className="text-sm text-stone-600">{application.location} · {application.applicant.email}</p>
-              <a href={application.mapsUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-emerald-800 underline">
-                Open location in Google Maps
-              </a>
-              <form action={reviewRestaurantApplicationByAdmin} className="mt-3 flex gap-2">
-                <input type="hidden" name="applicantId" value={application.applicantId} />
-                <button name="decision" value="APPROVED" className="min-h-10 rounded-lg bg-emerald-800 px-4 text-sm font-semibold text-white">Approve</button>
-                <button name="decision" value="DECLINED" className="min-h-10 rounded-lg border border-stone-300 px-4 text-sm font-semibold text-stone-700">Decline</button>
-              </form>
-            </li>
-          ))}
-        </ul>
-      </PageCard>
-
-      <PageCard className="mt-6">
         <h2 className="font-semibold">Create restaurant</h2>
         <p className="mt-1 text-xs text-stone-500">
-          The owner email must already have a Halina account (they need to sign up first).
+          Manually provision a workspace for an existing account. Live workspaces begin in private setup.
         </p>
         <form action={createRestaurantByAdmin} className="mt-4 flex flex-col gap-3">
           <label className={labelClass}>
@@ -137,7 +104,7 @@ export default async function AdminPage() {
           </label>
           <label className={labelClass}>
             Location
-            <input name="location" maxLength={120} className={inputClass} />
+            <input name="location" maxLength={300} className={inputClass} />
           </label>
           <label className={labelClass}>
             Cuisine type <span className="font-normal text-stone-400">(optional)</span>
@@ -217,7 +184,7 @@ export default async function AdminPage() {
                     Location
                     <input
                       name="location"
-                      maxLength={120}
+                      maxLength={300}
                       defaultValue={restaurant.location}
                       className={inputClass}
                     />
