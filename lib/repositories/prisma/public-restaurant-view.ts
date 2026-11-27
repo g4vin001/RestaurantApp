@@ -18,6 +18,7 @@ import {
   MAX_RESERVATION_MINUTES,
 } from "@/lib/domain/restaurant-schedule";
 import { publicCoverImageUrl } from "@/lib/customer/cover-image";
+import { customerServices, publicRestaurantScope } from "@/lib/restaurants/customer-access";
 
 type PublicRestaurantRow = {
   id: string;
@@ -165,6 +166,7 @@ function mapPublicRestaurantRow(restaurant: PublicRestaurantRow, now: Date) {
     slug: restaurant.slug,
     cuisineType: restaurant.cuisineType ?? undefined,
     acceptsReservations: availability.acceptsReservations,
+    acceptsWaitlist: customerServices(settings).waitlist,
     coverImageUrl: restaurant.coverImage
       ? publicCoverImageUrl(restaurant.slug, restaurant.coverImage.updatedAt)
       : undefined,
@@ -192,7 +194,7 @@ export async function fetchPublicRestaurantBySlug(
   now = new Date(),
 ) {
   const restaurant = await client.restaurant.findFirst({
-    where: { slug, environment: "LIVE", archivedAt: null },
+    where: { slug, ...publicRestaurantScope },
     select: {
       id: true,
       slug: true,
@@ -283,7 +285,7 @@ export async function fetchPublicRestaurants(
   now = new Date(),
 ) {
   const restaurants = await client.restaurant.findMany({
-    where: { environment: "LIVE", archivedAt: null },
+    where: publicRestaurantScope,
     select: {
       id: true,
       slug: true,

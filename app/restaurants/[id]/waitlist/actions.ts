@@ -6,9 +6,9 @@ import { ensureProfile } from "@/lib/auth/profile";
 import { prisma } from "@/lib/prisma";
 import { fetchPublicRestaurantBySlug } from "@/lib/repositories/prisma/public-restaurant-view";
 import { createClient } from "@/lib/supabase/server";
-import { isWithinServiceHours } from "@/lib/domain/restaurant-schedule";
-import { asRecord } from "@/lib/repositories/prisma/json-settings";
-import { broadcastRestaurantInvalidation } from "@/lib/realtime/invalidation";
+import { createCustomerWaitlistEntry } from "@/lib/repositories/prisma/customer-waitlist";
+import { OperationsRepositoryError } from "@/lib/repositories/operations";
+import { reportDataError } from "@/lib/server/data-error";
 
 export type WaitlistJoinState = { error?: string };
 
@@ -23,7 +23,6 @@ export async function joinCustomerWaitlist(
     redirect(
       `/login?redirectTo=${encodeURIComponent(`/restaurants/${slug}/waitlist`)}`,
     );
-  const profile = await ensureProfile(user);
   const partyName = String(formData.get("partyName") ?? "").trim();
   const partySize = Number(formData.get("partySize") ?? 0);
   const contact = String(formData.get("contact") ?? "").trim();
@@ -32,63 +31,24 @@ export async function joinCustomerWaitlist(
     return { error: "Enter a party name between 2 and 80 characters." };
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > 30)
     return { error: "Party size must be between 1 and 30." };
-  if (notes.length > 500)
+  if (contact.length > 120 || /\x00/.test(partyName + contact))
+    return { error: "Enter a valid name and contact of at most 120 characters." };
+  if (notes.length > 500 || notes.includes("\0"))
     return { error: "Keep notes under 500 characters." };
 
-  const restaurant = await prisma.restaurant.findFirst({
-    where: { slug, environment: "LIVE", archivedAt: null },
-    select: { id: true, walkInAvailability: true, timezone: true, operatingSettings: true },
-  });
-  if (!restaurant) return { error: "Restaurant not found." };
-  if (!isWithinServiceHours({ ...asRecord(restaurant.operatingSettings), timezone: restaurant.timezone }, new Date()))
-    return { error: "This restaurant is closed. Join the waitlist during opening hours." };
-  if (restaurant.walkInAvailability === "PAUSED")
-    return { error: "This restaurant is not accepting new walk-ins right now." };
-
-  const existing = await prisma.queueEntry.findFirst({
-    where: {
-      restaurantId: restaurant.id,
-      createdById: profile.id,
-      source: "CUSTOMER",
-      status: { in: ["WAITING", "CALLED"] },
-    },
-    select: { id: true },
-  });
-  if (existing) redirect("/my/waitlist");
-
-  const publicView = await fetchPublicRestaurantBySlug(prisma, slug);
-  const promisedWaitMinutes = Math.max(
-    0,
-    publicView?.estimatedWaitMinutes ?? 15,
-  );
-  const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    // Join at the back of the line, as manager-added walk-ins do. Without this
-    // every customer stayed at position 0 and sorted ahead of earlier walk-ins.
-    const last = await tx.queueEntry.aggregate({
-      where: { restaurantId: restaurant.id, status: { in: ["WAITING", "CALLED"] } },
-      _max: { position: true },
+  try {
+    const profile = await ensureProfile(user);
+    const publicView = await fetchPublicRestaurantBySlug(prisma, slug);
+    if (!publicView) return { error: "This restaurant is no longer available." };
+    await createCustomerWaitlistEntry(prisma, {
+      slug, profileId: profile.id, partyName, partySize, contact, notes,
+      promisedWaitMinutes: Math.max(0, publicView.estimatedWaitMinutes ?? 15),
     });
-    await tx.queueEntry.create({
-      data: {
-        restaurantId: restaurant.id,
-        partyName,
-        partySize,
-        contact: contact || null,
-        notes: notes || null,
-        customerSeatingNote: notes || null,
-        promisedWaitMinutes,
-        createdById: profile.id,
-        source: "CUSTOMER",
-        position: (last._max.position ?? -1) + 1,
-      },
-    });
-    await tx.restaurant.update({
-      where: { id: restaurant.id },
-      data: { lastOperationalUpdateAt: now },
-    });
-    await broadcastRestaurantInvalidation(tx, { restaurantId: restaurant.id, restaurantSlug: slug, environment: "LIVE", entity: "queue", revision: now.toISOString() });
-  });
+  } catch (error) {
+    if (error instanceof OperationsRepositoryError && error.code === "VALIDATION") return { error: error.message };
+    const reference = reportDataError("customer-waitlist", error);
+    return { error: `We could not join the waitlist. Try again. Support reference: ${reference}` };
+  }
   revalidatePath(`/restaurants/${slug}`);
   revalidatePath("/");
   redirect("/my/waitlist");

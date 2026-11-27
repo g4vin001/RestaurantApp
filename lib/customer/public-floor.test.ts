@@ -249,7 +249,7 @@ describe("public floor projection", () => {
 
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { environment: "LIVE", archivedAt: null },
+        where: { environment: "LIVE", lifecycle: "PUBLISHED", archivedAt: null },
       }),
     );
     expect(findFirst).toHaveBeenCalledWith(
@@ -257,6 +257,7 @@ describe("public floor projection", () => {
         where: {
           slug: "hidden-test-restaurant",
           environment: "LIVE",
+          lifecycle: "PUBLISHED",
           archivedAt: null,
         },
       }),

@@ -1,5 +1,7 @@
 import "server-only";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
+import { assertNoLiveListing, lockBusinessIdentity, restaurantBusinessKey } from "./restaurant-business-identity";
+import { RestaurantReviewError } from "@/lib/restaurants/review";
 
 export type CreateRestaurantAsAdminInput = {
   ownerId: string;
@@ -10,24 +12,32 @@ export type CreateRestaurantAsAdminInput = {
   environment?: "LIVE" | "TEST";
 };
 
-// Deliberately does NOT carry owner-onboarding.ts's "one active restaurant
-// per profile" guard — that rule is specific to self-service signup
-// (AGENTS.md ​§9), not to this admin tool, where reusing an owner email
-// across several test restaurants is the whole point. Always creates a new
-// restaurant; never a silent no-op.
 export async function createRestaurantAsAdmin(
   client: PrismaClient,
   input: CreateRestaurantAsAdminInput,
 ) {
-  return client.$transaction(
-    async (transaction) => {
-      const restaurant = await transaction.restaurant.create({
+  return client.$transaction(async (tx) => {
+    if (input.environment !== "TEST") {
+      const key = await restaurantBusinessKey(tx, input.name, input.location);
+      await lockBusinessIdentity(tx, key);
+      await assertNoLiveListing(tx, key);
+    }
+    return provisionRestaurant(tx, input);
+  });
+}
+
+export async function provisionRestaurant(
+  transaction: Prisma.TransactionClient,
+  input: CreateRestaurantAsAdminInput,
+) {
+  const restaurant = await transaction.restaurant.create({
         data: {
           name: input.name,
           location: input.location,
           cuisineType: input.cuisineType,
           slug: input.slug,
           environment: input.environment ?? "LIVE",
+          lifecycle: "SETUP",
           timezone: "Asia/Manila",
           locale: "en-PH",
           operatingSettings: {
@@ -70,25 +80,30 @@ export async function createRestaurantAsAdmin(
         },
       });
 
-      return {
-        restaurantId: restaurant.id,
-        membershipId: restaurant.memberships[0].id,
-      };
-    },
-    { isolationLevel: "Serializable" },
-  );
+  return {
+    restaurantId: restaurant.id,
+    membershipId: restaurant.memberships[0].id,
+  };
 }
 
 export async function setRestaurantArchivedAsAdmin(
   client: PrismaClient,
-  input: { restaurantId: string; actorProfileId: string; archived: boolean; reason: string; ipHash?: string },
+  input: { restaurantId: string; actorProfileId: string; archived: boolean; expectedName: string; reason: string; ipHash?: string },
 ) {
   return client.$transaction(async (transaction) => {
+    await transaction.$queryRaw`SELECT "id" FROM "Restaurant" WHERE "id" = ${input.restaurantId}::uuid FOR UPDATE`;
     const restaurant = await transaction.restaurant.findUnique({
       where: { id: input.restaurantId },
-      select: { id: true, name: true, archivedAt: true },
+      select: { id: true, name: true, location: true, environment: true, archivedAt: true },
     });
-    if (!restaurant) throw new Error("Restaurant not found.");
+    if (!restaurant) throw new RestaurantReviewError("That restaurant no longer exists.");
+    if (restaurant.name !== input.expectedName) throw new RestaurantReviewError(`Type "${restaurant.name}" exactly to confirm.`);
+    if (input.archived === Boolean(restaurant.archivedAt)) throw new RestaurantReviewError("This restaurant already has the requested archive status.");
+    if (!input.archived && restaurant.environment === "LIVE") {
+      const key = await restaurantBusinessKey(transaction, restaurant.name, restaurant.location);
+      await lockBusinessIdentity(transaction, key);
+      await assertNoLiveListing(transaction, key, restaurant.id);
+    }
     const archivedAt = input.archived ? new Date() : null;
     await transaction.restaurant.update({
       where: { id: restaurant.id },
@@ -106,5 +121,5 @@ export async function setRestaurantArchivedAsAdmin(
       },
     });
     return restaurant;
-  }, { isolationLevel: "Serializable" });
+  });
 }

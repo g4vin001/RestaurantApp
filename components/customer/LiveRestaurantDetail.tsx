@@ -31,9 +31,11 @@ export function LiveRestaurantDetail({ restaurant, slug }: { restaurant: PublicR
       </dl>
       <p className="mt-4 max-w-2xl text-sm leading-6 text-stone-600">{accepting
         ? "A rough estimate from the recorded queue and table availability. Your party size and table fit can change the wait; confirm with the host."
-        : `${restaurant.service.openNow ? "Walk-ins are paused." : "The waitlist opens during service hours."}${restaurant.acceptsReservations ? " You can still request a reservation for a future service." : ""}`}</p>
+        : `${restaurant.service.openNow ? "Walk-ins are paused." : "The restaurant is outside service hours."}${restaurant.acceptsReservations ? " You can still request a reservation for a future service." : ""}`}
+        {!restaurant.acceptsWaitlist && " Online waitlist requests are turned off."}
+      </p>
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        {accepting && <Link href={`/restaurants/${slug}/waitlist`} className="inline-flex min-h-12 items-center justify-center rounded-xl bg-emerald-800 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-900">Join waitlist</Link>}
+        {accepting && restaurant.acceptsWaitlist && <Link href={`/restaurants/${slug}/waitlist`} className="inline-flex min-h-12 items-center justify-center rounded-xl bg-emerald-800 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-900">Join waitlist</Link>}
         {restaurant.acceptsReservations && <Link href={`/restaurants/${slug}/book`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-stone-300 bg-white px-5 py-3 text-sm font-semibold text-stone-800 hover:bg-stone-50">Request a reservation</Link>}
         <Link href="/my/waitlist" className="inline-flex min-h-12 items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100">My waitlist</Link>
       </div>

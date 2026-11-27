@@ -6,7 +6,7 @@ describe("safeInternalRedirect", () => {
     expect(safeInternalRedirect("/manager/floor?table=1", "/")).toBe("/manager/floor?table=1");
   });
 
-  it.each(["https://evil.test", "//evil.test", "/%2f%2fevil.test", "javascript:alert(1)"])(
+  it.each(["https://evil.test", "//evil.test", "/%2f%2fevil.test", "javascript:alert(1)", "/safe/..//evil.test", "/safe/%2e%2e//evil.test"])(
     "rejects unsafe destination %s",
     (value) => {
       expect(safeInternalRedirect(value, "/")).toBe("/");

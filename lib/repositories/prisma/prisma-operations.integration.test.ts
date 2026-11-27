@@ -108,6 +108,7 @@ describeWithDatabase("Prisma operations repository", () => {
       data: {
         id: restaurantId,
         slug: "repository-test",
+        lifecycle: "PUBLISHED",
         name: "Repository Test Kitchen",
         location: "Quezon City",
         operatingSettings: {

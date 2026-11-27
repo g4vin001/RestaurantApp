@@ -106,6 +106,7 @@ async function attemptCreate(
         FROM "Restaurant"
         WHERE "id" = ${input.restaurantId}::uuid
           AND "environment" = 'LIVE'::"RestaurantEnvironment"
+          AND "lifecycle" = 'PUBLISHED'::"RestaurantLifecycle"
           AND "archivedAt" IS NULL
         FOR UPDATE
       `);

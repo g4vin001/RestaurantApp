@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { DatabaseUnavailable } from "@/components/DatabaseUnavailable";
 import { OperationsProvider } from "@/components/demo/DemoProvider";
 import { ManagerShell } from "@/components/manager/ManagerShell";
@@ -88,6 +89,12 @@ export default async function ManagerLayout({
           profileName={membership.profile.displayName}
           accountEmail={user.email}
         >
+          {membership.restaurant.environment === "LIVE" && membership.restaurant.lifecycle !== "PUBLISHED" && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <span>{membership.restaurant.lifecycle === "SETUP" ? "Your restaurant is in private setup." : "Your public listing is suspended."}</span>
+              <Link href="/manager/setup" className="font-semibold underline">View publication status</Link>
+            </div>
+          )}
           {children}
         </ManagerShell>
       </div>

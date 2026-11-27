@@ -31,7 +31,7 @@ function blockedDateLabel(date: string) {
     .format(new Date(`${date}T12:00:00Z`));
 }
 
-export function RestaurantSettings() {
+export function RestaurantSettings({ verifiedIdentity = false }: { verifiedIdentity?: boolean }) {
   const { state, updateRestaurant, renderedAt } = useDemo();
   const [name, setName] = useState(state.restaurant.name);
   const [location, setLocation] = useState(state.restaurant.location);
@@ -207,7 +207,7 @@ export function RestaurantSettings() {
             <div>
               <h2 className="font-semibold text-stone-950">Public identity</h2>
               <p className="mt-1 text-sm text-stone-500">
-                Customers see this photo, name, location, and current walk-in status.
+                {verifiedIdentity ? "Contact Halina to update the verified restaurant name or address." : "Customers see this photo, name, location, and current walk-in status."}
               </p>
             </div>
           </div>
@@ -217,6 +217,8 @@ export function RestaurantSettings() {
               Restaurant name
               <input
                 value={name}
+                readOnly={verifiedIdentity}
+                maxLength={80}
                 onChange={(event) => setName(event.target.value)}
                 className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 px-3 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
                 required
@@ -226,6 +228,8 @@ export function RestaurantSettings() {
               Location
               <input
                 value={location}
+                readOnly={verifiedIdentity}
+                maxLength={300}
                 onChange={(event) => setLocation(event.target.value)}
                 className="mt-2 min-h-11 w-full rounded-xl border border-stone-300 px-3 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
                 required

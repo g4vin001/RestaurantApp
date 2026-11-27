@@ -19,6 +19,7 @@ export async function broadcastRestaurantInvalidation(
     environment: "LIVE" | "TEST";
     entity: InvalidationEntity;
     revision: string;
+    publicVisibilityChanged?: boolean;
   },
 ) {
   const payload = {
@@ -48,7 +49,10 @@ export async function broadcastRestaurantInvalidation(
         'invalidated',
         ${`public-restaurant:${input.restaurantSlug}`},
         false
-      )`,
+      )
+      FROM "Restaurant"
+      WHERE "id" = ${input.restaurantId}::uuid
+        AND (${input.publicVisibilityChanged ?? false} OR ("lifecycle" = 'PUBLISHED' AND "archivedAt" IS NULL))`,
     );
   }
 }

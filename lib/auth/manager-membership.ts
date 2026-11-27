@@ -36,6 +36,8 @@ const findActiveManagerMembership = async (
           timezone: true,
           locale: true,
           environment: true,
+          lifecycle: true,
+          application: { select: { emailVerifiedAt: true } },
         },
       },
     },

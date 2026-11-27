@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { clearAdminSession } from "@/lib/admin/auth";
 import { getActiveManagerMembership } from "@/lib/auth/manager-membership";
 import {
   forgetUnconfirmedEmail,
@@ -214,5 +215,6 @@ export async function logout() {
     console.error("[halina:logout-work-session]", error);
   }
   await supabase.auth.signOut();
+  await clearAdminSession();
   redirect("/login");
 }

@@ -53,6 +53,32 @@ enum RestaurantEnvironment {
   TEST
 }
 
+enum RestaurantLifecycle {
+  SETUP
+  PUBLISHED
+  SUSPENDED
+}
+
+enum ApplicantRelationship {
+  OWNER
+  MANAGER
+  AUTHORIZED_REPRESENTATIVE
+}
+
+enum RestaurantReviewAction {
+  SUBMITTED
+  RESUBMITTED
+  INFORMATION_REQUESTED
+  NOTE_ADDED
+  APPROVED
+  DECLINED
+  PUBLICATION_REQUESTED
+  PUBLICATION_RETURNED
+  PUBLISHED
+  SUSPENDED
+  RESTORED
+}
+
 enum SeatingAssignmentStatus {
   ACTIVE
   CLEARING
@@ -157,7 +183,7 @@ model Profile {
   adminAuditLogs         AdminAuditLog[]
   adminAuthAttempts      AdminAuthAttempt[]
   importBatches          SyntheticImportBatch[]
-  restaurantApplication RestaurantApplication?  @relation("RestaurantApplicationApplicant")
+  restaurantApplications RestaurantApplication[] @relation("RestaurantApplicationApplicant")
   reviewedApplications  RestaurantApplication[] @relation("RestaurantApplicationReviewer")
 }
 
@@ -165,24 +191,72 @@ enum RestaurantApplicationStatus {
   PENDING
   APPROVED
   DECLINED
+  NEEDS_INFORMATION
 }
 
 model RestaurantApplication {
-  applicantId       String                      @id @db.Uuid
+  id                String                      @id @default(uuid()) @db.Uuid
+  applicantId       String?                     @db.Uuid
+  applicantEmail    String
+  emailVerifiedAt   DateTime?
+  applicantName     String
+  relationship      ApplicantRelationship?
   name              String
-  location          String
+  address           String                      @map("location")
   mapsUrl           String
+  phone             String
+  businessEmail     String
+  website           String?
+  businessKey       String?
   status            RestaurantApplicationStatus @default(PENDING)
+  revision          Int                         @default(0)
   submittedAt       DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
   reviewedAt        DateTime?
   reviewedById      String?                     @db.Uuid
   restaurantId      String?                     @unique @db.Uuid
-  applicant         Profile                     @relation("RestaurantApplicationApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
+  applicant         Profile?                    @relation("RestaurantApplicationApplicant", fields: [applicantId], references: [id], onDelete: SetNull)
   reviewedBy        Profile?                    @relation("RestaurantApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   restaurant        Restaurant?                 @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  evidence          RestaurantApplicationEvidence[]
+  history           RestaurantReviewEvent[]
 
   @@index([status, submittedAt])
   @@index([reviewedById])
+  @@index([applicantId, submittedAt])
+  @@index([businessKey])
+}
+
+model RestaurantApplicationEvidence {
+  id            String                @id @default(uuid()) @db.Uuid
+  applicationId String                @db.Uuid
+  filename      String
+  contentType   String
+  content       Bytes
+  submittedAt   DateTime              @default(now())
+  application   RestaurantApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId, submittedAt])
+}
+
+model RestaurantReviewEvent {
+  id              String                       @id @default(uuid()) @db.Uuid
+  applicationId   String?                      @db.Uuid
+  restaurantId    String?                      @db.Uuid
+  actorId         String?                      @db.Uuid
+  actorEmail      String?
+  action          RestaurantReviewAction
+  fromStatus      RestaurantApplicationStatus?
+  toStatus        RestaurantApplicationStatus?
+  fromLifecycle   RestaurantLifecycle?
+  toLifecycle     RestaurantLifecycle?
+  message         String?
+  details         Json?
+  createdAt       DateTime                     @default(now())
+  application     RestaurantApplication?       @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId, createdAt])
+  @@index([restaurantId, createdAt])
 }
 
 model Restaurant {
@@ -196,6 +270,9 @@ model Restaurant {
   operatingSettings       Json                   @default("{}")
   walkInAvailability      WalkInAvailability     @default(AVAILABLE)
   environment             RestaurantEnvironment  @default(LIVE)
+  lifecycle               RestaurantLifecycle    @default(SETUP)
+  publicationRequestedAt  DateTime?
+  publicationRequestedBy String?                @db.Uuid
   revision                Int                    @default(0)
   archivedAt              DateTime?
   staffPinHash            String?
@@ -223,6 +300,7 @@ model Restaurant {
   application             RestaurantApplication?
 
   @@index([environment, archivedAt])
+  @@index([environment, lifecycle, archivedAt])
 }
 
 // One public photo per restaurant, resized in the manager's browser before

@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ensureProfile } from "@/lib/auth/profile";
-import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
+import { requirePlatformAdmin } from "@/lib/admin/auth";
 import {
   parseDataLabUpload,
   parseRestaurantTimestamp,
@@ -14,14 +14,10 @@ import {
 import { setFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
 import { reportDataError } from "@/lib/server/data-error";
-import { createClient } from "@/lib/supabase/server";
 import { hashRequestAddress } from "@/lib/staff/invitations";
 
 async function requireDataLabAdmin() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdminEmail(user.email)) redirect("/");
-  if (!(await isAdminUnlocked(user.id))) redirect("/admin");
+  const user = await requirePlatformAdmin();
   await ensureProfile(user);
   const requestHeaders = await headers();
   const address = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ?? requestHeaders.get("x-real-ip") ?? "unknown";

@@ -1,11 +1,9 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
 import { PageCard } from "@/components/PageCard";
-import { isAdminEmail, isAdminUnlocked } from "@/lib/admin/auth";
+import { requirePlatformAdmin } from "@/lib/admin/auth";
 import { ClearFlash } from "@/components/ui/ClearFlash";
 import { readFlash } from "@/lib/flash";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
 import {
   applyDataLabImport,
   revertDataLabImport,
@@ -37,10 +35,7 @@ export default async function DataLabPage({
 }: {
   searchParams: Promise<{ restaurantId?: string }>;
 }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdminEmail(user.email)) notFound();
-  if (!(await isAdminUnlocked(user.id))) redirect("/admin");
+  await requirePlatformAdmin();
 
   const { restaurantId: requestedRestaurantId } = await searchParams;
   const [error, message, restaurants] = await Promise.all([
