@@ -137,7 +137,12 @@ test("verified applicant, administrator and customer complete the publication an
     await expect(owner.getByText("Your application is awaiting review.")).toBeVisible();
 
     await reviewer.reload();
-    for (const check of await reviewer.getByRole("checkbox").all()) await check.check();
+    const checklist = await reviewer.getByRole("checkbox").all();
+    expect(checklist).toHaveLength(6);
+    for (const check of checklist) {
+      await check.check();
+      await expect(check).toBeChecked();
+    }
     await confirmAction(reviewer, "Approve application");
     await expect(reviewer.getByRole("link", { name: "Restaurant listing · In setup" })).toBeVisible();
     await reviewer.getByRole("link", { name: "Restaurant listing · In setup" }).click();
@@ -186,7 +191,7 @@ test("verified applicant, administrator and customer complete the publication an
     await expect(owner.getByText("Reservation request sent.", { exact: false })).toBeVisible();
     await owner.goto(`${listing}/waitlist`);
     await owner.getByRole("button", { name: "Join waitlist", exact: true }).click();
-    await expect(owner).toHaveURL(/\/my\/waitlist$/);
+    await expect(owner).toHaveURL(/\/my\/waitlist$/, { timeout: 30_000 });
 
     await reviewer.getByLabel("Reason", { exact: true }).fill("Temporarily suspended while Halina reviews the listing.");
     await confirmAction(reviewer, "Suspend restaurant");

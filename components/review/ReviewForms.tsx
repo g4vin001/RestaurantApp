@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useRef, type ReactNode } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_EVIDENCE_BYTES } from "@/lib/auth/restaurant-onboarding";
 
 export type ReviewFormState = { error?: string; message?: string };
@@ -22,6 +22,8 @@ export function ReviewForm({ action, children, submit, confirmation }: {
   confirmation?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
   const form = useRef<HTMLFormElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   function submitReview(element: HTMLFormElement) {
@@ -34,13 +36,13 @@ export function ReviewForm({ action, children, submit, confirmation }: {
   }
 
   return (
-    <form ref={form} action={formAction} aria-busy={pending} onSubmit={(event) => {
+    <form ref={form} action={formAction} aria-busy={!ready || pending} onSubmit={(event) => {
       event.preventDefault();
       if (pending) return;
       if (confirmation) dialog.current?.showModal();
       else submitReview(event.currentTarget);
     }}>
-      <fieldset disabled={pending} className="min-w-0 space-y-4">
+      <fieldset disabled={!ready || pending} className="min-w-0 space-y-4">
         {children}
         {state.error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{state.error}</p>}
         {state.message && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">{state.message}</p>}
